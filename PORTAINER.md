@@ -65,6 +65,54 @@ ghcr.io/<github-user>/<repository>:latest
 бинарников произойдёт на Docker host и займёт больше времени и памяти. Для
 регулярных обновлений предпочтительнее GHCR-вариант.
 
+## Direct Creator без VK-сообщества
+
+Если сообщества и токена VK нет, используйте `portainer-stack-direct.yml`.
+Этот stack запускает один Creator напрямую, без управляющего бота. Один
+контейнер обслуживает ровно один Joiner.
+
+Поддерживаемые значения `CREATOR_MODE` и файлы:
+
+| Режим | Файл на Docker host |
+|---|---|
+| `vk` | `/opt/whitelist-bypass/secrets/cookies-vk.json` |
+| `telemost` | `/opt/whitelist-bypass/secrets/cookies-yandex.json` |
+| `wbstream` | `/opt/whitelist-bypass/secrets/cookies-wbstream.json` |
+| `dion` | `/opt/whitelist-bypass/secrets/cookies-dion.json` |
+
+Файлы должны быть экспортированы кнопками desktop Creator. Пустой JSON-массив
+`[]` не является авторизацией. Никогда не коммитьте cookies в Git и не
+встраивайте их в Docker-образ.
+
+Перед созданием stack скопируйте cookies на сервер через SSH:
+
+```sh
+sudo install -d -m 700 /opt/whitelist-bypass/secrets
+sudo install -m 600 /tmp/cookies-vk.json /opt/whitelist-bypass/secrets/cookies-vk.json
+rm -f /tmp/cookies-vk.json
+```
+
+В Portainer выберите Git repository и укажите:
+
+```text
+Repository URL: https://github.com/Sereza111/whitelist-bypass-portainer.git
+Repository reference: refs/heads/main
+Compose path: portainer-stack-direct.yml
+```
+
+Добавьте переменные:
+
+```text
+CREATOR_MODE=vk
+RESOURCES=default
+WLB_SECRETS_DIR=/opt/whitelist-bypass/secrets
+```
+
+После запуска откройте логи контейнера `whitelist-bypass-creator`. Ссылка будет
+показана после строки `CALL CREATED` и дополнительно сохранена в volume в файле
+`/data/session-link.txt`. При перезапуске без `EXISTING_LINK` создаётся новая
+сессия и новая ссылка.
+
 ## Cookies для VK, Telemost и Dion
 
 WB Stream использует анонимные guest token. Для остальных платформ экспортируйте

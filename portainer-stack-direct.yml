@@ -1,0 +1,39 @@
+services:
+  creator:
+    image: ${WLB_IMAGE:-ghcr.io/sereza111/whitelist-bypass-portainer:latest}
+    container_name: whitelist-bypass-creator
+    pull_policy: always
+    restart: unless-stopped
+    stop_grace_period: 30s
+    entrypoint:
+      - /usr/bin/tini
+      - --
+      - /usr/local/bin/wlb-direct-entrypoint
+    environment:
+      CREATOR_MODE: ${CREATOR_MODE:-vk}
+      RESOURCES: ${RESOURCES:-default}
+      DISPLAY_NAME: ${DISPLAY_NAME:-Headless}
+      EXISTING_LINK: ${EXISTING_LINK:-}
+      VK_PEER_ID: ${VK_PEER_ID:-}
+      UPSTREAM_SOCKS: ${UPSTREAM_SOCKS:-}
+      UPSTREAM_USER: ${UPSTREAM_USER:-}
+      UPSTREAM_PASS: ${UPSTREAM_PASS:-}
+    volumes:
+      - whitelist-bypass-direct-data:/data
+      - type: bind
+        source: ${WLB_SECRETS_DIR:-/opt/whitelist-bypass/secrets}
+        target: /run/secrets/wlb
+        read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  whitelist-bypass-direct-data:
+    name: whitelist-bypass-direct-data

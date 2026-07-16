@@ -34,7 +34,8 @@ COPY --from=build /out/headless-vk-bot            /usr/local/bin/
 
 COPY LICENSE NOTICE /usr/share/licenses/whitelist-bypass/
 COPY headless/docker/entrypoint.sh /usr/local/bin/wlb-entrypoint
-RUN chmod +x /usr/local/bin/wlb-entrypoint
+COPY headless/docker/direct-entrypoint.sh /usr/local/bin/wlb-direct-entrypoint
+RUN chmod +x /usr/local/bin/wlb-entrypoint /usr/local/bin/wlb-direct-entrypoint
 
 USER wlb
 WORKDIR /data

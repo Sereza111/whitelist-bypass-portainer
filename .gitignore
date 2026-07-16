@@ -4,9 +4,11 @@ relay/mobile-sources.jar
 relay/relay-*
 prebuilts/
 cookies*.json
+cookies.zip
 relay/relay
 whitelist-experiments/
 .env
 .env.*
 !.env.portainer.example
+!.env.direct.example
 *.local
