@@ -56,7 +56,7 @@ func TestAdaptiveKCPRecoversFromThreePercentLoss(t *testing.T) {
 	left.EnableKCP()
 	right.EnableKCP()
 
-	const messageCount = 200
+	const messageCount = 1000
 	received := make(chan uint32, messageCount)
 	right.SetOnData(func(data []byte) {
 		DecodeFrames(data, func(_ uint32, msgType byte, payload []byte) {
