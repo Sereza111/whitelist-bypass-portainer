@@ -4,7 +4,9 @@ Before changing the transport, read:
 
 1. `docs/PROTOCOL_ARCHITECTURE.md`
 2. `docs/PERFORMANCE_ROADMAP.md`
-3. upstream source at commit `64aa77acd5b52c34f5ddbd1ad0d861ea65bc8943`
+3. `docs/TARGET_ARCHITECTURE.md`
+4. `docs/PRODUCT_ROADMAP.md`
+5. upstream source at commit `64aa77acd5b52c34f5ddbd1ad0d861ea65bc8943`
 
 ## Current objective
 
@@ -43,3 +45,5 @@ Portainer and a headless Joiner in Video mode.
 3. Add a versioned transport capability handshake.
 4. Prototype reliable Video for VK, align KCP MTU/read sizes, and benchmark.
 5. Add per-connection queues, flow control, and fair scheduling.
+6. Extract the existing VK bot process supervisor into `wlb-manager` only after
+   transport compatibility and metrics are in place.
