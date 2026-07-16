@@ -33,6 +33,10 @@ type VP8DataTunnel struct {
 
 	sentFrames atomic.Uint64
 	recvFrames atomic.Uint64
+	sentBytes  atomic.Uint64
+	recvBytes  atomic.Uint64
+	sendWait   atomic.Uint64
+	maxQueue   atomic.Uint64
 
 	OnData  func([]byte)
 	OnClose func()
@@ -96,9 +100,17 @@ func (t *VP8DataTunnel) SendData(data []byte) {
 	if len(data) == 0 {
 		return
 	}
+	started := time.Now()
+	queued := false
 	select {
 	case t.sendQueue <- data:
+		queued = true
 	case <-t.stopCh:
+	}
+	if queued {
+		t.sentBytes.Add(uint64(len(data)))
+		t.sendWait.Add(uint64(time.Since(started)))
+		updateAtomicMax(&t.maxQueue, uint64(len(t.sendQueue)))
 	}
 }
 
@@ -212,10 +224,26 @@ func (t *VP8DataTunnel) HandleFrame(frame []byte) {
 		return
 	}
 	n := t.recvFrames.Add(1)
+	t.recvBytes.Add(uint64(len(res.Payload)))
 	if n <= 5 || n%500 == 0 {
 		t.logFn("vp8tunnel: recv frame #%d size=%d", n, len(res.Payload))
 	}
 	if t.OnData != nil {
 		t.OnData(res.Payload)
+	}
+}
+
+func (t *VP8DataTunnel) TunnelMetrics() TunnelMetrics {
+	return TunnelMetrics{
+		Kind:          "vp8",
+		SentBytes:     t.sentBytes.Load(),
+		ReceivedBytes: t.recvBytes.Load(),
+		SentFrames:    t.sentFrames.Load(),
+		ReceivedFrames: t.recvFrames.Load(),
+		QueueDepth:    len(t.sendQueue),
+		QueueCapacity: cap(t.sendQueue),
+		MaxQueueDepth: t.maxQueue.Load(),
+		SendWaitNanos: t.sendWait.Load(),
+		TrackCount:    1,
 	}
 }

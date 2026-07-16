@@ -94,6 +94,7 @@ startBtn.addEventListener('click', async () => {
     socksUser: input('socksUser').value,
     socksPass: input('socksPass').value,
     tunnelMode: select('tunnelMode').value,
+    videoReliability: select('videoReliability').value,
     vp8Fps: parseInt(input('vp8Fps').value, 10) || 24,
     vp8Batch: parseInt(input('vp8Batch').value, 10) || 30,
     resources: select('resources').value,

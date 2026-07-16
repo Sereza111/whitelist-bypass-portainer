@@ -647,7 +647,11 @@ func main() {
 	upstreamSocks := flag.String("upstream-socks", "", "route tunneled egress through this SOCKS5 proxy (host:port), e.g. a local VPN client")
 	upstreamUser := flag.String("upstream-user", "", "upstream SOCKS5 username")
 	upstreamPass := flag.String("upstream-pass", "", "upstream SOCKS5 password")
+	videoReliability := flag.String("video-reliability", "auto", "VK Video reliability: auto or raw")
 	flag.Parse()
+	if *videoReliability != "auto" && *videoReliability != "raw" {
+		log.Fatalf("--video-reliability must be auto or raw")
+	}
 
 	var readBuf int
 	var maxDCBuf uint64
@@ -744,8 +748,33 @@ func main() {
 		ur.maxDCBuf = maxDCBuf
 		ur.SetObfuscator(obf)
 		ur.OnConnected = func(tun tunnel.DataTunnel) {
-			rb := tunnel.NewRelayBridge(tun, "creator", common.VP8BufSize, log.Printf)
+			dataTunnel := tun
+			bridgeReadBuf := common.VP8BufSize
+			capabilities := tunnel.CapabilityMetricsV1
+			var adaptive *tunnel.AdaptiveKCPTunnel
+			if *videoReliability == "auto" {
+				adaptive = tunnel.NewAdaptiveKCPTunnel(tun, log.Printf)
+				dataTunnel = adaptive
+				bridgeReadBuf = tunnel.AdaptiveKCPRelayReadBuf
+				capabilities |= tunnel.CapabilityVideoKCP1
+			}
+			rb := tunnel.NewRelayBridge(dataTunnel, "creator", bridgeReadBuf, log.Printf)
 			rb.SetUpstreamSocks(*upstreamSocks, *upstreamUser, *upstreamPass)
+			if adaptive != nil {
+				rb.SetOnHandshake(func(result tunnel.HandshakeResult) {
+					if result.Supports(tunnel.CapabilityVideoKCP1) {
+						adaptive.EnableKCP()
+					} else {
+						adaptive.EnableRawCompatibility()
+					}
+				})
+			}
+			rb.ConfigureHandshake(
+				capabilities,
+				common.VP8BufSize,
+				tunnel.ReliabilityRawVP8,
+				1,
+			)
 			if st, ok := tun.(*tunnel.SymmetricScreenTunnel); ok {
 				rb.SetOnPeerConfig(func(fps, batch, trackCount int) {
 					st.SetTrackCount(trackCount)

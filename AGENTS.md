@@ -35,15 +35,17 @@ Portainer and a headless Joiner in Video mode.
   or fair scheduler. Blocking writes can stall unrelated connections.
 - Default VP8 pacing has a theoretical ceiling near 6.5 Mbps before overhead,
   retransmits, SFU loss, and CPU costs.
-- The official Windows Joiner v0.3.7 is four upstream commits behind the server
-  baseline. Build matching client artifacts before relying on new wire changes.
+- Matching Windows Joiner source and CI now live in `joiner-desktop-app/` and
+  `.github/workflows/windows-joiner.yml`.
+- `MsgHello/MsgHelloAck` capability negotiation and periodic transport metrics
+  are implemented. Unanswered handshakes fall back to legacy mode.
 
 ## Next implementation order
 
-1. Add observability and a repeatable SOCKS-only benchmark.
-2. Compare VK DC versus Video and isolate TUN/DNS/HTTP3 behavior.
-3. Add a versioned transport capability handshake.
-4. Prototype reliable Video for VK, align KCP MTU/read sizes, and benchmark.
+1. Verify matching Windows artifact and server image CI from the same commit.
+2. Add a repeatable SOCKS-only benchmark and capture baseline metrics.
+3. Prototype negotiated reliable Video for VK and align KCP MTU/read sizes.
+4. Compare raw versus KCP Video under controlled loss.
 5. Add per-connection queues, flow control, and fair scheduling.
 6. Extract the existing VK bot process supervisor into `wlb-manager` only after
    transport compatibility and metrics are in place.

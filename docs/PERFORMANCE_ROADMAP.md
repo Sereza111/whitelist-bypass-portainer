@@ -34,6 +34,22 @@ curl.exe --socks5-hostname 127.0.0.1:1080 -o NUL `
   "https://speed.cloudflare.com/__down?bytes=10485760"
 ```
 
+Повторяемый прогон из корня репозитория:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\benchmark-socks.ps1 `
+  -Mode vk-video `
+  -ClientCommit <commit-из-лога-клиента> `
+  -ServerCommit <commit-из-лога-сервера> `
+  -FPS 24 -Batch 30
+```
+
+Скрипт выполняет 20 коротких HTTPS-запросов и загрузку 10 МБ только через
+`127.0.0.1:1080`, затем пишет JSON в игнорируемый каталог
+`benchmark-results/`. Join link, cookies и содержимое ответов в отчёт не
+попадают. Одновременно сохраните соответствующие строки `METRICS` с клиента и
+сервера.
+
 Если SOCKS-only стабилен, а TUN нет — исправлять DNS/routes/IPv6/MTU. Если оба
 режима нестабильны только в Video — исправлять VP8 reliability/scheduler.
 

@@ -71,6 +71,12 @@ ghcr.io/<github-user>/<repository>:latest
 Этот stack запускает один Creator напрямую, без управляющего бота. Один
 контейнер обслуживает ровно один Joiner.
 
+Для VK Direct доступна переменная `VIDEO_RELIABILITY`: значение `auto`
+(по умолчанию) включает KCP только после handshake с matching client, а `raw`
+оставляет старый VP8 data path для аварийного отката. После обновления server и
+Joiner в обоих логах должно появиться `adaptive-kcp: reliable data path
+enabled`.
+
 Поддерживаемые значения `CREATOR_MODE` и файлы:
 
 | Режим | Файл на Docker host |

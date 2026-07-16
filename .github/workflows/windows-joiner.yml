@@ -40,10 +40,15 @@ jobs:
         shell: pwsh
         run: |
           $short = $env:GITHUB_SHA.Substring(0, 7)
-          $version = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME.TrimStart('v') } else { "0.3.7+$short" }
+          $version = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME.TrimStart('v') } else { "0.4.0-alpha.1+$short" }
           "BUILD_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "BUILD_COMMIT=$env:GITHUB_SHA" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "BUILD_TIME=$((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Test tunnel protocol
+        working-directory: relay
+        shell: pwsh
+        run: go test ./tunnel
 
       - name: Build Go engine
         working-directory: joiner-desktop-app/desktop-joiner

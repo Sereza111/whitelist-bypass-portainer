@@ -252,6 +252,17 @@ func (t *DCTunnel) OnData() func([]byte)        { return t.onData }
 func (t *DCTunnel) SetOnClose(fn func())         { t.onClose = fn }
 func (t *DCTunnel) Reconfigure(fps, batch int)   {}
 
+func (t *DCTunnel) TunnelMetrics() TunnelMetrics {
+	return TunnelMetrics{
+		Kind:           "data-channel",
+		SentBytes:      t.sendBytes.Load(),
+		ReceivedBytes:  t.recvBytes.Load(),
+		SentFrames:     t.sendMsgs.Load(),
+		ReceivedFrames: t.recvMsgs.Load(),
+		TrackCount:     1,
+	}
+}
+
 func (t *DCTunnel) statsLoop() {
 	if !dcStatsEnabled {
 		return

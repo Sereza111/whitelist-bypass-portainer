@@ -110,10 +110,14 @@ func main() {
 	dns := flag.String("dns", "1.1.1.1,8.8.8.8", "comma-separated DNS servers for the tunnel adapter")
 	noTun := flag.Bool("no-tun", false, "expose SOCKS5 only, do not bring up the wintun adapter")
 	dualTrack := flag.Bool("dual-track", false, "VK/WB Stream: dual-track tunnel (second screenshare channel) for higher throughput")
+	videoReliability := flag.String("video-reliability", "auto", "VK Video reliability: auto or raw")
 	flag.Parse()
 
 	if *platform == "" || *link == "" {
 		log.Fatal("--platform and --link are required")
+	}
+	if *videoReliability != "auto" && *videoReliability != "raw" {
+		log.Fatal("--video-reliability must be auto or raw")
 	}
 
 	switch *resources {
@@ -245,19 +249,48 @@ func main() {
 	)
 	onConnected := func(t tunnel.DataTunnel) {
 		readBuf := common.VP8BufSize
+		trackCount := 1
+		var adaptive *tunnel.AdaptiveKCPTunnel
 		if _, ok := t.(*tunnel.DCTunnel); ok {
 			readBuf = common.DCBufSize
+		} else if strings.EqualFold(*platform, "vk") && *videoReliability == "auto" {
+			if multi, ok := t.(*tunnel.MultiTrackTunnel); ok {
+				trackCount = multi.SubTunnelCount()
+			}
+			adaptive = tunnel.NewAdaptiveKCPTunnel(t, log.Printf)
+			t = adaptive
+			readBuf = tunnel.AdaptiveKCPRelayReadBuf
 		}
 		bridgeMu.Lock()
 		defer bridgeMu.Unlock()
+		configureAdaptive := func() {
+			if adaptive == nil {
+				return
+			}
+			bridge.SetOnHandshake(func(result tunnel.HandshakeResult) {
+				if result.Supports(tunnel.CapabilityVideoKCP1) {
+					adaptive.EnableKCP()
+				} else {
+					adaptive.EnableRawCompatibility()
+				}
+			})
+			bridge.ConfigureHandshake(
+				tunnel.CapabilityMetricsV1|tunnel.CapabilityVideoKCP1,
+				common.VP8BufSize,
+				tunnel.ReliabilityRawVP8,
+				trackCount,
+			)
+		}
 		// Reconnect: swap the new tunnel behind the persistent SOCKS
 		// listener instead of binding a second one
 		if bridge != nil {
 			bridge.SwapTunnel(t)
+			configureAdaptive()
 			log.Printf("[socks] tunnel swapped after reconnect")
 			return
 		}
 		bridge = tunnel.NewRelayBridgeWithAuth(t, "joiner", readBuf, log.Printf, *socksUser, *socksPass)
+		configureAdaptive()
 		bridge.SetPersistentListener(true)
 		bridge.MarkReady()
 		addr := fmt.Sprintf("%s:%d", *socksHost, *socksPort)

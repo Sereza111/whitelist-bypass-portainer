@@ -86,6 +86,25 @@ type RelayBridge struct {
 
 	onConfigAckMu sync.Mutex
 	onConfigAck   func()
+
+	handshakeMu         sync.Mutex
+	localHello          Hello
+	peerHello           *Hello
+	handshakeResult     *HandshakeResult
+	onHandshake         func(HandshakeResult)
+	handshakeGeneration atomic.Uint64
+
+	startedAt         time.Time
+	metricsStop       chan struct{}
+	metricsStopOnce   sync.Once
+	sentBytes         atomic.Uint64
+	receivedBytes     atomic.Uint64
+	sentFrames        atomic.Uint64
+	receivedFrames    atomic.Uint64
+	sentControlFrames atomic.Uint64
+	recvControlFrames atomic.Uint64
+	sendWaitNanos     atomic.Uint64
+	maxSendWaitNanos  atomic.Uint64
 }
 
 func (rb *RelayBridge) SetOnPeerConfig(fn func(fps, batch, trackCount int)) {
@@ -98,6 +117,54 @@ func (rb *RelayBridge) SetOnConfigAck(fn func()) {
 	rb.onConfigAckMu.Lock()
 	rb.onConfigAck = fn
 	rb.onConfigAckMu.Unlock()
+}
+
+func (rb *RelayBridge) SetOnHandshake(fn func(HandshakeResult)) {
+	rb.handshakeMu.Lock()
+	rb.onHandshake = fn
+	var current *HandshakeResult
+	if rb.handshakeResult != nil {
+		copy := *rb.handshakeResult
+		current = &copy
+	}
+	rb.handshakeMu.Unlock()
+	if current != nil && fn != nil {
+		fn(*current)
+	}
+}
+
+func (rb *RelayBridge) ConfigureHandshake(capabilities uint64, maxCarrierPayload int, reliability ReliabilityMode, trackCount int) {
+	rb.handshakeMu.Lock()
+	rb.localHello.Capabilities = capabilities
+	if maxCarrierPayload > 0 {
+		if maxCarrierPayload > 0xFFFF {
+			maxCarrierPayload = 0xFFFF
+		}
+		rb.localHello.MaxCarrierPayload = uint16(maxCarrierPayload)
+	}
+	if reliability != ReliabilityUnknown {
+		rb.localHello.Reliability = reliability
+	}
+	if trackCount > 0 {
+		if trackCount > 0xFF {
+			trackCount = 0xFF
+		}
+		rb.localHello.TrackCount = uint8(trackCount)
+	}
+	rb.localHello.Nonce = newHandshakeNonce()
+	rb.peerHello = nil
+	rb.handshakeResult = nil
+	rb.handshakeMu.Unlock()
+	rb.startHandshake()
+}
+
+func (rb *RelayBridge) NegotiatedHandshake() (HandshakeResult, bool) {
+	rb.handshakeMu.Lock()
+	defer rb.handshakeMu.Unlock()
+	if rb.handshakeResult == nil {
+		return HandshakeResult{}, false
+	}
+	return *rb.handshakeResult, true
 }
 
 func NewRelayBridgeWithAuth(tunnel DataTunnel, mode string, readBuf int, logFn func(string, ...any), socksUser, socksPass string) *RelayBridge {
@@ -114,9 +181,14 @@ func NewRelayBridge(tunnel DataTunnel, mode string, readBuf int, logFn func(stri
 		mode:    mode,
 		readBuf: readBuf,
 		ready:   make(chan struct{}),
+		startedAt:   time.Now(),
+		metricsStop: make(chan struct{}),
 	}
 	tunnel.SetOnData(rb.handleTunnelData)
 	tunnel.SetOnClose(rb.handleTunnelClose)
+	rb.localHello = newLocalHello(tunnel, readBuf)
+	rb.startHandshake()
+	go rb.metricsLoop()
 	return rb
 }
 
@@ -135,6 +207,14 @@ func (rb *RelayBridge) SwapTunnel(newTunnel DataTunnel) {
 	newTunnel.SetOnData(rb.handleTunnelData)
 	newTunnel.SetOnClose(rb.handleTunnelClose)
 	rb.closeAll()
+	rb.handshakeMu.Lock()
+	capabilities := rb.localHello.Capabilities
+	rb.localHello = newLocalHello(newTunnel, rb.readBuf)
+	rb.localHello.Capabilities = capabilities
+	rb.peerHello = nil
+	rb.handshakeResult = nil
+	rb.handshakeMu.Unlock()
+	rb.startHandshake()
 }
 
 func (rb *RelayBridge) currentTunnel() DataTunnel {
@@ -191,12 +271,20 @@ func (rb *RelayBridge) closeAll() {
 
 func (rb *RelayBridge) Reset() {
 	rb.closeAll()
+	rb.handshakeMu.Lock()
+	rb.localHello.Nonce = newHandshakeNonce()
+	rb.peerHello = nil
+	rb.handshakeResult = nil
+	rb.handshakeMu.Unlock()
+	rb.startHandshake()
 }
 
 func (rb *RelayBridge) Close() {
 	if !rb.closed.CompareAndSwap(false, true) {
 		return
 	}
+	rb.handshakeGeneration.Add(1)
+	rb.metricsStopOnce.Do(func() { close(rb.metricsStop) })
 	rb.listenerMu.Lock()
 	ln := rb.listener
 	rb.listener = nil
@@ -220,11 +308,172 @@ func (rb *RelayBridge) MarkReady() {
 
 func (rb *RelayBridge) send(connID uint32, msgType byte, payload []byte) {
 	frame := EncodeFrame(connID, msgType, payload)
+	rb.sendFrame(frame, connID == ControlConnID)
+}
+
+func (rb *RelayBridge) sendFrame(frame []byte, control bool) {
+	started := time.Now()
 	rb.currentTunnel().SendData(frame)
+	waited := uint64(time.Since(started))
+	rb.sentBytes.Add(uint64(len(frame)))
+	rb.sentFrames.Add(1)
+	rb.sendWaitNanos.Add(waited)
+	updateAtomicMax(&rb.maxSendWaitNanos, waited)
+	if control {
+		rb.sentControlFrames.Add(1)
+	}
+}
+
+func (rb *RelayBridge) startHandshake() {
+	if rb.closed.Load() {
+		return
+	}
+	generation := rb.handshakeGeneration.Add(1)
+	rb.sendHello()
+	go func() {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for attempt := 1; attempt < 3; attempt++ {
+			<-ticker.C
+			if rb.closed.Load() || rb.handshakeGeneration.Load() != generation || rb.handshakeResolved() {
+				return
+			}
+			rb.sendHello()
+		}
+		if rb.closed.Load() || rb.handshakeGeneration.Load() != generation || rb.handshakeResolved() {
+			return
+		}
+		rb.recordHandshakeResult(HandshakeResult{
+			Status:         HandshakeOK,
+			LegacyFallback: true,
+		})
+		rb.logFn("relay: handshake timeout; using legacy raw compatibility (capabilities disabled)")
+	}()
+}
+
+func (rb *RelayBridge) sendHello() {
+	rb.handshakeMu.Lock()
+	hello := rb.localHello
+	rb.handshakeMu.Unlock()
+	rb.sendFrame(EncodeHello(hello), true)
+}
+
+func (rb *RelayBridge) handshakeResolved() bool {
+	rb.handshakeMu.Lock()
+	defer rb.handshakeMu.Unlock()
+	return rb.handshakeResult != nil && !rb.handshakeResult.LegacyFallback
+}
+
+func (rb *RelayBridge) handleHello(payload []byte) {
+	peer, ok := DecodeHello(payload)
+	if !ok {
+		rb.logFn("relay: ignored malformed protocol hello")
+		return
+	}
+
+	rb.handshakeMu.Lock()
+	local := rb.localHello
+	isNewPeer := rb.peerHello == nil || rb.peerHello.Nonce != peer.Nonce
+	peerCopy := peer
+	rb.peerHello = &peerCopy
+	rb.handshakeMu.Unlock()
+
+	status := HandshakeOK
+	selected := peer.WireVersion
+	if peer.WireVersion < MinimumWireVersion || peer.WireVersion > WireVersion {
+		status = HandshakeIncompatibleWire
+		selected = 0
+	}
+	capabilities := uint64(0)
+	if status == HandshakeOK {
+		capabilities = local.Capabilities & peer.Capabilities
+	}
+	rb.sendFrame(EncodeHelloAck(HelloAck{
+		SelectedWireVersion: selected,
+		Status:              status,
+		Capabilities:        capabilities,
+		EchoNonce:           peer.Nonce,
+		ResponderNonce:      local.Nonce,
+	}), true)
+
+	if isNewPeer {
+		rb.logFn("relay: peer hello wire=%d build=%s commit=%s caps=0x%x max_payload=%d reliability=%s tracks=%d",
+			peer.WireVersion, peer.BuildVersion, peer.BuildCommit, peer.Capabilities,
+			peer.MaxCarrierPayload, peer.Reliability, peer.TrackCount)
+	}
+}
+
+func (rb *RelayBridge) handleHelloAck(payload []byte) {
+	ack, ok := DecodeHelloAck(payload)
+	if !ok {
+		rb.logFn("relay: ignored malformed protocol hello ack")
+		return
+	}
+
+	rb.handshakeMu.Lock()
+	local := rb.localHello
+	if ack.EchoNonce != local.Nonce {
+		rb.handshakeMu.Unlock()
+		rb.logFn("relay: ignored stale protocol hello ack")
+		return
+	}
+	var peer Hello
+	if rb.peerHello != nil {
+		peer = *rb.peerHello
+		if peer.Nonce != ack.ResponderNonce {
+			rb.handshakeMu.Unlock()
+			rb.logFn("relay: ignored protocol hello ack with unexpected responder nonce")
+			return
+		}
+	} else {
+		peer.Nonce = ack.ResponderNonce
+	}
+	rb.handshakeMu.Unlock()
+
+	result := HandshakeResult{
+		Peer:                peer,
+		SelectedWireVersion: ack.SelectedWireVersion,
+		Capabilities:        ack.Capabilities & local.Capabilities,
+		Status:              ack.Status,
+	}
+	rb.recordHandshakeResult(result)
+	rb.logFn("relay: handshake status=%s wire=%d negotiated_caps=0x%x",
+		result.Status, result.SelectedWireVersion, result.Capabilities)
+}
+
+func (rb *RelayBridge) recordHandshakeResult(result HandshakeResult) {
+	rb.handshakeMu.Lock()
+	if rb.handshakeResult != nil && !rb.handshakeResult.LegacyFallback &&
+		rb.handshakeResult.Status == result.Status &&
+		rb.handshakeResult.SelectedWireVersion == result.SelectedWireVersion &&
+		rb.handshakeResult.Capabilities == result.Capabilities {
+		rb.handshakeMu.Unlock()
+		return
+	}
+	copy := result
+	rb.handshakeResult = &copy
+	cb := rb.onHandshake
+	rb.handshakeMu.Unlock()
+	if cb != nil {
+		cb(result)
+	}
 }
 
 func (rb *RelayBridge) handleTunnelData(data []byte) {
+	rb.receivedBytes.Add(uint64(len(data)))
 	DecodeFrames(data, func(connID uint32, msgType byte, payload []byte) {
+		rb.receivedFrames.Add(1)
+		if connID == ControlConnID {
+			rb.recvControlFrames.Add(1)
+		}
+		if connID == ControlConnID && msgType == MsgHello {
+			rb.handleHello(payload)
+			return
+		}
+		if connID == ControlConnID && msgType == MsgHelloAck {
+			rb.handleHelloAck(payload)
+			return
+		}
 		if connID == ControlConnID && msgType == MsgConfig {
 			fps, batch, trackCount, ok := DecodeVP8Config(payload)
 			if !ok {

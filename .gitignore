@@ -12,3 +12,4 @@ whitelist-experiments/
 !.env.portainer.example
 !.env.direct.example
 *.local
+benchmark-results/

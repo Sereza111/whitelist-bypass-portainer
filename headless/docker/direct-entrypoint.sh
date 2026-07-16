@@ -59,6 +59,7 @@ case "$MODE" in
     vk)
         [ -n "$EXISTING_LINK" ] && set -- "$@" --vk-link "$EXISTING_LINK"
         [ -n "${VK_PEER_ID:-}" ] && set -- "$@" --peer-id "$VK_PEER_ID"
+        set -- "$@" --video-reliability "${VIDEO_RELIABILITY:-auto}"
         ;;
     telemost)
         [ -n "$EXISTING_LINK" ] && set -- "$@" --tm-link "$EXISTING_LINK"

@@ -120,3 +120,34 @@ Creator после demux самостоятельно открывает TCP/UDP
 6. Windows TUN маршрутизирует только IPv4; DNS/IPv6/HTTP3 могут давать задержки
    или утечки вне туннеля.
 7. Server и клиенты не имеют обязательного version/capability negotiation.
+
+## Реализованный compatibility handshake
+
+В текущей ветке control plane mux расширен сообщениями:
+
+- `MsgHello = 0x0A`;
+- `MsgHelloAck = 0x0B`.
+
+`Hello` передаёт magic `WLB2`, wire version, build version/commit,
+capability bitmask, max carrier payload, текущий reliability mode, число tracks
+и случайный 128-bit nonce. `HelloAck` связывается с запросом через nonce и
+возвращает выбранную wire version и пересечение capabilities.
+
+Старый v0.3.7 peer игнорирует неизвестный control frame; после трёх попыток
+новая сторона фиксирует `legacyCompatibility=true` и не включает optional
+features.
+
+Для VK Video matching server/client рекламируют `video_kcp1`. Adaptive wrapper
+оставляет control frames в raw, маркирует KCP segments magic `WKC1` и во время
+перехода принимает оба вида payload. Обычные data frames блокируются до
+результата handshake, поэтому raw и KCP не могут поменять порядок байтов одного
+TCP stream. При старом peer wrapper через timeout открывает raw data path.
+
+KCP segment MTU равен 1122 байтам: вместе с 4-byte marker он точно помещается в
+1126-byte VP8 carrier payload. Relay read buffer уменьшен до 1089 байт, поэтому
+`9-byte mux frame + 24-byte KCP header + marker` не создают второй segment для
+обычного TCP read.
+
+RelayBridge каждые 10 секунд пишет строку `METRICS` с relay bytes/frames,
+control frames, временем блокировки `SendData`, активными TCP/UDP flows,
+результатом handshake и transport-specific queue/KCP counters.

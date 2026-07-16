@@ -31,7 +31,10 @@ type ScreenWriter struct {
 	cfgMu sync.Mutex
 	fps   int
 	batch int
-	sent  atomic.Uint64
+	sent      atomic.Uint64
+	sentBytes atomic.Uint64
+	sendWait  atomic.Uint64
+	maxQueue  atomic.Uint64
 }
 
 func NewScreenWriter(obf *TunnelObfuscator, label string, logFn func(string, ...any)) *ScreenWriter {
@@ -58,9 +61,17 @@ func (w *ScreenWriter) SendData(data []byte) {
 	if len(data) == 0 {
 		return
 	}
+	started := time.Now()
+	queued := false
 	select {
 	case w.sendQueue <- data:
+		queued = true
 	case <-w.stopCh:
+	}
+	if queued {
+		w.sentBytes.Add(uint64(len(data)))
+		w.sendWait.Add(uint64(time.Since(started)))
+		updateAtomicMax(&w.maxQueue, uint64(len(w.sendQueue)))
 	}
 }
 
@@ -181,6 +192,7 @@ type SymmetricScreenTunnel struct {
 	onDataMu   sync.Mutex
 	onData     func([]byte)
 	recv       atomic.Uint64
+	recvBytes  atomic.Uint64
 	trackCount atomic.Int32
 }
 
@@ -258,10 +270,41 @@ func (s *SymmetricScreenTunnel) HandleScreenFrame(frame []byte) {
 	if !res.HasFrame || res.SelfEcho || res.Keepalive || len(res.Payload) == 0 {
 		return
 	}
+	s.recvBytes.Add(uint64(len(res.Payload)))
 	s.onDataMu.Lock()
 	handler := s.onData
 	s.onDataMu.Unlock()
 	if handler != nil {
 		handler(res.Payload)
+	}
+}
+
+func (w *ScreenWriter) TunnelMetrics() TunnelMetrics {
+	return TunnelMetrics{
+		Kind:          "screen",
+		SentBytes:     w.sentBytes.Load(),
+		SentFrames:    w.sent.Load(),
+		QueueDepth:    len(w.sendQueue),
+		QueueCapacity: cap(w.sendQueue),
+		MaxQueueDepth: w.maxQueue.Load(),
+		SendWaitNanos: w.sendWait.Load(),
+		TrackCount:    1,
+	}
+}
+
+func (s *SymmetricScreenTunnel) TunnelMetrics() TunnelMetrics {
+	cam := s.cam.TunnelMetrics()
+	screen := s.screen.TunnelMetrics()
+	return TunnelMetrics{
+		Kind:           "symmetric-screen",
+		SentBytes:      cam.SentBytes + screen.SentBytes,
+		ReceivedBytes:  cam.ReceivedBytes + s.recvBytes.Load(),
+		SentFrames:     cam.SentFrames + screen.SentFrames,
+		ReceivedFrames: cam.ReceivedFrames + s.recv.Load(),
+		QueueDepth:     cam.QueueDepth + screen.QueueDepth,
+		QueueCapacity:  cam.QueueCapacity + screen.QueueCapacity,
+		MaxQueueDepth:  cam.MaxQueueDepth + screen.MaxQueueDepth,
+		SendWaitNanos:  cam.SendWaitNanos + screen.SendWaitNanos,
+		TrackCount:     int(s.trackCount.Load()),
 	}
 }

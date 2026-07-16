@@ -171,3 +171,21 @@ func (m *MultiTrackTunnel) HandleFrame(frame []byte) {
 	}
 }
 
+func (m *MultiTrackTunnel) TunnelMetrics() TunnelMetrics {
+	m.mu.Lock()
+	tunnels := append([]*VP8DataTunnel(nil), m.tunnels...)
+	m.mu.Unlock()
+	metrics := TunnelMetrics{Kind: "multi-vp8", TrackCount: len(tunnels)}
+	for _, tun := range tunnels {
+		item := tun.TunnelMetrics()
+		metrics.SentBytes += item.SentBytes
+		metrics.ReceivedBytes += item.ReceivedBytes
+		metrics.SentFrames += item.SentFrames
+		metrics.ReceivedFrames += item.ReceivedFrames
+		metrics.QueueDepth += item.QueueDepth
+		metrics.QueueCapacity += item.QueueCapacity
+		metrics.MaxQueueDepth += item.MaxQueueDepth
+		metrics.SendWaitNanos += item.SendWaitNanos
+	}
+	return metrics
+}

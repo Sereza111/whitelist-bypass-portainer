@@ -33,11 +33,17 @@ type KCPTunnel struct {
 
 	sentMessages      atomic.Uint64
 	deliveredMessages atomic.Uint64
+	sentBytes         atomic.Uint64
+	deliveredBytes    atomic.Uint64
 	outputSegments    atomic.Uint64
 	inputSegments     atomic.Uint64
 }
 
 func NewKCPTunnel(inner DataTunnel, logFn func(string, ...any)) *KCPTunnel {
+	return newKCPTunnel(inner, kcpSegmentMTU, logFn)
+}
+
+func newKCPTunnel(inner DataTunnel, segmentMTU int, logFn func(string, ...any)) *KCPTunnel {
 	t := &KCPTunnel{
 		inner:   inner,
 		logFn:   logFn,
@@ -55,7 +61,7 @@ func NewKCPTunnel(inner DataTunnel, logFn func(string, ...any)) *KCPTunnel {
 	})
 	t.kcp.NoDelay(1, 10, 2, 1)
 	t.kcp.WndSize(kcpSendWindow, kcpRecvWindow)
-	t.kcp.SetMtu(kcpSegmentMTU)
+	t.kcp.SetMtu(segmentMTU)
 	inner.SetOnData(t.handleInnerData)
 	inner.SetOnClose(t.handleInnerClose)
 	go t.updateLoop()
@@ -67,6 +73,7 @@ func (t *KCPTunnel) SendData(data []byte) {
 		return
 	}
 	t.sentMessages.Add(1)
+	t.sentBytes.Add(uint64(len(data)))
 	t.mu.Lock()
 	t.kcp.Send(data)
 	t.kcp.Update()
@@ -127,7 +134,25 @@ func (t *KCPTunnel) handleInnerData(segment []byte) {
 	}
 	for _, message := range messages {
 		t.deliveredMessages.Add(1)
+		t.deliveredBytes.Add(uint64(len(message)))
 		cb(message)
+	}
+}
+
+func (t *KCPTunnel) TunnelMetrics() TunnelMetrics {
+	t.mu.Lock()
+	waitSnd := t.kcp.WaitSnd()
+	t.mu.Unlock()
+	return TunnelMetrics{
+		Kind:              "kcp-vp8",
+		SentBytes:         t.sentBytes.Load(),
+		ReceivedBytes:     t.deliveredBytes.Load(),
+		SentFrames:        t.sentMessages.Load(),
+		ReceivedFrames:    t.deliveredMessages.Load(),
+		KCPInputSegments:  t.inputSegments.Load(),
+		KCPOutputSegments: t.outputSegments.Load(),
+		KCPWaitSnd:        waitSnd,
+		TrackCount:        1,
 	}
 }
 

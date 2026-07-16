@@ -16,6 +16,7 @@ export interface JoinerSettings {
   socksUser: string;
   socksPass: string;
   tunnelMode: 'video' | 'dc';
+  videoReliability: 'auto' | 'raw';
   vp8Fps: number;
   vp8Batch: number;
   resources: 'moderate' | 'default' | 'unlimited';
@@ -23,4 +24,3 @@ export interface JoinerSettings {
   noTun: boolean;
   dualTrack: boolean;
 }
-
