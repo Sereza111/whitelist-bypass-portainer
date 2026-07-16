@@ -76,5 +76,6 @@ Docker volume `whitelist-bypass-data`.
 ## Лицензия и upstream
 
 Исходный проект распространяется по лицензии MIT; файл [LICENSE](LICENSE)
-сохранён. История и полные клиенты находятся в
+сохранён. Происхождение кода и внесённые изменения описаны в [NOTICE](NOTICE).
+Оба файла также включаются внутрь Docker-образа. История и полные клиенты находятся в
 [upstream-репозитории](https://github.com/kulikov0/whitelist-bypass).

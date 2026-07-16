@@ -14,6 +14,10 @@ RUN go -C /src/headless/vk        build -trimpath -ldflags="-s -w" -o /out/headl
  && go -C /src/headless/vk-bot    build -trimpath -ldflags="-s -w" -o /out/headless-vk-bot .
 
 FROM debian:bookworm-slim
+LABEL org.opencontainers.image.licenses="MIT" \
+      io.github.whitelist-bypass.upstream="https://github.com/kulikov0/whitelist-bypass" \
+      io.github.whitelist-bypass.upstream-revision="64aa77acd5b52c34f5ddbd1ad0d861ea65bc8943"
+
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates tini \
  && rm -rf /var/lib/apt/lists/*
@@ -28,6 +32,7 @@ COPY --from=build /out/headless-wbstream-creator  /opt/wlb/bin/
 COPY --from=build /out/headless-dion-creator      /opt/wlb/bin/
 COPY --from=build /out/headless-vk-bot            /usr/local/bin/
 
+COPY LICENSE NOTICE /usr/share/licenses/whitelist-bypass/
 COPY headless/docker/entrypoint.sh /usr/local/bin/wlb-entrypoint
 RUN chmod +x /usr/local/bin/wlb-entrypoint
 

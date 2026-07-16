@@ -1,0 +1,13 @@
+Whitelist Bypass — server/Portainer edition
+
+This repository is an unofficial derivative of:
+https://github.com/kulikov0/whitelist-bypass
+
+Upstream snapshot:
+- Branch: feature/kcp-over-vp8
+- Commit: 64aa77acd5b52c34f5ddbd1ad0d861ea65bc8943
+
+Changes in this edition are limited to a server-only source layout, Portainer
+stacks, container publishing automation, deployment documentation, and related
+container metadata. The original project and this derivative are distributed
+under the MIT License included in the LICENSE file.
