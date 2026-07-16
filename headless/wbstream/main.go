@@ -15,6 +15,7 @@ import (
 
 func main() {
 	common.MaybePrintVersion()
+	common.LogBuild(log.Printf)
 	cookiesPath := flag.String("cookies", "", "path to cookies-wbstream.json")
 	roomFlag := flag.String("room", "", "WB Stream room id, wbstream://<id>, or https://stream.wb.ru/room/<id> (empty = create new)")
 	displayName := flag.String("name", "Headless", "display name in the room")

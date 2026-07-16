@@ -881,6 +881,7 @@ func extractUfrag(candidate string) string {
 
 func main() {
 	common.MaybePrintVersion()
+	common.LogBuild(log.Printf)
 	cookiesPath := flag.String("cookies", "", "path to cookies-yandex.json")
 	cookieString := flag.String("cookie-string", "", "raw cookie string")
 	tmLink := flag.String("tm-link", "", "Telemost conference URI to join an existing conference")

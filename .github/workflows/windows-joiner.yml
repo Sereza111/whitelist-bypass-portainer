@@ -1,0 +1,87 @@
+name: Build Windows Joiner
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+    paths:
+      - 'joiner-desktop-app/**'
+      - 'relay/**'
+      - '.github/workflows/windows-joiner.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-joiner-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-windows-x64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.1'
+          cache-dependency-path: joiner-desktop-app/desktop-joiner/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: joiner-desktop-app/package-lock.json
+
+      - name: Set build metadata
+        shell: pwsh
+        run: |
+          $short = $env:GITHUB_SHA.Substring(0, 7)
+          $version = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME.TrimStart('v') } else { "0.3.7+$short" }
+          "BUILD_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "BUILD_COMMIT=$env:GITHUB_SHA" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "BUILD_TIME=$((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build Go engine
+        working-directory: joiner-desktop-app/desktop-joiner
+        shell: pwsh
+        run: |
+          go build -trimpath -ldflags "-s -w -X whitelist-bypass/relay/common.Version=$env:BUILD_VERSION -X whitelist-bypass/relay/common.BuildCommit=$env:BUILD_COMMIT -X whitelist-bypass/relay/common.BuildTime=$env:BUILD_TIME" -o desktop-joiner-bundle.exe .
+          .\desktop-joiner-bundle.exe --version
+
+      - name: Fetch Wintun 0.14.1
+        shell: pwsh
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP 'wintun.zip'
+          $out = Join-Path $env:RUNNER_TEMP 'wintun-unpacked'
+          Invoke-WebRequest -Uri 'https://www.wintun.net/builds/wintun-0.14.1.zip' -OutFile $zip
+          Expand-Archive -LiteralPath $zip -DestinationPath $out -Force
+          Copy-Item -LiteralPath (Join-Path $out 'wintun\bin\amd64\wintun.dll') -Destination 'joiner-desktop-app\desktop-joiner\wintun-bundle.dll'
+
+      - name: Build portable Electron app
+        working-directory: joiner-desktop-app
+        shell: pwsh
+        run: |
+          npm ci
+          npm run build
+          npx --no-install electron-builder --win --x64 --publish never
+
+      - name: Write SHA-256 checksum
+        shell: pwsh
+        run: |
+          $artifact = Get-ChildItem -LiteralPath prebuilts -Filter '*.exe' | Select-Object -First 1
+          if (-not $artifact) { throw 'Windows artifact was not produced' }
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $artifact.FullName).Hash.ToLowerInvariant()
+          "$hash  $($artifact.Name)" | Out-File -FilePath "$($artifact.FullName).sha256" -Encoding ascii
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: whitelist-bypass-joiner-windows-x64-${{ env.BUILD_VERSION }}
+          path: |
+            prebuilts/*.exe
+            prebuilts/*.sha256
+          if-no-files-found: error
+          retention-days: 30

@@ -1,17 +1,21 @@
 FROM --platform=$BUILDPLATFORM golang:1.26-bookworm AS build
 ARG TARGETOS
 ARG TARGETARCH
+ARG BUILD_VERSION=0.3.7-dev
+ARG BUILD_COMMIT=unknown
+ARG BUILD_TIME=unknown
 ENV CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH
 WORKDIR /src
 
 COPY relay /src/relay
 COPY headless /src/headless
 
-RUN go -C /src/headless/vk        build -trimpath -ldflags="-s -w" -o /out/headless-vk-creator . \
- && go -C /src/headless/telemost  build -trimpath -ldflags="-s -w" -o /out/headless-telemost-creator . \
- && go -C /src/headless/wbstream  build -trimpath -ldflags="-s -w" -o /out/headless-wbstream-creator . \
- && go -C /src/headless/dion      build -trimpath -ldflags="-s -w" -o /out/headless-dion-creator . \
- && go -C /src/headless/vk-bot    build -trimpath -ldflags="-s -w" -o /out/headless-vk-bot .
+RUN LDFLAGS="-s -w -X whitelist-bypass/relay/common.Version=${BUILD_VERSION} -X whitelist-bypass/relay/common.BuildCommit=${BUILD_COMMIT} -X whitelist-bypass/relay/common.BuildTime=${BUILD_TIME}" \
+ && go -C /src/headless/vk        build -trimpath -ldflags="$LDFLAGS" -o /out/headless-vk-creator . \
+ && go -C /src/headless/telemost  build -trimpath -ldflags="$LDFLAGS" -o /out/headless-telemost-creator . \
+ && go -C /src/headless/wbstream  build -trimpath -ldflags="$LDFLAGS" -o /out/headless-wbstream-creator . \
+ && go -C /src/headless/dion      build -trimpath -ldflags="$LDFLAGS" -o /out/headless-dion-creator . \
+ && go -C /src/headless/vk-bot    build -trimpath -ldflags="$LDFLAGS" -o /out/headless-vk-bot .
 
 FROM debian:bookworm-slim
 LABEL org.opencontainers.image.licenses="MIT" \

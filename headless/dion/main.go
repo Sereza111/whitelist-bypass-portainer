@@ -17,6 +17,7 @@ import (
 
 func main() {
 	common.MaybePrintVersion()
+	common.LogBuild(log.Printf)
 	cookiesPath := flag.String("cookies", "", "path to cookies-dion.json (exported from creator-app)")
 	roomFlag := flag.String("room", "", "event slug or https://dion.vc/event/<slug> to rejoin (empty = create new room)")
 	displayName := flag.String("name", "Headless", "display name in the room")

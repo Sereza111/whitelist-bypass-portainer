@@ -634,6 +634,7 @@ func (b *Bridge) run(callInfo *CallInfo, cookieStr string, cfg VKConfig) {
 
 func main() {
 	common.MaybePrintVersion()
+	common.LogBuild(log.Printf)
 	cookiesPath := flag.String("cookies", "", "path to cookies.json")
 	cookieString := flag.String("cookie-string", "", "raw cookie string (name=val; name=val)")
 	peerId := flag.String("peer-id", "", "VK peer_id for a new call")

@@ -36,6 +36,20 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,format=short
 
+      - name: Set build metadata
+        id: buildmeta
+        shell: bash
+        run: |
+          short_sha="${GITHUB_SHA::7}"
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="0.3.7+${short_sha}"
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "commit=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "built=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
       - uses: docker/build-push-action@v6
         with:
           context: .
@@ -44,5 +58,9 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BUILD_VERSION=${{ steps.buildmeta.outputs.version }}
+            BUILD_COMMIT=${{ steps.buildmeta.outputs.commit }}
+            BUILD_TIME=${{ steps.buildmeta.outputs.built }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
