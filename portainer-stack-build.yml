@@ -1,0 +1,31 @@
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: headless/docker/Dockerfile
+    container_name: whitelist-bypass-bot
+    restart: unless-stopped
+    stop_grace_period: 30s
+    environment:
+      VK_TOKEN: ${VK_TOKEN:?Set the VK community access token}
+      VK_GROUP_ID: ${VK_GROUP_ID:?Set the numeric VK community ID}
+      VK_USER_IDS: ${VK_USER_IDS:-}
+      RESOURCES: ${RESOURCES:-default}
+      UPSTREAM_SOCKS: ${UPSTREAM_SOCKS:-}
+      UPSTREAM_USER: ${UPSTREAM_USER:-}
+      UPSTREAM_PASS: ${UPSTREAM_PASS:-}
+    volumes:
+      - whitelist-bypass-data:/data
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  whitelist-bypass-data:
+    name: whitelist-bypass-data
