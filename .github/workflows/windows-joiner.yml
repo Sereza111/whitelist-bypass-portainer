@@ -48,7 +48,15 @@ jobs:
       - name: Test tunnel protocol
         working-directory: relay
         shell: pwsh
-        run: go test ./tunnel
+        run: |
+          $output = & go test -v ./tunnel 2>&1
+          $exitCode = $LASTEXITCODE
+          $output | ForEach-Object { Write-Host $_ }
+          if ($exitCode -ne 0) {
+            $summary = (($output -join ' ') -replace '%', '%25')
+            Write-Host "::error file=relay/tunnel/adaptive_kcp_tunnel_test.go::$summary"
+            exit $exitCode
+          }
 
       - name: Build Go engine
         working-directory: joiner-desktop-app/desktop-joiner
