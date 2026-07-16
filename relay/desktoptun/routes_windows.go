@@ -82,14 +82,12 @@ func deleteRouteByPrefix(prefix, adapter string) error {
 // addHostRoute installs a /32 route for ip via the given gateway. Used
 // for the joiner's signaling + SFU bypasses.
 func addHostRoute(ip, gateway string, metric int) error {
-	_, err := runHidden("route", "-p", "ADD", ip,
-		"MASK", "255.255.255.255", gateway,
-		"METRIC", strconv.Itoa(metric))
-	if err == nil {
-		return nil
-	}
-	// retry without persistence in case -p is rejected on this host
-	_, err = runHidden("route", "ADD", ip,
+	// Remove an orphan left by an older/crashed Joiner before replacing it.
+	// Ignore the error when the route does not exist.
+	_, _ = runHidden("route", "DELETE", ip)
+	// Bypass routes must never be persistent: a crashed client must not leave
+	// the server or signaling hosts pinned outside the user's normal VPN.
+	_, err := runHidden("route", "ADD", ip,
 		"MASK", "255.255.255.255", gateway,
 		"METRIC", strconv.Itoa(metric))
 	return err

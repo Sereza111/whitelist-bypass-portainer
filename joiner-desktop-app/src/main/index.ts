@@ -89,6 +89,7 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  userRequestedStop = true;
   stopJoiner();
   if (process.platform !== 'darwin') app.quit();
 });
@@ -204,15 +205,29 @@ ipcMain.handle(IPC.STOP, async () => {
 });
 
 function stopJoiner() {
+  userRequestedStop = true;
   closeCaptchaWindow();
   if (!joinerProcess) return;
   // On Linux when the Go binary was spawned via pkexec, it runs as
   // root and we (the user) cannot SIGTERM it. The binary watches
   // stdin: writing "QUIT\n" and closing the pipe triggers the same
   // shutdown path as SIGTERM.
-  try { joinerProcess.stdin?.write('QUIT\n'); } catch {}
-  try { joinerProcess.stdin?.end(); } catch {}
+  const proc = joinerProcess;
+  let gracefulRequested = false;
   try {
-    joinerProcess.kill('SIGTERM');
+    if (proc.stdin?.writable) {
+      proc.stdin.write('QUIT\n');
+      proc.stdin.end();
+      gracefulRequested = true;
+    }
   } catch {}
+  if (gracefulRequested) {
+    setTimeout(() => {
+      if (joinerProcess === proc) {
+        try { proc.kill('SIGTERM'); } catch {}
+      }
+    }, 2000);
+    return;
+  }
+  try { proc.kill('SIGTERM'); } catch {}
 }
