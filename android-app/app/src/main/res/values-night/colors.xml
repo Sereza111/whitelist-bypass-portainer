@@ -1,16 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="accent_emerald">#FFD04C5E</color>
-    <color name="accent_emerald_soft">#2ED04C5E</color>
-    <color name="warn_amber">#FFE5B260</color>
-    <color name="error_red">#FFEF7A52</color>
-    <color name="ink">#FFECECE8</color>
-    <color name="ink_2">#FFA8A8A2</color>
-    <color name="ink_3">#FF6A6A65</color>
-    <color name="hair">#14ECECE8</color>
-    <color name="hair_strong">#2EECECE8</color>
-    <color name="panel_bg">#FF131517</color>
-    <color name="panel_2">#FF181B1E</color>
-    <color name="surface_bg">#FF0A0B0C</color>
+    <color name="accent_emerald">#FFC24760</color>
+    <color name="accent_emerald_soft">#35C24760</color>
+    <color name="warn_amber">#FFD0A05A</color>
+    <color name="error_red">#FFEF765F</color>
+    <color name="ink">#FFF1E9DB</color>
+    <color name="ink_2">#FFB5A8A5</color>
+    <color name="ink_3">#FF786B70</color>
+    <color name="hair">#244A343D</color>
+    <color name="hair_strong">#664A343D</color>
+    <color name="panel_bg">#FF151016</color>
+    <color name="panel_2">#FF1C151B</color>
+    <color name="surface_bg">#FF070609</color>
 </resources>
-

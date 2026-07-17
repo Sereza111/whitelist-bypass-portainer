@@ -65,6 +65,10 @@ func (t *AdaptiveKCPTunnel) KCPEnabled() bool {
 	return t.mode.Load() == 2
 }
 
+func (t *AdaptiveKCPTunnel) SetKCPProfile(profile string) string {
+	return t.kcp.SetProfile(profile)
+}
+
 func (t *AdaptiveKCPTunnel) EnableRawCompatibility() bool {
 	if !t.mode.CompareAndSwap(0, 1) {
 		return false
@@ -157,7 +161,7 @@ func (t *AdaptiveKCPTunnel) TunnelMetrics() TunnelMetrics {
 		kcpMetrics.TrackCount = innerMetrics.TrackCount
 	}
 	if t.mode.Load() == 2 {
-		kcpMetrics.Kind = "adaptive-kcp-active"
+		kcpMetrics.Kind = "adaptive-kcp-active-" + t.kcp.Profile()
 	} else {
 		kcpMetrics.Kind = "adaptive-kcp-raw"
 	}

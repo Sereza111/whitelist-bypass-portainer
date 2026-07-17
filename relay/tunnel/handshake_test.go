@@ -15,7 +15,7 @@ func TestHelloRoundTrip(t *testing.T) {
 		Reliability:       ReliabilityRawVP8,
 		TrackCount:        2,
 		Nonce:             [16]byte{1, 2, 3, 4},
-		BuildVersion:      "0.4.0-alpha.4+abcdef0",
+		BuildVersion:      "0.4.0-alpha.5+abcdef0",
 		BuildCommit:       "abcdef0123456789",
 	}
 	frame := EncodeHello(want)

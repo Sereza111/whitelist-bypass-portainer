@@ -8,9 +8,13 @@
   </head>
   <body>
     <header class="masthead">
-      <div>
-        <p class="eyebrow">Whitelist Bypass / Control plane</p>
-        <h1>Session Reliquary</h1>
+      <div class="brand-shell">
+        <div class="seal" aria-hidden="true">W</div>
+        <div>
+          <p class="eyebrow">Whitelist Bypass / Control plane</p>
+          <h1>Session Reliquary</h1>
+          <p class="lede">Carrier orchestration · private session forge</p>
+        </div>
       </div>
       <div id="state" class="state" data-state="loading">loading</div>
     </header>
@@ -43,6 +47,13 @@
               <option value="raw">Legacy raw</option>
             </select>
           </label>
+          <label>KCP transport profile
+            <select id="kcpProfile">
+              <option value="stable">Stable / lossy SFU</option>
+              <option value="balanced" selected>Balanced / recommended</option>
+              <option value="fast">Fast / clean carrier</option>
+            </select>
+          </label>
           <label>Display name
             <input id="displayName" value="Headless" maxlength="80">
           </label>
@@ -65,6 +76,7 @@
         <dl>
           <div><dt>State</dt><dd id="sessionState">—</dd></div>
           <div><dt>Mode</dt><dd id="sessionMode">—</dd></div>
+          <div><dt>KCP profile</dt><dd id="sessionKcpProfile">—</dd></div>
           <div><dt>Build</dt><dd id="build">—</dd></div>
         </dl>
         <label>Join link

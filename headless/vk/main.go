@@ -648,6 +648,7 @@ func main() {
 	upstreamUser := flag.String("upstream-user", "", "upstream SOCKS5 username")
 	upstreamPass := flag.String("upstream-pass", "", "upstream SOCKS5 password")
 	videoReliability := flag.String("video-reliability", "auto", "VK Video reliability: auto or raw")
+	kcpProfile := flag.String("kcp-profile", tunnel.KCPProfileBalanced, "KCP profile: fast, balanced, or stable")
 	flag.Parse()
 	if *videoReliability != "auto" && *videoReliability != "raw" {
 		log.Fatalf("--video-reliability must be auto or raw")
@@ -754,6 +755,7 @@ func main() {
 			var adaptive *tunnel.AdaptiveKCPTunnel
 			if *videoReliability == "auto" {
 				adaptive = tunnel.NewAdaptiveKCPTunnel(tun, log.Printf)
+				adaptive.SetKCPProfile(*kcpProfile)
 				dataTunnel = adaptive
 				bridgeReadBuf = tunnel.AdaptiveKCPRelayReadBuf
 				capabilities |= tunnel.CapabilityVideoKCP1

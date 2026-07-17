@@ -13,7 +13,7 @@ func TestNormalizeRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Mode != "vk" || got.Resources != "default" || got.VideoReliability != "auto" || got.DisplayName != "Headless" {
+	if got.Mode != "vk" || got.Resources != "default" || got.VideoReliability != "auto" || got.KCPProfile != "balanced" || got.DisplayName != "Headless" {
 		t.Fatalf("unexpected defaults: %#v", got)
 	}
 	if _, err := m.normalizeRequest(sessionRequest{Mode: "unknown"}); err == nil {

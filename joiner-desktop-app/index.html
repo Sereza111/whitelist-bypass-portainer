@@ -8,11 +8,21 @@
   </head>
   <body>
     <header>
-      <h1>WhitelistBypass Joiner</h1>
-      <div class="status" id="status" data-state="idle">idle</div>
+      <div class="brand">
+        <div class="sigil" aria-hidden="true">W</div>
+        <div>
+          <p class="eyebrow">WHITELIST BYPASS / JOINER</p>
+          <h1>Carrier Reliquary</h1>
+        </div>
+      </div>
+      <div class="status-wrap">
+        <span>transport state</span>
+        <div class="status" id="status" data-state="idle">idle</div>
+      </div>
     </header>
     <main>
-      <section class="form">
+      <section class="form panel">
+        <div class="section-heading"><span>01</span><h2>Connection rite</h2></div>
         <label>
           Join link
           <input id="link" type="text" placeholder="Paste call link" />
@@ -66,6 +76,14 @@
             <option value="raw">Legacy raw (rollback)</option>
           </select>
         </label>
+        <label>
+          KCP profile
+          <select id="kcpProfile">
+            <option value="stable">Stable — high loss</option>
+            <option value="balanced" selected>Balanced — recommended</option>
+            <option value="fast">Fast — clean carrier</option>
+          </select>
+        </label>
         <div class="row">
           <label>
             VP8 FPS
@@ -89,8 +107,8 @@
           <button id="stop">Stop</button>
         </div>
       </section>
-      <section class="log-wrap">
-        <h2>Log <button class="log-download-btn" id="downloadLogs" type="button" title="Download logs">Save</button></h2>
+      <section class="log-wrap panel">
+        <div class="section-heading"><span>02</span><h2>Live diagnostics</h2><button class="log-download-btn" id="downloadLogs" type="button" title="Download logs">Save</button></div>
         <pre id="log"></pre>
       </section>
     </main>

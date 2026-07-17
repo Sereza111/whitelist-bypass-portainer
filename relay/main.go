@@ -34,6 +34,7 @@ func main() {
 	upstreamUser := flag.String("upstream-user", "", "upstream SOCKS5 username")
 	upstreamPass := flag.String("upstream-pass", "", "upstream SOCKS5 password")
 	videoReliability := flag.String("video-reliability", "auto", "VK Video reliability: auto or raw")
+	kcpProfile := flag.String("kcp-profile", tunnel.KCPProfileBalanced, "KCP profile: fast, balanced, or stable")
 	flag.String("local-ip", "", "local IP address (unused, passed via hook)")
 	flag.Parse()
 
@@ -90,6 +91,7 @@ func main() {
 					trackCount = multi.SubTunnelCount()
 				}
 				adaptive = tunnel.NewAdaptiveKCPTunnel(tun, log.Printf)
+				adaptive.SetKCPProfile(*kcpProfile)
 				tun = adaptive
 				readBuf = tunnel.AdaptiveKCPRelayReadBuf
 			}

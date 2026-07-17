@@ -42,6 +42,13 @@ Portainer and a headless Joiner in Video mode.
 - `headless/manager` and `portainer-stack-panel.yml` provide a single-session
   authenticated panel MVP. It supervises Creator subprocesses without Docker
   socket access; multi-session SQLite/vault/SSE work is still pending.
+- `portainer-stack.yml` is now the recommended single deployment containing
+  the panel and Creator supervisor. The VK community bot moved to
+  `portainer-stack-bot.yml`; direct/panel stacks must not run together.
+- Adaptive KCP defaults to the balanced profile: bounded non-blocking output
+  queue, WaitSnd backpressure, 256 window and congestion control. Stable and
+  fast profiles are available; METRICS reports kbps, output queue, drops and
+  backpressure.
 
 ## Next implementation order
 
@@ -49,6 +56,7 @@ Portainer and a headless Joiner in Video mode.
 2. Add a repeatable SOCKS-only benchmark and capture baseline metrics.
 3. Prototype negotiated reliable Video for VK and align KCP MTU/read sizes.
 4. Compare raw versus KCP Video under controlled loss.
-5. Add per-connection queues, flow control, and fair scheduling.
+5. Measure balanced/stable/fast under loss, then add per-connection queues,
+   flow control and fair scheduling.
 6. Extract the existing VK bot process supervisor into `wlb-manager` only after
    transport compatibility and metrics are in place.

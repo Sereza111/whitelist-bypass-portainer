@@ -95,10 +95,11 @@ CONNECT и интерактивный трафик.
 может зависнуть вместо нормальной TCP retransmission. Это главный кандидат на
 причину частично загружающихся сайтов в VK Video.
 
-Текущий KCP использует `NoDelay(1,10,2,1)`, окна `1024/1024` и MTU `1000`.
-При relay payload около 1126 байт сообщение часто делится на два KCP segment,
-поэтому перед переносом KCP на другие платформы нужно согласовать MTU и размер
-чтения.
+Legacy WB KCP сохраняет быстрый профиль. Negotiated VK KCP по умолчанию
+использует balanced profile: `NoDelay(1,20,2,0)`, окна `256/256`, bounded
+output queue и WaitSnd backpressure. MTU adaptive-сегмента выровнен так, чтобы
+обычный relay frame помещался в один carrier frame. Для сильной потери доступен
+stable profile, а fast оставлен только для A/B на чистом carrier.
 
 ### 6. Server egress
 

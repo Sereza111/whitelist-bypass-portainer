@@ -25,7 +25,7 @@ import (
 )
 
 var (
-	Version     = "0.4.0-alpha.4"
+	Version     = "0.4.0-alpha.5"
 	BuildCommit = "unknown"
 	BuildTime   = "unknown"
 )
@@ -39,6 +39,7 @@ type sessionRequest struct {
 	DisplayName      string `json:"displayName"`
 	ExistingLink     string `json:"existingLink"`
 	VideoReliability string `json:"videoReliability"`
+	KCPProfile       string `json:"kcpProfile"`
 }
 
 type sessionStatus struct {
@@ -47,6 +48,7 @@ type sessionStatus struct {
 	Resources    string    `json:"resources"`
 	DisplayName  string    `json:"displayName"`
 	Reliability  string    `json:"videoReliability"`
+	KCPProfile   string    `json:"kcpProfile"`
 	StartedAt    time.Time `json:"startedAt,omitempty"`
 	SessionLink  string    `json:"sessionLink,omitempty"`
 	ExitError    string    `json:"exitError,omitempty"`
@@ -138,6 +140,7 @@ func (m *manager) normalizeRequest(req sessionRequest) (sessionRequest, error) {
 	req.DisplayName = strings.TrimSpace(req.DisplayName)
 	req.ExistingLink = strings.TrimSpace(req.ExistingLink)
 	req.VideoReliability = strings.ToLower(strings.TrimSpace(req.VideoReliability))
+	req.KCPProfile = strings.ToLower(strings.TrimSpace(req.KCPProfile))
 	if req.Mode == "" {
 		req.Mode = "vk"
 	}
@@ -149,6 +152,9 @@ func (m *manager) normalizeRequest(req sessionRequest) (sessionRequest, error) {
 	}
 	if req.VideoReliability == "" {
 		req.VideoReliability = "auto"
+	}
+	if req.KCPProfile == "" {
+		req.KCPProfile = "balanced"
 	}
 	switch req.Mode {
 	case "vk", "telemost", "wbstream", "dion":
@@ -162,6 +168,9 @@ func (m *manager) normalizeRequest(req sessionRequest) (sessionRequest, error) {
 	}
 	if req.VideoReliability != "auto" && req.VideoReliability != "raw" {
 		return req, errors.New("videoReliability must be auto or raw")
+	}
+	if req.KCPProfile != "fast" && req.KCPProfile != "balanced" && req.KCPProfile != "stable" {
+		return req, errors.New("kcpProfile must be fast, balanced, or stable")
 	}
 	return req, nil
 }
@@ -197,6 +206,7 @@ func (m *manager) commandFor(req sessionRequest) (*exec.Cmd, error) {
 			args = append(args, "--peer-id", peerID)
 		}
 		args = append(args, "--video-reliability", req.VideoReliability)
+		args = append(args, "--kcp-profile", req.KCPProfile)
 	case "telemost":
 		if req.ExistingLink != "" {
 			args = append(args, "--tm-link", req.ExistingLink)
@@ -250,7 +260,7 @@ func (m *manager) start(req sessionRequest) error {
 	m.exitErr = ""
 	m.done = make(chan struct{})
 	m.cmd = cmd
-	m.logs.add("[manager] starting mode=%s resources=%s reliability=%s", normalized.Mode, normalized.Resources, normalized.VideoReliability)
+	m.logs.add("[manager] starting mode=%s resources=%s reliability=%s kcp_profile=%s", normalized.Mode, normalized.Resources, normalized.VideoReliability, normalized.KCPProfile)
 	if err := cmd.Start(); err != nil {
 		m.cmd = nil
 		m.state = "failed"
@@ -349,6 +359,7 @@ func (m *manager) status() sessionStatus {
 		Resources:    m.request.Resources,
 		DisplayName:  m.request.DisplayName,
 		Reliability:  m.request.VideoReliability,
+		KCPProfile:   m.request.KCPProfile,
 		StartedAt:    m.started,
 		SessionLink:  m.link,
 		ExitError:    m.exitErr,
@@ -429,6 +440,7 @@ func main() {
 			DisplayName:      envOr("DISPLAY_NAME", "Headless"),
 			ExistingLink:     os.Getenv("EXISTING_LINK"),
 			VideoReliability: envOr("VIDEO_RELIABILITY", "auto"),
+			KCPProfile:       envOr("KCP_PROFILE", "balanced"),
 		}); err != nil {
 			mgr.logs.add("[manager] auto-start failed: %v", err)
 		}

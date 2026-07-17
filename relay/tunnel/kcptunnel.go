@@ -1,6 +1,7 @@
 package tunnel
 
 import (
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -11,11 +12,20 @@ import (
 const (
 	kcpConversationID = 0x77627374
 	kcpUpdateInterval = 10 * time.Millisecond
-	kcpSendWindow     = 1024
-	kcpRecvWindow     = 1024
+	kcpBalancedWindow = 256
+	kcpFastWindow     = 512
+	kcpStableWindow   = 128
 	kcpSegmentMTU     = 1000
 	kcpReceiveBufSize = 128 * 1024
 	kcpStatsEvery     = 500
+	kcpOutputQueueDepth = 256
+	kcpBackpressurePoll = 5 * time.Millisecond
+)
+
+const (
+	KCPProfileFast     = "fast"
+	KCPProfileBalanced = "balanced"
+	KCPProfileStable   = "stable"
 )
 
 type KCPTunnel struct {
@@ -30,17 +40,24 @@ type KCPTunnel struct {
 
 	stopCh   chan struct{}
 	stopOnce sync.Once
+	outputCh chan []byte
+	profile  string
+	maxWaitSnd int
 
 	sentMessages      atomic.Uint64
 	deliveredMessages atomic.Uint64
 	sentBytes         atomic.Uint64
 	deliveredBytes    atomic.Uint64
 	outputSegments    atomic.Uint64
+	droppedSegments   atomic.Uint64
 	inputSegments     atomic.Uint64
+	backpressureNanos atomic.Uint64
 }
 
 func NewKCPTunnel(inner DataTunnel, logFn func(string, ...any)) *KCPTunnel {
-	return newKCPTunnel(inner, kcpSegmentMTU, logFn)
+	t := newKCPTunnel(inner, kcpSegmentMTU, logFn)
+	t.SetProfile(KCPProfileFast)
+	return t
 }
 
 func newKCPTunnel(inner DataTunnel, segmentMTU int, logFn func(string, ...any)) *KCPTunnel {
@@ -49,6 +66,7 @@ func newKCPTunnel(inner DataTunnel, segmentMTU int, logFn func(string, ...any)) 
 		logFn:   logFn,
 		recvBuf: make([]byte, kcpReceiveBufSize),
 		stopCh:  make(chan struct{}),
+		outputCh: make(chan []byte, kcpOutputQueueDepth),
 	}
 	t.kcp = kcp.NewKCP(kcpConversationID, func(buf []byte, size int) {
 		if size <= 0 {
@@ -56,14 +74,20 @@ func newKCPTunnel(inner DataTunnel, segmentMTU int, logFn func(string, ...any)) 
 		}
 		segment := make([]byte, size)
 		copy(segment, buf[:size])
-		t.outputSegments.Add(1)
-		t.inner.SendData(segment)
+		select {
+		case t.outputCh <- segment:
+			t.outputSegments.Add(1)
+		default:
+			// Treat a saturated carrier as packet loss. Blocking here would
+			// hold the KCP mutex, delay ACK processing and amplify collapse.
+			t.droppedSegments.Add(1)
+		}
 	})
-	t.kcp.NoDelay(1, 10, 2, 1)
-	t.kcp.WndSize(kcpSendWindow, kcpRecvWindow)
 	t.kcp.SetMtu(segmentMTU)
+	t.SetProfile(KCPProfileBalanced)
 	inner.SetOnData(t.handleInnerData)
 	inner.SetOnClose(t.handleInnerClose)
+	go t.outputLoop()
 	go t.updateLoop()
 	return t
 }
@@ -72,12 +96,58 @@ func (t *KCPTunnel) SendData(data []byte) {
 	if len(data) == 0 {
 		return
 	}
-	t.sentMessages.Add(1)
-	t.sentBytes.Add(uint64(len(data)))
+	started := time.Now()
+	for {
+		t.mu.Lock()
+		if t.kcp.WaitSnd() < t.maxWaitSnd {
+			t.sentMessages.Add(1)
+			t.sentBytes.Add(uint64(len(data)))
+			t.kcp.Send(data)
+			t.kcp.Update()
+			t.mu.Unlock()
+			t.backpressureNanos.Add(uint64(time.Since(started)))
+			return
+		}
+		t.mu.Unlock()
+		select {
+		case <-t.stopCh:
+			return
+		case <-time.After(kcpBackpressurePoll):
+		}
+	}
+}
+
+func (t *KCPTunnel) SetProfile(profile string) string {
+	profile = strings.ToLower(strings.TrimSpace(profile))
 	t.mu.Lock()
-	t.kcp.Send(data)
-	t.kcp.Update()
+	switch profile {
+	case KCPProfileFast:
+		t.kcp.NoDelay(1, 10, 2, 1)
+		t.kcp.WndSize(kcpFastWindow, kcpFastWindow)
+		t.maxWaitSnd = kcpFastWindow
+	case KCPProfileStable:
+		t.kcp.NoDelay(0, 30, 2, 0)
+		t.kcp.WndSize(kcpStableWindow, kcpStableWindow)
+		t.maxWaitSnd = kcpStableWindow
+	default:
+		profile = KCPProfileBalanced
+		t.kcp.NoDelay(1, 20, 2, 0)
+		t.kcp.WndSize(kcpBalancedWindow, kcpBalancedWindow)
+		t.maxWaitSnd = kcpBalancedWindow
+	}
+	t.profile = profile
+	maxWaitSnd := t.maxWaitSnd
 	t.mu.Unlock()
+	if t.logFn != nil {
+		t.logFn("kcptunnel: profile=%s max_wait_snd=%d", profile, maxWaitSnd)
+	}
+	return profile
+}
+
+func (t *KCPTunnel) Profile() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.profile
 }
 
 func (t *KCPTunnel) SetOnData(fn func([]byte)) {
@@ -142,17 +212,33 @@ func (t *KCPTunnel) handleInnerData(segment []byte) {
 func (t *KCPTunnel) TunnelMetrics() TunnelMetrics {
 	t.mu.Lock()
 	waitSnd := t.kcp.WaitSnd()
+	profile := t.profile
 	t.mu.Unlock()
 	return TunnelMetrics{
-		Kind:              "kcp-vp8",
+		Kind:              "kcp-vp8-" + profile,
 		SentBytes:         t.sentBytes.Load(),
 		ReceivedBytes:     t.deliveredBytes.Load(),
 		SentFrames:        t.sentMessages.Load(),
 		ReceivedFrames:    t.deliveredMessages.Load(),
 		KCPInputSegments:  t.inputSegments.Load(),
 		KCPOutputSegments: t.outputSegments.Load(),
+		KCPDroppedSegments: t.droppedSegments.Load(),
 		KCPWaitSnd:        waitSnd,
+		KCPBackpressureNanos: t.backpressureNanos.Load(),
+		KCPOutputQueueDepth:  len(t.outputCh),
+		KCPOutputQueueCap:    cap(t.outputCh),
 		TrackCount:        1,
+	}
+}
+
+func (t *KCPTunnel) outputLoop() {
+	for {
+		select {
+		case <-t.stopCh:
+			return
+		case segment := <-t.outputCh:
+			t.inner.SendData(segment)
+		}
 	}
 }
 
@@ -177,12 +263,14 @@ func (t *KCPTunnel) updateLoop() {
 		case <-ticker.C:
 			t.mu.Lock()
 			t.kcp.Update()
+			waitSnd := t.kcp.WaitSnd()
 			t.mu.Unlock()
 			ticks++
 			if ticks%kcpStatsEvery == 0 && t.logFn != nil {
-				t.logFn("kcptunnel: sent=%d delivered=%d out_segs=%d in_segs=%d",
+				t.logFn("kcptunnel: sent=%d delivered=%d out_segs=%d dropped_segs=%d in_segs=%d wait_snd=%d",
 					t.sentMessages.Load(), t.deliveredMessages.Load(),
-					t.outputSegments.Load(), t.inputSegments.Load())
+					t.outputSegments.Load(), t.droppedSegments.Load(),
+					t.inputSegments.Load(), waitSnd)
 			}
 		}
 	}

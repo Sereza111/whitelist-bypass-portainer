@@ -1,174 +1,80 @@
 # Запуск Whitelist Bypass через Portainer
 
-Эта версия основана на ветке upstream `feature/kcp-over-vp8`, commit
-`64aa77acd5b52c34f5ddbd1ad0d861ea65bc8943`. Серверная часть работает как
-VK-бот: бот получает команды через VK Long Poll и запускает отдельный headless
-Creator для каждой сессии.
+Рекомендуемое развёртывание использует один Stack: web panel и запускаемые ею
+Direct Creator находятся в одном контейнере. Отдельный Creator Stack вместе с
+панелью не нужен.
 
-> Один Creator обслуживает ровно один Joiner. Для каждого устройства создавайте
-> отдельную сессию через бота.
+> Один запущенный Creator обслуживает один Joiner. Для телефона и ПК создавайте
+> разные сессии последовательно либо используйте будущий multi-session manager.
 
 ## Что требуется
 
 - Linux-сервер с Docker и Portainer;
-- публичное или приватное GitHub-репо с этими файлами;
-- VK-сообщество, access token сообщества и числовой ID сообщества;
-- минимум 1 vCPU и 1 ГБ RAM; для нескольких одновременных сессий нужно больше;
-- исходящие HTTPS/WebSocket/WebRTC-соединения. Входящие порты контейнер не
-  публикует.
+- публичный образ GHCR;
+- каталог `/opt/whitelist-bypass/secrets` с cookies нужной платформы;
+- минимум 1 vCPU и 1 ГБ RAM;
+- открытый TCP/9200 для текущей HTTP-панели.
 
-## 1. Опубликовать образ в GHCR
+## Рекомендуемый Stack
 
-После push в ветку `main` workflow `.github/workflows/docker-bot.yml` собирает
-образы `linux/amd64`, `linux/arm64` и `linux/386` и публикует:
+1. Откройте **Stacks → Add stack → Repository**.
+2. Укажите репозиторий и ветку `main`.
+3. Compose path: `portainer-stack.yml`.
+4. Добавьте переменные:
 
-```text
-ghcr.io/<github-user>/<repository>:latest
-```
-
-Откройте на GitHub вкладку **Actions**, дождитесь зелёного workflow
-`Build & push bot Docker image`, затем в настройках Package сделайте образ
-публичным. Если образ должен остаться приватным, добавьте в Portainer registry
-`ghcr.io` с GitHub username и PAT, у которого есть `read:packages`.
-
-## 2. Создать Stack в Portainer
-
-1. Откройте **Stacks -> Add stack -> Repository**.
-2. Укажите URL вашего GitHub-репозитория и ветку `main`.
-3. В поле **Compose path** укажите `portainer-stack.yml`.
-4. Добавьте переменные окружения:
-
-| Переменная | Обязательно | Пример | Назначение |
-|---|---:|---|---|
-| `WLB_IMAGE` | да | `ghcr.io/user/repo:latest` | образ из GHCR |
-| `VK_TOKEN` | да | `vk1.a...` | access token VK-сообщества |
-| `VK_GROUP_ID` | да | `123456789` | числовой ID сообщества |
-| `VK_USER_IDS` | настоятельно рекомендуется | `111,222` | кто может управлять ботом |
-| `RESOURCES` | нет | `default` | `moderate`, `default` или `unlimited` |
-| `UPSTREAM_SOCKS` | нет | `host.docker.internal:1080` | дополнительный SOCKS5 с UDP ASSOCIATE |
-| `UPSTREAM_USER` | нет | | логин upstream SOCKS5 |
-| `UPSTREAM_PASS` | нет | | пароль upstream SOCKS5 |
-
-Не оставляйте `VK_USER_IDS` пустым на публичном VK-сообществе: пустое значение
-разрешает запускать сессии любому пользователю, который может написать боту.
-
-5. Нажмите **Deploy the stack**.
-6. В логах дождитесь успешного запуска Long Poll. Напишите со своего разрешённого
-   VK-аккаунта в сообщения сообщества `/start`.
-
-Команды бота: `/vk`, `/tm`, `/wb`, `/dion`, `/list`, `/close <id>`.
-
-## Web panel (MVP)
-
-Для управления Direct Creator через браузер используйте
-`portainer-stack-panel.yml`. Панель публикуется на фиксированном порту
-`0.0.0.0:9200` сервера. Инструкция и
-ограничения: [docs/PANEL.md](docs/PANEL.md).
-
-## Сборка прямо в Portainer
-
-Если образ ещё не опубликован, используйте `portainer-stack-build.yml`. Portainer
-должен клонировать весь репозиторий и поддерживать Compose `build`. Сборка Go
-бинарников произойдёт на Docker host и займёт больше времени и памяти. Для
-регулярных обновлений предпочтительнее GHCR-вариант.
-
-## Direct Creator без VK-сообщества
-
-Если сообщества и токена VK нет, используйте `portainer-stack-direct.yml`.
-Этот stack запускает один Creator напрямую, без управляющего бота. Один
-контейнер обслуживает ровно один Joiner.
-
-Для VK Direct доступна переменная `VIDEO_RELIABILITY`: значение `auto`
-(по умолчанию) включает KCP только после handshake с matching client, а `raw`
-оставляет старый VP8 data path для аварийного отката. После обновления server и
-Joiner в обоих логах должно появиться `adaptive-kcp: reliable data path
-enabled`.
-
-Поддерживаемые значения `CREATOR_MODE` и файлы:
-
-| Режим | Файл на Docker host |
+| Переменная | Значение |
 |---|---|
-| `vk` | `/opt/whitelist-bypass/secrets/cookies-vk.json` |
-| `telemost` | `/opt/whitelist-bypass/secrets/cookies-yandex.json` |
-| `wbstream` | `/opt/whitelist-bypass/secrets/cookies-wbstream.json` |
-| `dion` | `/opt/whitelist-bypass/secrets/cookies-dion.json` |
+| `WLB_IMAGE` | `ghcr.io/sereza111/whitelist-bypass-portainer:latest` |
+| `PANEL_USERNAME` | `admin` или другой логин |
+| `PANEL_PASSWORD` | уникальный пароль длиной от 12 символов |
+| `WLB_SECRETS_DIR` | `/opt/whitelist-bypass/secrets` |
+| `VIDEO_RELIABILITY` | `auto` |
+| `KCP_PROFILE` | `balanced` |
+| `AUTO_START` | `false` |
 
-Файлы должны быть экспортированы кнопками desktop Creator. Пустой JSON-массив
-`[]` не является авторизацией. Никогда не коммитьте cookies в Git и не
-встраивайте их в Docker-образ.
+5. Deploy stack.
+6. Проверьте Published Ports: `9200:8080`.
+7. Откройте `http://SERVER_IP:9200`.
 
-Перед созданием stack скопируйте cookies на сервер через SSH:
+`portainer-stack-panel.yml` оставлен как совместимый alias того же
+развёртывания. Не запускайте одновременно `portainer-stack-direct.yml` и
+панель для одного аккаунта/ссылки.
 
-```sh
-sudo install -d -m 700 /opt/whitelist-bypass/secrets
-sudo install -m 600 /tmp/cookies-vk.json /opt/whitelist-bypass/secrets/cookies-vk.json
-rm -f /tmp/cookies-vk.json
-```
+## Cookies
 
-В Portainer выберите Git repository и укажите:
+Панель читает файлы только из bind mount:
 
-```text
-Repository URL: https://github.com/Sereza111/whitelist-bypass-portainer.git
-Repository reference: refs/heads/main
-Compose path: portainer-stack-direct.yml
-```
+| Платформа | Файл |
+|---|---|
+| VK | `cookies-vk.json` |
+| Telemost | `cookies-yandex.json` |
+| WB Stream | `cookies-wbstream.json` |
+| Dion | `cookies-dion.json` |
 
-Добавьте переменные:
+Cookies, токены и join links нельзя коммитить в Git.
 
-```text
-CREATOR_MODE=vk
-RESOURCES=default
-WLB_SECRETS_DIR=/opt/whitelist-bypass/secrets
-```
+## Transport
 
-После запуска откройте логи контейнера `whitelist-bypass-creator`. Ссылка будет
-показана после строки `CALL CREATED` и дополнительно сохранена в volume в файле
-`/data/session-link.txt`. При перезапуске без `EXISTING_LINK` создаётся новая
-сессия и новая ссылка.
+Для matching server/client используйте:
 
-## Cookies для VK, Telemost и Dion
+- reliability: `auto`;
+- KCP profile `balanced` — рекомендуемый;
+- `stable` — при сильной потере и обвалах скорости;
+- `fast` — только для чистого carrier без заметных потерь;
+- `raw` — аварийный legacy rollback, не нормальный режим для web-трафика.
 
-WB Stream использует анонимные guest token. Для остальных платформ экспортируйте
-cookies штатными кнопками desktop Creator и скопируйте JSON в постоянный volume:
+В логах matching пары должны появиться `adaptive-kcp-active-<profile>` и
+`legacy=false`. METRICS показывает `tx_kbps`, `rx_kbps`,
+`kcp_wait_snd`, `kcp_out_queue`, `kcp_dropped` и backpressure.
 
-```sh
-docker cp cookies-vk.json whitelist-bypass-bot:/data/cookies-vk.json
-docker cp cookies-yandex.json whitelist-bypass-bot:/data/cookies-yandex.json
-docker cp cookies-dion.json whitelist-bypass-bot:/data/cookies-dion.json
-docker exec -u 0 whitelist-bypass-bot sh -c 'chown wlb:wlb /data/cookies-*.json && chmod 600 /data/cookies-*.json'
-docker restart whitelist-bypass-bot
-```
+## Дополнительные варианты
 
-Не добавляйте cookies, `VK_TOKEN` или `.env` в Git. Данные и логи сессий хранятся
-в named volume `whitelist-bypass-data` и переживают пересоздание контейнера.
+- `portainer-stack-bot.yml` — старое управление через VK-сообщество;
+- `portainer-stack-direct.yml` — legacy одиночный Creator без панели;
+- `portainer-stack-build.yml` — локальная сборка образа на Docker host.
 
-## Если WebRTC не соединяется
+## Безопасность панели
 
-Сначала проверьте, что firewall разрешает исходящий UDP и TCP. Если Docker bridge
-мешает WebRTC, добавьте сервису `bot` в stack:
-
-```yaml
-network_mode: host
-```
-
-На Linux для обращения к SOCKS5 на Docker host можно добавить:
-
-```yaml
-extra_hosts:
-  - "host.docker.internal:host-gateway"
-```
-
-После изменения нажмите **Update the stack**.
-
-## Обновление и откат
-
-- Обновление: в Portainer включите **Re-pull image and redeploy**.
-- Откат: замените `:latest` в `WLB_IMAGE` на immutable-тег `:sha-<commit>` из
-  GHCR и redeploy stack.
-- Резервная копия: сохраните Docker volume `whitelist-bypass-data`.
-
-## Риски
-
-Платформа может заметить звонок с IP дата-центра и заблокировать аккаунт.
-Используйте отдельный аккаунт или запускайте Creator с домашнего подключения.
-Соблюдайте местное законодательство и правила используемых платформ.
+Порт 9200 сейчас использует HTTP Basic Auth. Для постоянного публичного
+развёртывания поставьте TLS reverse proxy (Caddy/Nginx), ограничьте порт
+firewall и смените любой пароль, попавший в скриншот или переписку.

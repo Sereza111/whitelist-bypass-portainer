@@ -111,6 +111,7 @@ func main() {
 	noTun := flag.Bool("no-tun", false, "expose SOCKS5 only, do not bring up the wintun adapter")
 	dualTrack := flag.Bool("dual-track", false, "VK/WB Stream: dual-track tunnel (second screenshare channel) for higher throughput")
 	videoReliability := flag.String("video-reliability", "auto", "VK Video reliability: auto or raw")
+	kcpProfile := flag.String("kcp-profile", tunnel.KCPProfileBalanced, "KCP profile: fast, balanced, or stable")
 	flag.Parse()
 
 	if *platform == "" || *link == "" {
@@ -258,6 +259,7 @@ func main() {
 				trackCount = multi.SubTunnelCount()
 			}
 			adaptive = tunnel.NewAdaptiveKCPTunnel(t, log.Printf)
+			adaptive.SetKCPProfile(*kcpProfile)
 			t = adaptive
 			readBuf = tunnel.AdaptiveKCPRelayReadBuf
 		}

@@ -46,6 +46,23 @@ func TestAdaptiveKCPReadBufferFitsOneSegment(t *testing.T) {
 	}
 }
 
+func TestAdaptiveKCPProfiles(t *testing.T) {
+	leftRaw, _ := newMemoryTunnelPair()
+	adaptive := NewAdaptiveKCPTunnel(leftRaw, func(string, ...any) {})
+	defer adaptive.Stop()
+
+	for input, want := range map[string]string{
+		"fast":     KCPProfileFast,
+		"stable":   KCPProfileStable,
+		"BALANCED": KCPProfileBalanced,
+		"unknown":  KCPProfileBalanced,
+	} {
+		if got := adaptive.SetKCPProfile(input); got != want {
+			t.Fatalf("profile %q normalized to %q, want %q", input, got, want)
+		}
+	}
+}
+
 func TestAdaptiveKCPRecoversFromThreePercentLoss(t *testing.T) {
 	leftRaw, rightRaw := newLossyTunnelPair(33)
 	logFn := func(string, ...any) {}

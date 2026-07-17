@@ -17,10 +17,14 @@ type TunnelMetrics struct {
 	QueueCapacity     int    `json:"queueCapacity"`
 	MaxQueueDepth     uint64 `json:"maxQueueDepth"`
 	SendWaitNanos     uint64 `json:"sendWaitNanos"`
-	KCPInputSegments  uint64 `json:"kcpInputSegments,omitempty"`
-	KCPOutputSegments uint64 `json:"kcpOutputSegments,omitempty"`
-	KCPWaitSnd        int    `json:"kcpWaitSnd,omitempty"`
-	TrackCount        int    `json:"trackCount"`
+	KCPInputSegments      uint64 `json:"kcpInputSegments,omitempty"`
+	KCPOutputSegments     uint64 `json:"kcpOutputSegments,omitempty"`
+	KCPDroppedSegments    uint64 `json:"kcpDroppedSegments,omitempty"`
+	KCPWaitSnd            int    `json:"kcpWaitSnd,omitempty"`
+	KCPBackpressureNanos uint64 `json:"kcpBackpressureNanos,omitempty"`
+	KCPOutputQueueDepth  int    `json:"kcpOutputQueueDepth,omitempty"`
+	KCPOutputQueueCap    int    `json:"kcpOutputQueueCapacity,omitempty"`
+	TrackCount            int    `json:"trackCount"`
 }
 
 type RelayMetrics struct {
@@ -82,14 +86,22 @@ func (rb *RelayBridge) MetricsSnapshot() RelayMetrics {
 func (rb *RelayBridge) metricsLoop() {
 	ticker := time.NewTicker(defaultMetricsInterval)
 	defer ticker.Stop()
+	lastAt := time.Now()
+	var lastSent, lastReceived uint64
 	for {
 		select {
 		case <-rb.metricsStop:
 			return
 		case <-ticker.C:
 			m := rb.MetricsSnapshot()
-			rb.logFn("METRICS mode=%s uptime=%s tx_bytes=%d rx_bytes=%d tx_frames=%d rx_frames=%d control_tx=%d control_rx=%d send_wait_ms=%.2f max_send_wait_ms=%.2f tcp=%d udp=%d dns_queries=%d dns_retries=%d wire=%d caps=0x%x legacy=%t tunnel=%s tunnel_tx=%d tunnel_rx=%d queue=%d/%d queue_max=%d kcp_wait_snd=%d",
+			now := time.Now()
+			elapsed := now.Sub(lastAt).Seconds()
+			txKbps := float64(m.SentBytes-lastSent) * 8 / elapsed / 1000
+			rxKbps := float64(m.ReceivedBytes-lastReceived) * 8 / elapsed / 1000
+			lastAt, lastSent, lastReceived = now, m.SentBytes, m.ReceivedBytes
+			rb.logFn("METRICS mode=%s uptime=%s tx_bytes=%d rx_bytes=%d tx_kbps=%.1f rx_kbps=%.1f tx_frames=%d rx_frames=%d control_tx=%d control_rx=%d send_wait_ms=%.2f max_send_wait_ms=%.2f tcp=%d udp=%d dns_queries=%d dns_retries=%d wire=%d caps=0x%x legacy=%t tunnel=%s tunnel_tx=%d tunnel_rx=%d queue=%d/%d queue_max=%d kcp_wait_snd=%d kcp_out_queue=%d/%d kcp_dropped=%d kcp_backpressure_ms=%.2f",
 				m.Mode, m.Uptime.Round(time.Second), m.SentBytes, m.ReceivedBytes,
+				txKbps, rxKbps,
 				m.SentFrames, m.ReceivedFrames, m.SentControlFrames, m.RecvControlFrames,
 				float64(m.SendWaitNanos)/float64(time.Millisecond),
 				float64(m.MaxSendWaitNanos)/float64(time.Millisecond),
@@ -97,7 +109,10 @@ func (rb *RelayBridge) metricsLoop() {
 				m.NegotiatedWire, m.NegotiatedCaps,
 				m.LegacyCompatibility, m.Tunnel.Kind, m.Tunnel.SentBytes,
 				m.Tunnel.ReceivedBytes, m.Tunnel.QueueDepth, m.Tunnel.QueueCapacity,
-				m.Tunnel.MaxQueueDepth, m.Tunnel.KCPWaitSnd)
+				m.Tunnel.MaxQueueDepth, m.Tunnel.KCPWaitSnd,
+				m.Tunnel.KCPOutputQueueDepth, m.Tunnel.KCPOutputQueueCap,
+				m.Tunnel.KCPDroppedSegments,
+				float64(m.Tunnel.KCPBackpressureNanos)/float64(time.Millisecond))
 		}
 	}
 }

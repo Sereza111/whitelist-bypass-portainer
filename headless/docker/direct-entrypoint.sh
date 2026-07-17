@@ -60,6 +60,7 @@ case "$MODE" in
         [ -n "$EXISTING_LINK" ] && set -- "$@" --vk-link "$EXISTING_LINK"
         [ -n "${VK_PEER_ID:-}" ] && set -- "$@" --peer-id "$VK_PEER_ID"
         set -- "$@" --video-reliability "${VIDEO_RELIABILITY:-auto}"
+        set -- "$@" --kcp-profile "${KCP_PROFILE:-balanced}"
         ;;
     telemost)
         [ -n "$EXISTING_LINK" ] && set -- "$@" --tm-link "$EXISTING_LINK"

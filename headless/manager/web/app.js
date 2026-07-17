@@ -22,6 +22,7 @@ function render(status) {
   stateEl.dataset.state = status.state;
   byId('sessionState').textContent = status.state;
   byId('sessionMode').textContent = status.mode || '—';
+  byId('sessionKcpProfile').textContent = status.kcpProfile || '—';
   byId('build').textContent = `${status.buildVersion} / ${(status.buildCommit || '').slice(0, 7)}`;
   linkEl.value = status.sessionLink || '';
   logsEl.textContent = (status.logs || []).join('\n') || 'No events yet';
@@ -55,6 +56,7 @@ startButton.addEventListener('click', async () => {
         displayName: byId('displayName').value,
         existingLink: byId('existingLink').value,
         videoReliability: byId('videoReliability').value,
+        kcpProfile: byId('kcpProfile').value,
       }),
     });
     render(status);

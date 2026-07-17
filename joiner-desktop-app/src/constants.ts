@@ -17,6 +17,7 @@ export interface JoinerSettings {
   socksPass: string;
   tunnelMode: 'video' | 'dc';
   videoReliability: 'auto' | 'raw';
+  kcpProfile: 'fast' | 'balanced' | 'stable';
   vp8Fps: number;
   vp8Batch: number;
   resources: 'moderate' | 'default' | 'unlimited';

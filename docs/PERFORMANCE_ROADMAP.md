@@ -151,6 +151,26 @@ VLESS не исправляет loss, pacing или head-of-line blocking на V
 3. **Долгосрочно:** исследовать QUIC streams поверх custom datagram carrier как
    замену KCP + самописному mux. Это отдельный прототип, а не быстрый патч.
 
+### Почему не xHTTP/Hysteria2 внутри звонка
+
+- xHTTP — HTTP transport Xray и требует уже доступного HTTP(S) endpoint;
+- Hysteria2 требует доступного UDP/QUIC endpoint;
+- если такие endpoints доступны Joiner напрямую, carrier через звонок не нужен;
+- если вложить их внутрь VP8/KCP, лимит и loss SFU остаются, а две независимые
+  системы retransmit создают congestion collapse.
+
+Их можно использовать как внешний egress после Creator, но это меняет точку
+выхода, а не скорость участка звонка.
+
+## Реализованный balanced KCP pass
+
+- KCP output отделён от блокирующей VP8 queue bounded-очередью;
+- переполнение output queue учитывается как loss вместо удержания KCP mutex;
+- `WaitSnd` ограничивает producer и создаёт измеримый backpressure;
+- balanced/stable включают congestion control;
+- доступны профили `stable`, `balanced`, `fast`;
+- METRICS содержит throughput, KCP output queue, drops и backpressure.
+
 ## Рекомендуемый первый кодовый спринт
 
 1. Metrics + benchmark harness.

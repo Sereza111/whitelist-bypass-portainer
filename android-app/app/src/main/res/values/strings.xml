@@ -52,6 +52,7 @@
     <string name="nav_activity">Logs</string>
 
     <string name="main_sub_no_configs">No calls saved</string>
+    <string name="main_brand_title">Carrier Reliquary</string>
     <plurals name="main_sub_count">
         <item quantity="one">1 call saved</item>
         <item quantity="other">%d calls saved</item>
@@ -173,4 +174,3 @@
     <string name="activity_copy">Copy raw</string>
     <string name="activity_share">Share file</string>
 </resources>
-

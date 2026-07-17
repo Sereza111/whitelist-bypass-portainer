@@ -112,6 +112,7 @@ function spawnJoiner(settings: JoinerSettings): { ok: boolean; error?: string } 
     '--socks-port', String(settings.socksPort),
     '--tunnel-mode', settings.tunnelMode,
     '--video-reliability', settings.videoReliability,
+    '--kcp-profile', settings.kcpProfile,
     '--vp8-fps', String(settings.vp8Fps),
     '--vp8-batch', String(settings.vp8Batch),
     '--resources', settings.resources,
