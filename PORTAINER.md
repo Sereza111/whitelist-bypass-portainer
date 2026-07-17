@@ -72,8 +72,9 @@ Cookies, токены и join links нельзя коммитить в Git.
 
 В логах matching пары должны появиться `adaptive-kcp-active-<profile>` и
 `legacy=false`. METRICS показывает `tx_kbps`, `rx_kbps`,
-`kcp_wait_snd`, `kcp_out_queue`, `kcp_dropped`, `kcp_stalls`, время простоя
-входящего потока и backpressure. При заполненном KCP-окне без входящих данных
+`kcp_wait_snd`, `kcp_control_wait_snd`, `kcp_out_queue`, `kcp_dropped`,
+`kcp_stalls`, `kcp_ack_stalls`, время простоя входящего потока/ACK и
+backpressure. При заполненном KCP-окне без входящих данных или ACK-прогресса
 manager/client запрашивает ограниченное переподключение carrier вместо вечного
 зависания.
 

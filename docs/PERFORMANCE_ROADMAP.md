@@ -178,6 +178,39 @@ VLESS не исправляет loss, pacing или head-of-line blocking на V
 - METRICS содержит throughput, KCP output queue, drops, backpressure,
   `kcp_stalls` и `kcp_input_idle_ms`.
 
+## Полевой результат `0.5.0-alpha.2`: односторонний stall
+
+Matching Android-клиент и сервер успешно согласовали `wire=1`, `caps=0x3` и
+KCP. Во время Speedtest входящий поток продолжал получать VP8/KCP без пауз, но
+обратное направление перестало подтверждаться:
+
+| Uptime | RX, kbps | TX, kbps | WaitSnd | input idle |
+|---:|---:|---:|---:|---:|
+| 30s | 32.6 | 19.8 | 7/1024 | 11 ms |
+| 40s | 703.3 | 33.3 | 516/1024 | 0 ms |
+| 50s | 1655.0 | 20.3 | 745/1024 | 0 ms |
+| 1m00s | 1704.6 | 12.7 | 839/1024 | 7 ms |
+| 1m10s | 1135.5 | 10.8 | 972/1024 | 4 ms |
+| 1m20s | 1514.8 | 0.5 | 932/1024 | 14 ms |
+
+Новые `CONNECT` не получили `CONNECT_OK` за 20 секунд, поэтому upload-фаза не
+началась. Текущий stall detector не сработал закономерно: он ищет полностью
+молчаливый carrier, а здесь server→Joiner продолжал работать.
+
+Реализовано для `0.5.0-alpha.3`:
+
+1. ACK/UNA progress и его возраст видны отдельно от `last input`;
+2. 75% окна без ACK progress 15 секунд считается односторонним stall и вызывает
+   штатный reconnect;
+3. KCP profile передаётся Creator → Joiner после capability handshake, Joiner
+   выбирает более безопасный профиль;
+4. отдельная negotiated reliable KCP lane переносит CONNECT и CONNECT_OK/ERR,
+   обходя backlog bulk conversation.
+
+Следующий P2 — DNS control message, per-flow queues, DRR, лимит UDP fan-out и
+приоритет коротких интерактивных потоков. `CLOSE` нельзя просто переносить в
+priority lane: сначала нужны sequence/drain semantics, иначе он обгонит DATA.
+
 ## Рекомендуемый первый кодовый спринт
 
 1. Metrics + benchmark harness.

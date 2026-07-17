@@ -122,6 +122,27 @@ Creator после demux самостоятельно открывает TCP/UDP
    или утечки вне туннеля.
 7. Server и клиенты не имеют обязательного version/capability negotiation.
 
+Дополнение после matching Android-теста `0.5.0-alpha.2`: двунаправленный
+WebRTC carrier может деградировать только в одну сторону. При живом
+server→Joiner потоке метрика общего `last input` остаётся свежей, хотя
+Joiner→server ACK-прогресс прекращается и `WaitSnd` приближается к пределу.
+Следовательно, health-check должен учитывать отдельный прогресс ACK/UNA для
+исходящего направления, а не только наличие любых входящих KCP packets.
+
+В `0.5.0-alpha.3` capability `priority_control` включает вторую KCP
+conversation с marker `WKC2`. Через неё проходят `CONNECT` и
+`CONNECT_OK/ERR`, поэтому создание нового TCP-потока больше не стоит за bulk
+`MsgData` основной `WKC1` conversation. `CLOSE` пока намеренно остаётся в
+основной ordered lane: без drain/sequence semantics приоритетный CLOSE мог бы
+обогнать последние DATA и обрезать поток. DNS priority и полноценный fair mux
+остаются следующим этапом.
+
+Тот же релиз считает прогресс KCP ACK/UNA отдельно от любых входящих packets.
+При устойчивом заполнении 75% send window без ACK-прогресса в течение 15 секунд
+запрашивается штатный reconnect carrier. Creator передаёт выбранный KCP profile
+после handshake, а Joiner применяет более безопасный из локального и серверного
+вариантов; Android `balanced` и server `fast` теперь дают effective `balanced`.
+
 ## Реализованный compatibility handshake
 
 В текущей ветке control plane mux расширен сообщениями:

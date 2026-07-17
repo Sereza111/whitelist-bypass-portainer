@@ -51,13 +51,50 @@ Portainer and a headless Joiner in Video mode.
   256 and fast 2048. A silent-stall detector requests carrier recovery;
   METRICS reports kbps, output queue, drops, backpressure and recoveries.
 
+## Latest matched field test (Android, 2026-07-17)
+
+Source: user-provided `relay (4).log`; do not commit the log itself because it
+contains destination addresses and session-adjacent runtime data.
+
+- Matching client `0.5.0-alpha.2` / commit `3a3f62f` negotiated wire 1 and
+  capabilities `0x3`; this was not a version mismatch or legacy fallback.
+- Android still hard-codes `--kcp-profile balanced`. Selecting `fast` in the
+  server profile therefore creates an asymmetric configuration; panel profile
+  settings are not currently propagated to Android.
+- The download carrier stayed alive: input KCP segments and VP8 frames kept
+  increasing, `kcp_input_idle_ms` stayed near zero, and `kcp_stalls=0`.
+- The reverse direction degraded: Joiner `kcp_wait_snd` rose from 7 to 516,
+  745, 839 and 972/1024 while Joiner TX fell to 0.5 kbps. New CONNECT messages
+  then timed out after 20 seconds and the Speedtest upload phase never began.
+- This is a one-way/ACK-progress stall, not the fully silent carrier stall that
+  the current detector handles. The existing condition (`WaitSnd` full AND no
+  inbound KCP input for 12s) cannot fire while server-to-client video continues.
+- The single ordered KCP conversation also gives CONNECT/DNS/control no way to
+  bypass delayed bulk segments. Per-flow scheduling above one KCP conversation
+  alone will not remove this transport-level head-of-line blocking.
+
+## Current transport status
+
+1. ACK/UNA progress is measured independently from inbound traffic. Sustained
+   `WaitSnd >= 75%` without progress requests a bounded carrier reconnect and
+   reports `kcp_ack_stalls` / `kcp_ack_idle_ms`.
+2. Creator sends its KCP profile after capability negotiation. Joiners select
+   the safer local/remote profile and log the effective value.
+3. Capability `priority_control` enables a second reliable KCP conversation for
+   CONNECT and CONNECT_OK/ERR. CLOSE deliberately remains ordered with bulk
+   data until drain/sequence semantics exist, so it cannot truncate a stream.
+4. Next: add reliable DNS control messages, bounded per-flow queues and DRR;
+   prioritize control/DNS/interactive flows and cap UDP fan-out.
+5. Add directional metrics: ACK/UNA progress, KCP RTT/RTO/retransmits,
+   per-direction carrier frames, per-class queued bytes, CONNECT p50/p95.
+6. Re-test Android with matching `balanced/balanced`, then controlled profiles
+   and pacing. Do not use Speedtest as the only benchmark: also run one bulk
+   download, one upload, and concurrent short HTTPS/DNS probes.
+
 ## Next implementation order
 
-1. Verify matching Windows artifact and server image CI from the same commit.
-2. Add a repeatable SOCKS-only benchmark and capture baseline metrics.
-3. Prototype negotiated reliable Video for VK and align KCP MTU/read sizes.
-4. Compare raw versus KCP Video under controlled loss.
-5. Measure balanced/stable/fast under loss, then add per-connection queues,
-   flow control and fair scheduling.
-6. Extract the existing VK bot process supervisor into `wlb-manager` only after
-   transport compatibility and metrics are in place.
+1. Ship and field-test ACK-progress recovery, profile negotiation and the
+   separate CONNECT lane together as `0.5.0-alpha.3`.
+2. Add per-flow queues, flow control and DRR with control/DNS priority.
+3. Capture repeatable directional Android and SOCKS-only benchmarks.
+4. Only then tune windows/pacing or prototype multi-track/QUIC alternatives.

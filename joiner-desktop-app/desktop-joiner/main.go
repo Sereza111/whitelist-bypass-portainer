@@ -277,13 +277,20 @@ func main() {
 			}
 			bridge.SetOnHandshake(func(result tunnel.HandshakeResult) {
 				if result.Supports(tunnel.CapabilityVideoKCP1) {
+					if result.Supports(tunnel.CapabilityPriorityControl) {
+						adaptive.EnablePriorityControl()
+					}
 					adaptive.EnableKCP()
 				} else {
 					adaptive.EnableRawCompatibility()
 				}
 			})
+			bridge.SetOnPeerKCPProfile(func(profile string) {
+				effective := adaptive.SetKCPProfile(tunnel.PreferSaferKCPProfile(*kcpProfile, profile))
+				log.Printf("[transport] negotiated KCP profile=%s", effective)
+			})
 			bridge.ConfigureHandshake(
-				tunnel.CapabilityMetricsV1|tunnel.CapabilityVideoKCP1,
+				tunnel.CapabilityMetricsV1|tunnel.CapabilityVideoKCP1|tunnel.CapabilityPriorityControl,
 				common.VP8BufSize,
 				tunnel.ReliabilityRawVP8,
 				trackCount,

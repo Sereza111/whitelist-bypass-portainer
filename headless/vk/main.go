@@ -761,14 +761,20 @@ func main() {
 				})
 				dataTunnel = adaptive
 				bridgeReadBuf = tunnel.AdaptiveKCPRelayReadBuf
-				capabilities |= tunnel.CapabilityVideoKCP1
+				capabilities |= tunnel.CapabilityVideoKCP1 | tunnel.CapabilityPriorityControl
 			}
 			rb := tunnel.NewRelayBridge(dataTunnel, "creator", bridgeReadBuf, log.Printf)
 			rb.SetUpstreamSocks(*upstreamSocks, *upstreamUser, *upstreamPass)
 			if adaptive != nil {
 				rb.SetOnHandshake(func(result tunnel.HandshakeResult) {
 					if result.Supports(tunnel.CapabilityVideoKCP1) {
+						if result.Supports(tunnel.CapabilityPriorityControl) {
+							adaptive.EnablePriorityControl()
+						}
 						adaptive.EnableKCP()
+						if result.Supports(tunnel.CapabilityPriorityControl) {
+							rb.SendKCPProfile(*kcpProfile)
+						}
 					} else {
 						adaptive.EnableRawCompatibility()
 					}

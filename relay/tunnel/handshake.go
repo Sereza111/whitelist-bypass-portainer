@@ -16,9 +16,10 @@ const (
 )
 
 const (
-	CapabilityMetricsV1      uint64 = 1 << 0
-	CapabilityVideoKCP1      uint64 = 1 << 1
-	CapabilityMuxFlowControl uint64 = 1 << 2
+	CapabilityMetricsV1       uint64 = 1 << 0
+	CapabilityVideoKCP1       uint64 = 1 << 1
+	CapabilityMuxFlowControl  uint64 = 1 << 2
+	CapabilityPriorityControl uint64 = 1 << 3
 )
 
 type ReliabilityMode byte

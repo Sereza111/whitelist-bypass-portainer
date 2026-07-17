@@ -84,8 +84,10 @@ type RelayBridge struct {
 	onPeerConfigMu sync.Mutex
 	onPeerConfig   func(fps, batch, trackCount int)
 
-	onConfigAckMu sync.Mutex
-	onConfigAck   func()
+	onConfigAckMu      sync.Mutex
+	onConfigAck        func()
+	onPeerKCPProfileMu sync.Mutex
+	onPeerKCPProfile   func(string)
 
 	handshakeMu         sync.Mutex
 	localHello          Hello
@@ -119,6 +121,16 @@ func (rb *RelayBridge) SetOnConfigAck(fn func()) {
 	rb.onConfigAckMu.Lock()
 	rb.onConfigAck = fn
 	rb.onConfigAckMu.Unlock()
+}
+
+func (rb *RelayBridge) SetOnPeerKCPProfile(fn func(string)) {
+	rb.onPeerKCPProfileMu.Lock()
+	rb.onPeerKCPProfile = fn
+	rb.onPeerKCPProfileMu.Unlock()
+}
+
+func (rb *RelayBridge) SendKCPProfile(profile string) {
+	rb.sendFrame(EncodeKCPProfile(profile), true)
 }
 
 func (rb *RelayBridge) SetOnHandshake(fn func(HandshakeResult)) {
@@ -178,11 +190,11 @@ func NewRelayBridgeWithAuth(tunnel DataTunnel, mode string, readBuf int, logFn f
 
 func NewRelayBridge(tunnel DataTunnel, mode string, readBuf int, logFn func(string, ...any)) *RelayBridge {
 	rb := &RelayBridge{
-		tunnel:  tunnel,
-		logFn:   logFn,
-		mode:    mode,
-		readBuf: readBuf,
-		ready:   make(chan struct{}),
+		tunnel:      tunnel,
+		logFn:       logFn,
+		mode:        mode,
+		readBuf:     readBuf,
+		ready:       make(chan struct{}),
 		startedAt:   time.Now(),
 		metricsStop: make(chan struct{}),
 	}
@@ -474,6 +486,19 @@ func (rb *RelayBridge) handleTunnelData(data []byte) {
 		}
 		if connID == ControlConnID && msgType == MsgHelloAck {
 			rb.handleHelloAck(payload)
+			return
+		}
+		if connID == ControlConnID && msgType == MsgKCPProfile {
+			profile, ok := DecodeKCPProfile(payload)
+			if !ok {
+				return
+			}
+			rb.onPeerKCPProfileMu.Lock()
+			cb := rb.onPeerKCPProfile
+			rb.onPeerKCPProfileMu.Unlock()
+			if cb != nil {
+				cb(profile)
+			}
 			return
 		}
 		if connID == ControlConnID && msgType == MsgConfig {
@@ -849,7 +874,7 @@ func (rb *RelayBridge) handleSOCKS(conn net.Conn) {
 	}
 	// Dial local/private addresses directly instead of tunneling to the creator,
 	// which cannot reach the joiner's local network. Disabled for now until
-	// there is a real use case for local network access through the proxy. So idk if 
+	// there is a real use case for local network access through the proxy. So idk if
 	// this is a bug or a feature
 	// if ip := net.ParseIP(hostOnly); ip != nil && !ip.IsGlobalUnicast() {
 	// 	rb.logFn("relay: SOCKS local dial %s", common.MaskAddr(host))

@@ -1,6 +1,7 @@
 package tunnel
 
 import (
+	"encoding/binary"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -25,9 +26,13 @@ const (
 	kcpStatsEvery       = 500
 	kcpOutputQueueDepth = 1024
 	kcpBackpressurePoll = 5 * time.Millisecond
+	kcpHighWaterPercent = 75
 )
 
-var kcpStallTimeout = 12 * time.Second
+var (
+	kcpStallTimeout       = 12 * time.Second
+	kcpAckProgressTimeout = 15 * time.Second
+)
 
 const (
 	KCPProfileFast     = "fast"
@@ -53,17 +58,21 @@ type KCPTunnel struct {
 	stallMu    sync.Mutex
 	onStall    func()
 
-	sentMessages      atomic.Uint64
-	deliveredMessages atomic.Uint64
-	sentBytes         atomic.Uint64
-	deliveredBytes    atomic.Uint64
-	outputSegments    atomic.Uint64
-	droppedSegments   atomic.Uint64
-	inputSegments     atomic.Uint64
-	backpressureNanos atomic.Uint64
-	lastInputUnixNano atomic.Int64
-	stallRecoveries   atomic.Uint64
-	stallNotified     atomic.Bool
+	sentMessages       atomic.Uint64
+	deliveredMessages  atomic.Uint64
+	sentBytes          atomic.Uint64
+	deliveredBytes     atomic.Uint64
+	outputSegments     atomic.Uint64
+	droppedSegments    atomic.Uint64
+	inputSegments      atomic.Uint64
+	backpressureNanos  atomic.Uint64
+	lastInputUnixNano  atomic.Int64
+	lastAckUnixNano    atomic.Int64
+	lastAckSequence    atomic.Uint32
+	highWaterUnixNano  atomic.Int64
+	stallRecoveries    atomic.Uint64
+	ackStallRecoveries atomic.Uint64
+	stallNotified      atomic.Bool
 }
 
 func NewKCPTunnel(inner DataTunnel, logFn func(string, ...any)) *KCPTunnel {
@@ -73,6 +82,10 @@ func NewKCPTunnel(inner DataTunnel, logFn func(string, ...any)) *KCPTunnel {
 }
 
 func newKCPTunnel(inner DataTunnel, segmentMTU int, logFn func(string, ...any)) *KCPTunnel {
+	return newKCPTunnelWithConversation(inner, segmentMTU, kcpConversationID, logFn)
+}
+
+func newKCPTunnelWithConversation(inner DataTunnel, segmentMTU int, conversationID uint32, logFn func(string, ...any)) *KCPTunnel {
 	t := &KCPTunnel{
 		inner:    inner,
 		logFn:    logFn,
@@ -80,7 +93,7 @@ func newKCPTunnel(inner DataTunnel, segmentMTU int, logFn func(string, ...any)) 
 		stopCh:   make(chan struct{}),
 		outputCh: make(chan []byte, kcpOutputQueueDepth),
 	}
-	t.kcp = kcp.NewKCP(kcpConversationID, func(buf []byte, size int) {
+	t.kcp = kcp.NewKCP(conversationID, func(buf []byte, size int) {
 		if size <= 0 {
 			return
 		}
@@ -96,7 +109,9 @@ func newKCPTunnel(inner DataTunnel, segmentMTU int, logFn func(string, ...any)) 
 		}
 	})
 	t.kcp.SetMtu(segmentMTU)
-	t.lastInputUnixNano.Store(time.Now().UnixNano())
+	now := time.Now().UnixNano()
+	t.lastInputUnixNano.Store(now)
+	t.lastAckUnixNano.Store(now)
 	t.SetProfile(KCPProfileBalanced)
 	inner.SetOnData(t.handleInnerData)
 	inner.SetOnClose(t.handleInnerClose)
@@ -198,9 +213,11 @@ func (t *KCPTunnel) handleInnerData(segment []byte) {
 	}
 	t.inputSegments.Add(1)
 	t.lastInputUnixNano.Store(time.Now().UnixNano())
-	t.stallNotified.Store(false)
+	ackSequence, hasAckProgress := kcpPacketAckProgress(segment)
 	t.mu.Lock()
+	waitSndBefore := t.kcp.WaitSnd()
 	t.kcp.Input(segment, kcp.IKCP_PACKET_REGULAR, true)
+	waitSndAfter := t.kcp.WaitSnd()
 	cb := t.onData
 	var messages [][]byte
 	if cb != nil {
@@ -222,7 +239,11 @@ func (t *KCPTunnel) handleInnerData(segment []byte) {
 		}
 	}
 	t.mu.Unlock()
-
+	sequenceAdvanced := hasAckProgress && advanceAtomicSequence(&t.lastAckSequence, ackSequence)
+	if sequenceAdvanced || waitSndAfter < waitSndBefore {
+		t.lastAckUnixNano.Store(time.Now().UnixNano())
+		t.stallNotified.Store(false)
+	}
 	if cb == nil {
 		return
 	}
@@ -233,27 +254,77 @@ func (t *KCPTunnel) handleInnerData(segment []byte) {
 	}
 }
 
+// kcpPacketAckProgress recognizes KCP ACK/UNA information without relying
+// on unexported kcp-go state. Any valid segment carries UNA; an ACK segment also
+// explicitly confirms one sequence number. Only a strictly newer sequence is
+// progress; repeated inbound bulk packets with the same UNA must not hide a
+// one-way acknowledgement stall.
+func kcpPacketAckProgress(packet []byte) (uint32, bool) {
+	const (
+		kcpHeaderSize = 24
+		kcpCommandACK = 82
+	)
+	var newest uint32
+	found := false
+	for len(packet) >= kcpHeaderSize {
+		cmd := packet[4]
+		sn := binary.LittleEndian.Uint32(packet[12:16])
+		una := binary.LittleEndian.Uint32(packet[16:20])
+		payloadSize := int(binary.LittleEndian.Uint32(packet[20:24]))
+		if payloadSize < 0 || payloadSize > len(packet)-kcpHeaderSize {
+			return 0, false
+		}
+		candidate := una
+		candidateFound := una != 0
+		if cmd == kcpCommandACK && (!candidateFound || sequenceAfter(sn+1, candidate)) {
+			candidate = sn + 1
+			candidateFound = true
+		}
+		if candidateFound && (!found || sequenceAfter(candidate, newest)) {
+			newest = candidate
+			found = true
+		}
+		packet = packet[kcpHeaderSize+payloadSize:]
+	}
+	return newest, found
+}
+
+func sequenceAfter(next, current uint32) bool {
+	return int32(next-current) > 0
+}
+
+func advanceAtomicSequence(target *atomic.Uint32, next uint32) bool {
+	for current := target.Load(); sequenceAfter(next, current); current = target.Load() {
+		if target.CompareAndSwap(current, next) {
+			return true
+		}
+	}
+	return false
+}
+
 func (t *KCPTunnel) TunnelMetrics() TunnelMetrics {
 	t.mu.Lock()
 	waitSnd := t.kcp.WaitSnd()
 	profile := t.profile
 	t.mu.Unlock()
 	return TunnelMetrics{
-		Kind:                 "kcp-vp8-" + profile,
-		SentBytes:            t.sentBytes.Load(),
-		ReceivedBytes:        t.deliveredBytes.Load(),
-		SentFrames:           t.sentMessages.Load(),
-		ReceivedFrames:       t.deliveredMessages.Load(),
-		KCPInputSegments:     t.inputSegments.Load(),
-		KCPOutputSegments:    t.outputSegments.Load(),
-		KCPDroppedSegments:   t.droppedSegments.Load(),
-		KCPWaitSnd:           waitSnd,
-		KCPBackpressureNanos: t.backpressureNanos.Load(),
-		KCPOutputQueueDepth:  len(t.outputCh),
-		KCPOutputQueueCap:    cap(t.outputCh),
-		KCPStallRecoveries:   t.stallRecoveries.Load(),
-		KCPLastInputAgeNanos: uint64(time.Since(time.Unix(0, t.lastInputUnixNano.Load()))),
-		TrackCount:           1,
+		Kind:                  "kcp-vp8-" + profile,
+		SentBytes:             t.sentBytes.Load(),
+		ReceivedBytes:         t.deliveredBytes.Load(),
+		SentFrames:            t.sentMessages.Load(),
+		ReceivedFrames:        t.deliveredMessages.Load(),
+		KCPInputSegments:      t.inputSegments.Load(),
+		KCPOutputSegments:     t.outputSegments.Load(),
+		KCPDroppedSegments:    t.droppedSegments.Load(),
+		KCPWaitSnd:            waitSnd,
+		KCPBackpressureNanos:  t.backpressureNanos.Load(),
+		KCPOutputQueueDepth:   len(t.outputCh),
+		KCPOutputQueueCap:     cap(t.outputCh),
+		KCPStallRecoveries:    t.stallRecoveries.Load(),
+		KCPAckStallRecoveries: t.ackStallRecoveries.Load(),
+		KCPLastInputAgeNanos:  uint64(time.Since(time.Unix(0, t.lastInputUnixNano.Load()))),
+		KCPLastAckAgeNanos:    uint64(time.Since(time.Unix(0, t.lastAckUnixNano.Load()))),
+		TrackCount:            1,
 	}
 }
 
@@ -293,10 +364,29 @@ func (t *KCPTunnel) updateLoop() {
 			maxWaitSnd := t.maxWaitSnd
 			t.mu.Unlock()
 			lastInput := time.Unix(0, t.lastInputUnixNano.Load())
-			if waitSnd >= maxWaitSnd && time.Since(lastInput) >= kcpStallTimeout && t.stallNotified.CompareAndSwap(false, true) {
+			lastAck := time.Unix(0, t.lastAckUnixNano.Load())
+			highWater := maxWaitSnd * kcpHighWaterPercent / 100
+			now := time.Now()
+			if waitSnd < highWater {
+				t.highWaterUnixNano.Store(0)
+			} else if t.highWaterUnixNano.Load() == 0 {
+				t.highWaterUnixNano.CompareAndSwap(0, now.UnixNano())
+			}
+			highWaterStarted := t.highWaterUnixNano.Load()
+			highWaterSince := time.Unix(0, highWaterStarted)
+			ackProgressSince := lastAck
+			if highWaterSince.After(ackProgressSince) {
+				ackProgressSince = highWaterSince
+			}
+			silentStall := waitSnd >= maxWaitSnd && time.Since(lastInput) >= kcpStallTimeout
+			ackStall := waitSnd >= highWater && highWaterStarted != 0 && now.Sub(ackProgressSince) >= kcpAckProgressTimeout
+			if (silentStall || ackStall) && t.stallNotified.CompareAndSwap(false, true) {
 				t.stallRecoveries.Add(1)
+				if ackStall && !silentStall {
+					t.ackStallRecoveries.Add(1)
+				}
 				if t.logFn != nil {
-					t.logFn("kcptunnel: stalled wait_snd=%d no_input_for=%s; requesting carrier reconnect", waitSnd, time.Since(lastInput).Round(time.Second))
+					t.logFn("kcptunnel: stalled wait_snd=%d/%d no_input_for=%s no_ack_progress_for=%s; requesting carrier reconnect", waitSnd, maxWaitSnd, time.Since(lastInput).Round(time.Second), time.Since(lastAck).Round(time.Second))
 				}
 				t.stallMu.Lock()
 				onStall := t.onStall

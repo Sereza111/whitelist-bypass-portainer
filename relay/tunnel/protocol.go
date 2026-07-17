@@ -14,6 +14,7 @@ const (
 	MsgConfigAck  byte = 0x09
 	MsgHello      byte = 0x0A
 	MsgHelloAck   byte = 0x0B
+	MsgKCPProfile byte = 0x0C
 )
 
 const ControlConnID uint32 = 0
@@ -23,6 +24,50 @@ type DataTunnel interface {
 	SetOnData(fn func([]byte))
 	SetOnClose(fn func())
 	Reconfigure(fps, batch int)
+}
+
+func EncodeKCPProfile(profile string) []byte {
+	code := byte(2)
+	switch profile {
+	case KCPProfileStable:
+		code = 1
+	case KCPProfileFast:
+		code = 3
+	}
+	return EncodeFrame(ControlConnID, MsgKCPProfile, []byte{code})
+}
+
+func DecodeKCPProfile(payload []byte) (string, bool) {
+	if len(payload) != 1 {
+		return "", false
+	}
+	switch payload[0] {
+	case 1:
+		return KCPProfileStable, true
+	case 2:
+		return KCPProfileBalanced, true
+	case 3:
+		return KCPProfileFast, true
+	default:
+		return "", false
+	}
+}
+
+func PreferSaferKCPProfile(local, peer string) string {
+	rank := func(profile string) int {
+		switch profile {
+		case KCPProfileStable:
+			return 1
+		case KCPProfileFast:
+			return 3
+		default:
+			return 2
+		}
+	}
+	if rank(peer) < rank(local) {
+		return peer
+	}
+	return local
 }
 
 func EncodeVP8Config(fps, batch, trackCount int) []byte {

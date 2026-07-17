@@ -93,7 +93,7 @@ func TestRelayBridgeNegotiatesCapability(t *testing.T) {
 	defer left.Close()
 	defer right.Close()
 
-	left.ConfigureHandshake(CapabilityMetricsV1|CapabilityVideoKCP1, 1126, ReliabilityRawVP8, 1)
+	left.ConfigureHandshake(CapabilityMetricsV1|CapabilityVideoKCP1|CapabilityPriorityControl, 1126, ReliabilityRawVP8, 1)
 	right.ConfigureHandshake(CapabilityMetricsV1, 1126, ReliabilityRawVP8, 1)
 	left.sendHello()
 	right.sendHello()
@@ -108,6 +108,9 @@ func TestRelayBridgeNegotiatesCapability(t *testing.T) {
 		rightResult, rightOK := right.NegotiatedHandshake()
 		if leftOK && rightOK && leftResult.Capabilities == CapabilityMetricsV1 &&
 			rightResult.Capabilities == CapabilityMetricsV1 {
+			if leftResult.Supports(CapabilityPriorityControl) || rightResult.Supports(CapabilityPriorityControl) {
+				t.Fatal("priority control activated without support from both peers")
+			}
 			leftMetrics := left.MetricsSnapshot()
 			rightMetrics := right.MetricsSnapshot()
 			if leftMetrics.SentFrames == 0 || leftMetrics.ReceivedFrames == 0 ||

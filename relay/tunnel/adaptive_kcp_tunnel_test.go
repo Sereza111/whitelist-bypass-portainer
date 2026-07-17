@@ -63,6 +63,171 @@ func TestAdaptiveKCPProfiles(t *testing.T) {
 	}
 }
 
+func TestPreferSaferKCPProfile(t *testing.T) {
+	for _, test := range []struct{ local, peer, want string }{
+		{KCPProfileFast, KCPProfileBalanced, KCPProfileBalanced},
+		{KCPProfileBalanced, KCPProfileFast, KCPProfileBalanced},
+		{KCPProfileStable, KCPProfileFast, KCPProfileStable},
+		{KCPProfileFast, KCPProfileStable, KCPProfileStable},
+	} {
+		if got := PreferSaferKCPProfile(test.local, test.peer); got != test.want {
+			t.Fatalf("PreferSaferKCPProfile(%q, %q)=%q want %q", test.local, test.peer, got, test.want)
+		}
+	}
+}
+
+func TestKCPProfileEncoding(t *testing.T) {
+	for _, want := range []string{KCPProfileStable, KCPProfileBalanced, KCPProfileFast} {
+		frame := EncodeKCPProfile(want)
+		decoded := false
+		DecodeFrames(frame, func(connID uint32, msgType byte, payload []byte) {
+			if connID != ControlConnID || msgType != MsgKCPProfile {
+				t.Fatalf("unexpected profile frame conn=%d type=%d", connID, msgType)
+			}
+			got, ok := DecodeKCPProfile(payload)
+			if !ok || got != want {
+				t.Fatalf("profile decode=(%q, %t), want (%q, true)", got, ok, want)
+			}
+			decoded = true
+		})
+		if !decoded {
+			t.Fatalf("profile %q frame was not decoded", want)
+		}
+	}
+	for _, payload := range [][]byte{nil, {}, {0}, {4}, {1, 2}} {
+		if got, ok := DecodeKCPProfile(payload); ok {
+			t.Fatalf("malformed profile %v decoded as %q", payload, got)
+		}
+	}
+}
+
+func TestKCPPacketAckProgressDoesNotAdvanceOnRepeatedUNA(t *testing.T) {
+	packet := make([]byte, 24)
+	packet[4] = 81 // PUSH; UNA still acknowledges earlier outbound segments.
+	binary.LittleEndian.PutUint32(packet[16:20], 42)
+	sequence, ok := kcpPacketAckProgress(packet)
+	if !ok || sequence != 42 {
+		t.Fatalf("ack progress=(%d, %t), want (42, true)", sequence, ok)
+	}
+	var target atomic.Uint32
+	if !advanceAtomicSequence(&target, sequence) {
+		t.Fatal("first UNA did not advance acknowledgement progress")
+	}
+	if advanceAtomicSequence(&target, sequence) {
+		t.Fatal("repeated UNA incorrectly counted as acknowledgement progress")
+	}
+	if !advanceAtomicSequence(&target, sequence+1) {
+		t.Fatal("newer UNA did not advance acknowledgement progress")
+	}
+	if !sequenceAfter(0, ^uint32(0)) {
+		t.Fatal("sequence comparison does not handle uint32 wrap")
+	}
+}
+
+func TestPriorityCarrierSendsPriorityBeforeQueuedNormalData(t *testing.T) {
+	inner := &blockingSendTunnel{entered: make(chan struct{}), release: make(chan struct{}), sent: make(chan byte, 3)}
+	carrier := newPriorityCarrier(inner)
+	defer carrier.Stop()
+
+	carrier.SendNormal([]byte{1})
+	select {
+	case <-inner.entered:
+	case <-time.After(time.Second):
+		t.Fatal("first normal send did not reach carrier")
+	}
+	carrier.SendNormal([]byte{2})
+	carrier.SendPriority([]byte{9})
+	close(inner.release)
+
+	got := make([]byte, 0, 3)
+	for len(got) < 3 {
+		select {
+		case value := <-inner.sent:
+			got = append(got, value)
+		case <-time.After(time.Second):
+			t.Fatalf("carrier output stopped at %v", got)
+		}
+	}
+	if !bytes.Equal(got, []byte{1, 9, 2}) {
+		t.Fatalf("carrier order=%v, want [1 9 2]", got)
+	}
+}
+
+func TestCloseRemainsOrderedWithBulkData(t *testing.T) {
+	if isPriorityMuxFrame(EncodeFrame(7, MsgClose, nil)) {
+		t.Fatal("CLOSE must not overtake preceding stream data")
+	}
+}
+
+func TestKCPProfileUsesReliableControlLane(t *testing.T) {
+	leftRaw, rightRaw := newMemoryTunnelPair()
+	left := NewAdaptiveKCPTunnel(leftRaw, func(string, ...any) {})
+	right := NewAdaptiveKCPTunnel(rightRaw, func(string, ...any) {})
+	defer left.Stop()
+	defer right.Stop()
+	left.EnablePriorityControl()
+	right.EnablePriorityControl()
+	left.EnableKCP()
+	right.EnableKCP()
+
+	received := make(chan string, 1)
+	right.SetOnData(func(data []byte) {
+		DecodeFrames(data, func(_ uint32, msgType byte, payload []byte) {
+			if msgType == MsgKCPProfile {
+				if profile, ok := DecodeKCPProfile(payload); ok {
+					received <- profile
+				}
+			}
+		})
+	})
+	left.SendData(EncodeKCPProfile(KCPProfileStable))
+	select {
+	case profile := <-received:
+		if profile != KCPProfileStable {
+			t.Fatalf("profile=%q, want stable", profile)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("profile was not delivered over control KCP")
+	}
+	if metrics := left.TunnelMetrics(); metrics.KCPControlSentFrames == 0 {
+		t.Fatalf("profile bypassed control KCP: %#v", metrics)
+	}
+}
+
+func TestAdaptiveKCPPriorityControlBypassesBulkBacklog(t *testing.T) {
+	leftRaw, rightRaw := newMemoryTunnelPair()
+	left := NewAdaptiveKCPTunnel(leftRaw, func(string, ...any) {})
+	right := NewAdaptiveKCPTunnel(rightRaw, func(string, ...any) {})
+	defer left.Stop()
+	defer right.Stop()
+	left.EnablePriorityControl()
+	right.EnablePriorityControl()
+	left.EnableKCP()
+	right.EnableKCP()
+
+	received := make(chan byte, 8)
+	right.SetOnData(func(data []byte) {
+		DecodeFrames(data, func(_ uint32, msgType byte, _ []byte) { received <- msgType })
+	})
+	left.SendData(EncodeFrame(7, MsgData, []byte("bulk")))
+	left.SendData(EncodeFrame(8, MsgConnect, []byte("example.test:443")))
+
+	seen := map[byte]bool{}
+	deadline := time.After(2 * time.Second)
+	for len(seen) < 2 {
+		select {
+		case msgType := <-received:
+			seen[msgType] = true
+		case <-deadline:
+			t.Fatalf("priority lane did not deliver both frames: %#v", seen)
+		}
+	}
+	metrics := left.TunnelMetrics()
+	if metrics.KCPControlSentFrames == 0 {
+		t.Fatalf("priority CONNECT did not use control KCP: %#v", metrics)
+	}
+}
+
 func TestAdaptiveKCPRecoversFromThreePercentLoss(t *testing.T) {
 	leftRaw, rightRaw := newLossyTunnelPair(33)
 	logFn := func(string, ...any) {}
@@ -139,6 +304,38 @@ func TestAdaptiveKCPRequestsRecoveryWhenCarrierSilentlyStalls(t *testing.T) {
 	}
 }
 
+func TestAdaptiveKCPRequestsRecoveryWithoutAckProgress(t *testing.T) {
+	previousTimeout := kcpAckProgressTimeout
+	kcpAckProgressTimeout = 60 * time.Millisecond
+	defer func() { kcpAckProgressTimeout = previousTimeout }()
+
+	leftRaw, rightRaw := newOneWayTunnelPair()
+	left := NewAdaptiveKCPTunnel(leftRaw, func(string, ...any) {})
+	right := NewAdaptiveKCPTunnel(rightRaw, func(string, ...any) {})
+	defer left.Stop()
+	defer right.Stop()
+	left.EnableKCP()
+	right.EnableKCP()
+
+	recovery := make(chan struct{}, 1)
+	left.SetOnStall(func() { recovery <- struct{}{} })
+	go func() {
+		payload := EncodeFrame(9, MsgData, make([]byte, AdaptiveKCPRelayReadBuf))
+		for i := 0; i < kcpBalancedWindow; i++ {
+			left.SendData(payload)
+		}
+	}()
+
+	select {
+	case <-recovery:
+	case <-time.After(3 * time.Second):
+		t.Fatal("one-way ACK stall did not request recovery")
+	}
+	if got := left.TunnelMetrics().KCPAckStallRecoveries; got != 1 {
+		t.Fatalf("ack stall recoveries=%d, want 1", got)
+	}
+}
+
 func expectTunnelPayload(t *testing.T, ch <-chan []byte, want []byte) {
 	t.Helper()
 	select {
@@ -160,6 +357,33 @@ type lossyMemoryTunnel struct {
 	dropEvery uint64
 	seen      atomic.Uint64
 	dropped   atomic.Uint64
+}
+
+type blockingSendTunnel struct {
+	once    sync.Once
+	entered chan struct{}
+	release chan struct{}
+	sent    chan byte
+}
+
+func (t *blockingSendTunnel) SendData(data []byte) {
+	t.once.Do(func() {
+		close(t.entered)
+		<-t.release
+	})
+	t.sent <- data[0]
+}
+
+func (*blockingSendTunnel) SetOnData(func([]byte)) {}
+func (*blockingSendTunnel) SetOnClose(func())      {}
+func (*blockingSendTunnel) Reconfigure(int, int)   {}
+
+func newOneWayTunnelPair() (*lossyMemoryTunnel, *lossyMemoryTunnel) {
+	left, right := newLossyTunnelPair(0)
+	// Drop every framed KCP packet travelling from right to left. The forward
+	// carrier remains alive, reproducing the asymmetric Android field failure.
+	left.dropEvery = 1
+	return left, right
 }
 
 func newLossyTunnelPair(dropEvery uint64) (*lossyMemoryTunnel, *lossyMemoryTunnel) {
