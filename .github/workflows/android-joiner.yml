@@ -77,6 +77,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          native_log="${RUNNER_TEMP}/android-native-build.log"
+          exec 3>&1 4>&2
+          exec > >(tee "${native_log}") 2>&1
+          report_native_failure() {
+            status=$?
+            if [[ ${status} -ne 0 ]]; then
+              message="$(tail -n 30 "${native_log}")"
+              message="${message//'%'/'%25'}"
+              message="${message//$'\r'/'%0D'}"
+              message="${message//$'\n'/'%0A'}"
+              echo "::error file=.github/workflows/android-joiner.yml,title=Android native build::${message}" >&3
+            fi
+            return ${status}
+          }
+          trap report_native_failure EXIT
           export ANDROID_NDK_HOME="${ANDROID_SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}"
           toolchain="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
           ldflags="-s -w -X whitelist-bypass/relay/common.Version=${BUILD_VERSION} -X whitelist-bypass/relay/common.BuildCommit=${BUILD_COMMIT} -X whitelist-bypass/relay/common.BuildTime=${BUILD_TIME}"
@@ -145,4 +160,3 @@ jobs:
           files: |
             prebuilts/*.apk
             prebuilts/*.sha256
-
