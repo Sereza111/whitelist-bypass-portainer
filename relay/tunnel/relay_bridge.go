@@ -420,14 +420,14 @@ func (rb *RelayBridge) handleHelloAck(payload []byte) {
 		return
 	}
 	var peer Hello
-	if rb.peerHello != nil {
+	if rb.peerHello != nil && rb.peerHello.Nonce == ack.ResponderNonce {
 		peer = *rb.peerHello
-		if peer.Nonce != ack.ResponderNonce {
-			rb.handshakeMu.Unlock()
-			rb.logFn("relay: ignored protocol hello ack with unexpected responder nonce")
-			return
-		}
 	} else {
+		// Hello and HelloAck travel over an asynchronous carrier and can be
+		// reordered. EchoNonce already proves that this Ack answers our current
+		// Hello, so do not reject a valid negotiation merely because peerHello
+		// still belongs to the previous generation. A later Hello will enrich
+		// the peer build metadata.
 		peer.Nonce = ack.ResponderNonce
 	}
 	rb.handshakeMu.Unlock()

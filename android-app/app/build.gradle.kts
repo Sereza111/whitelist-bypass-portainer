@@ -4,7 +4,7 @@ plugins {
 }
 
 val versionBuild = System.getenv("BUILD_NUMBER")?.toIntOrNull() ?: 0
-val buildVersion = System.getenv("BUILD_VERSION") ?: "0.5.0-alpha.1"
+val buildVersion = System.getenv("BUILD_VERSION") ?: "0.5.0-alpha.2"
 
 android {
     namespace = "bypass.whitelist"

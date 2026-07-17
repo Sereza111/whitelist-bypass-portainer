@@ -98,7 +98,11 @@ func TestRelayBridgeNegotiatesCapability(t *testing.T) {
 	left.sendHello()
 	right.sendHello()
 
-	deadline := time.Now().Add(500 * time.Millisecond)
+	// NewRelayBridge starts with a baseline Hello before callers can apply
+	// feature-specific capabilities. The configured generation retries after
+	// one second, so allow the same bounded recovery path that production uses
+	// instead of depending on goroutine delivery order in memoryTunnel.
+	deadline := time.Now().Add(4 * time.Second)
 	for time.Now().Before(deadline) {
 		leftResult, leftOK := left.NegotiatedHandshake()
 		rightResult, rightOK := right.NegotiatedHandshake()

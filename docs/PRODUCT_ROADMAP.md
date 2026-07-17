@@ -43,7 +43,7 @@
 
 **Статус:** REST CRUD профилей, несколько subprocess, persistent JSON,
 bounded logs, healthcheck, process-group shutdown и общий/per-client limits
-реализованы в `0.5.0-alpha.1`. SQLite, orphan history и structured events
+реализованы в `0.5.0-alpha.2`. SQLite, orphan history и structured events
 остаются следующей итерацией.
 
 **Gate:** API создаёт, перечисляет и останавливает несколько Creator; restart
