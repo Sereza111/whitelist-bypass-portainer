@@ -22,24 +22,20 @@ Compose path: portainer-stack-panel.yml
 | `WLB_SECRETS_DIR` | `/opt/whitelist-bypass/secrets` |
 | `WLB_IMAGE` | `ghcr.io/sereza111/whitelist-bypass-portainer:latest` |
 
-По умолчанию порт публикуется только на loopback Docker host:
+Порт панели зафиксирован в Compose, чтобы развёртывание не зависело от
+переменных Portainer:
 
 ```text
-127.0.0.1:8080
+0.0.0.0:9200 -> container:8080
 ```
 
-Откройте SSH tunnel с ПК:
+После Deploy зайдите на `http://SERVER_IP:9200`. Браузер запросит
+`PANEL_USERNAME` и `PANEL_PASSWORD`. Разрешите входящий TCP/9200 в firewall
+VPS.
 
-```powershell
-ssh -L 8080:127.0.0.1:8080 root@SERVER_IP
-```
-
-Пока SSH открыт, зайдите на <http://127.0.0.1:8080>. Браузер запросит
-`PANEL_USERNAME` и `PANEL_PASSWORD`.
-
-Для прямой публикации можно задать `PANEL_BIND_IP=0.0.0.0`, но Basic Auth без
-HTTPS передаёт пароль без транспортного шифрования. Такой режим разрешайте
-только за TLS reverse proxy и firewall.
+Basic Auth без HTTPS передаёт пароль без транспортного шифрования. Для
+постоянного публичного доступа поставьте перед портом 9200 TLS reverse proxy и
+ограничьте доступ firewall.
 
 ## Cookies
 

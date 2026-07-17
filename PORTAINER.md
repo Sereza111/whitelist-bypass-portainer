@@ -61,8 +61,8 @@ ghcr.io/<github-user>/<repository>:latest
 ## Web panel (MVP)
 
 Для управления Direct Creator через браузер используйте
-`portainer-stack-panel.yml`. Панель по умолчанию доступна только на
-`127.0.0.1:8080` сервера и открывается через SSH tunnel. Инструкция и
+`portainer-stack-panel.yml`. Панель публикуется на фиксированном порту
+`0.0.0.0:9200` сервера. Инструкция и
 ограничения: [docs/PANEL.md](docs/PANEL.md).
 
 ## Сборка прямо в Portainer
