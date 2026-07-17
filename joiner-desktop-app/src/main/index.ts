@@ -152,6 +152,12 @@ function spawnJoiner(settings: JoinerSettings): { ok: boolean; error?: string } 
       send(IPC.STATUS, 'connected');
       retryCount = 0;
     }
+    if (text.includes('adaptive-kcp: reliable data path enabled')) {
+      send(IPC.STATUS, 'reliable');
+    }
+    if (text.includes('adaptive-kcp: legacy raw data path enabled')) {
+      send(IPC.STATUS, 'degraded');
+    }
     const captchaMatch = text.match(/STATUS:CAPTCHA:(\S+)/);
     if (captchaMatch) {
       openCaptchaWindow(captchaMatch[1]);

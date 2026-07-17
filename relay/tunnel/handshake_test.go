@@ -15,7 +15,7 @@ func TestHelloRoundTrip(t *testing.T) {
 		Reliability:       ReliabilityRawVP8,
 		TrackCount:        2,
 		Nonce:             [16]byte{1, 2, 3, 4},
-		BuildVersion:      "0.4.0-alpha.2+abcdef0",
+		BuildVersion:      "0.4.0-alpha.3+abcdef0",
 		BuildCommit:       "abcdef0123456789",
 	}
 	frame := EncodeHello(want)
@@ -70,6 +70,19 @@ func TestHelloAckRoundTrip(t *testing.T) {
 			t.Fatalf("hello ack mismatch\n got: %#v\nwant: %#v", got, want)
 		}
 	})
+}
+
+func TestDNSDestination(t *testing.T) {
+	for _, addr := range []string{"1.1.1.1:53", "[2606:4700:4700::1111]:53", "dns.example:53"} {
+		if !isDNSDestination(addr) {
+			t.Fatalf("DNS destination not recognized: %s", addr)
+		}
+	}
+	for _, addr := range []string{"1.1.1.1:443", "broken", "1.1.1.1"} {
+		if isDNSDestination(addr) {
+			t.Fatalf("non-DNS destination accepted: %s", addr)
+		}
+	}
 }
 
 func TestRelayBridgeNegotiatesCapability(t *testing.T) {

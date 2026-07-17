@@ -105,6 +105,8 @@ type RelayBridge struct {
 	recvControlFrames atomic.Uint64
 	sendWaitNanos     atomic.Uint64
 	maxSendWaitNanos  atomic.Uint64
+	dnsQueries        atomic.Uint64
+	dnsRetryFrames    atomic.Uint64
 }
 
 func (rb *RelayBridge) SetOnPeerConfig(fn func(fps, batch, trackCount int)) {
@@ -1019,8 +1021,32 @@ func (rb *RelayBridge) handleUDPAssociate(tcpConn net.Conn) {
 			copy(payload[1:], dstAddr)
 			copy(payload[1+len(dstAddr):], buf[headerLen:n])
 			rb.send(id, MsgUDP, payload)
+			if isDNSDestination(dstAddr) {
+				rb.dnsQueries.Add(1)
+				retryPayload := bytes.Clone(payload)
+				go rb.retryDNSQuery(id, retryPayload)
+			}
 		}
 	}()
+}
+
+func (rb *RelayBridge) retryDNSQuery(connID uint32, payload []byte) {
+	for _, delay := range []time.Duration{75 * time.Millisecond, 200 * time.Millisecond} {
+		time.Sleep(delay)
+		if rb.closed.Load() {
+			return
+		}
+		if _, ok := rb.udpClients.Load(connID); !ok {
+			return
+		}
+		rb.dnsRetryFrames.Add(1)
+		rb.send(connID, MsgUDP, payload)
+	}
+}
+
+func isDNSDestination(addr string) bool {
+	_, port, err := net.SplitHostPort(addr)
+	return err == nil && port == "53"
 }
 
 func ipAddrList(ips []net.IPAddr) string {

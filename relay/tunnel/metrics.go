@@ -40,6 +40,8 @@ type RelayMetrics struct {
 	NegotiatedWire      uint16        `json:"negotiatedWire"`
 	NegotiatedCaps      uint64        `json:"negotiatedCapabilities"`
 	LegacyCompatibility bool          `json:"legacyCompatibility"`
+	DNSQueries          uint64        `json:"dnsQueries"`
+	DNSRetryFrames      uint64        `json:"dnsRetryFrames"`
 	Tunnel              TunnelMetrics `json:"tunnel"`
 }
 
@@ -63,6 +65,8 @@ func (rb *RelayBridge) MetricsSnapshot() RelayMetrics {
 		MaxSendWaitNanos:  rb.maxSendWaitNanos.Load(),
 		ActiveTCP:         tcpConns,
 		ActiveUDP:         udpConns,
+		DNSQueries:        rb.dnsQueries.Load(),
+		DNSRetryFrames:    rb.dnsRetryFrames.Load(),
 	}
 	if result, ok := rb.NegotiatedHandshake(); ok {
 		snapshot.NegotiatedWire = result.SelectedWireVersion
@@ -84,12 +88,13 @@ func (rb *RelayBridge) metricsLoop() {
 			return
 		case <-ticker.C:
 			m := rb.MetricsSnapshot()
-			rb.logFn("METRICS mode=%s uptime=%s tx_bytes=%d rx_bytes=%d tx_frames=%d rx_frames=%d control_tx=%d control_rx=%d send_wait_ms=%.2f max_send_wait_ms=%.2f tcp=%d udp=%d wire=%d caps=0x%x legacy=%t tunnel=%s tunnel_tx=%d tunnel_rx=%d queue=%d/%d queue_max=%d kcp_wait_snd=%d",
+			rb.logFn("METRICS mode=%s uptime=%s tx_bytes=%d rx_bytes=%d tx_frames=%d rx_frames=%d control_tx=%d control_rx=%d send_wait_ms=%.2f max_send_wait_ms=%.2f tcp=%d udp=%d dns_queries=%d dns_retries=%d wire=%d caps=0x%x legacy=%t tunnel=%s tunnel_tx=%d tunnel_rx=%d queue=%d/%d queue_max=%d kcp_wait_snd=%d",
 				m.Mode, m.Uptime.Round(time.Second), m.SentBytes, m.ReceivedBytes,
 				m.SentFrames, m.ReceivedFrames, m.SentControlFrames, m.RecvControlFrames,
 				float64(m.SendWaitNanos)/float64(time.Millisecond),
 				float64(m.MaxSendWaitNanos)/float64(time.Millisecond),
-				m.ActiveTCP, m.ActiveUDP, m.NegotiatedWire, m.NegotiatedCaps,
+				m.ActiveTCP, m.ActiveUDP, m.DNSQueries, m.DNSRetryFrames,
+				m.NegotiatedWire, m.NegotiatedCaps,
 				m.LegacyCompatibility, m.Tunnel.Kind, m.Tunnel.SentBytes,
 				m.Tunnel.ReceivedBytes, m.Tunnel.QueueDepth, m.Tunnel.QueueCapacity,
 				m.Tunnel.MaxQueueDepth, m.Tunnel.KCPWaitSnd)

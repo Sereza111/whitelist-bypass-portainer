@@ -25,6 +25,8 @@ h1 { font-size: 14px; margin: 0; }
   background: #2c2e35; color: var(--muted);
 }
 .status[data-state="active"], .status[data-state="connected"] { background: var(--ok); color: #fff; }
+.status[data-state="reliable"] { background: #265f4b; color: #e9fff5; }
+.status[data-state="degraded"] { background: #6b4b18; color: #ffe7ad; }
 .status[data-state="stopped"] { background: #4a3030; color: #ffb4a8; }
 main { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px; min-height: 0; }
 section.form { display: flex; flex-direction: column; gap: 10px; }
