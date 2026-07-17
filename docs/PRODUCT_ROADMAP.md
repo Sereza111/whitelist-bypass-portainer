@@ -41,6 +41,11 @@
 - graceful process-group shutdown;
 - limits на concurrent sessions.
 
+**Статус:** REST CRUD профилей, несколько subprocess, persistent JSON,
+bounded logs, healthcheck, process-group shutdown и общий/per-client limits
+реализованы в `0.5.0-alpha.1`. SQLite, orphan history и structured events
+остаются следующей итерацией.
+
 **Gate:** API создаёт, перечисляет и останавливает несколько Creator; restart
 manager не теряет историю и корректно отмечает orphaned sessions.
 
@@ -55,6 +60,11 @@ manager не теряет историю и корректно отмечает 
 - live events и diagnostics;
 - reverse-proxy/TLS deployment profile;
 - audit log.
+
+**Статус:** gothic multi-session UI, profiles, provider status, start/stop,
+скрытая join link и diagnostics реализованы. Session auth/CSRF, encrypted
+vault, SSE/QR и audit log ещё не реализованы; публичный доступ требует TLS
+reverse proxy.
 
 **Gate:** panel не требует Docker socket, secrets отсутствуют в browser logs и
 API responses, security checklist пройден.

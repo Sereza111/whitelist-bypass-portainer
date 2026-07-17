@@ -107,6 +107,38 @@ func TestAdaptiveKCPRecoversFromThreePercentLoss(t *testing.T) {
 	}
 }
 
+func TestAdaptiveKCPRequestsRecoveryWhenCarrierSilentlyStalls(t *testing.T) {
+	previousTimeout := kcpStallTimeout
+	kcpStallTimeout = 50 * time.Millisecond
+	defer func() { kcpStallTimeout = previousTimeout }()
+
+	leftRaw, rightRaw := newLossyTunnelPair(1)
+	left := NewAdaptiveKCPTunnel(leftRaw, func(string, ...any) {})
+	right := NewAdaptiveKCPTunnel(rightRaw, func(string, ...any) {})
+	defer left.Stop()
+	defer right.Stop()
+	left.EnableKCP()
+	right.EnableKCP()
+
+	recovery := make(chan struct{}, 1)
+	left.SetOnStall(func() { recovery <- struct{}{} })
+	go func() {
+		payload := EncodeFrame(9, MsgData, make([]byte, AdaptiveKCPRelayReadBuf))
+		for i := 0; i < kcpBalancedWindow+64; i++ {
+			left.SendData(payload)
+		}
+	}()
+
+	select {
+	case <-recovery:
+	case <-time.After(2 * time.Second):
+		t.Fatal("stalled carrier did not request recovery")
+	}
+	if got := left.TunnelMetrics().KCPStallRecoveries; got != 1 {
+		t.Fatalf("stall recoveries=%d, want 1", got)
+	}
+}
+
 func expectTunnelPayload(t *testing.T, ch <-chan []byte, want []byte) {
 	t.Helper()
 	select {

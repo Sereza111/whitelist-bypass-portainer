@@ -3,98 +3,113 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>WLB Manager</title>
+    <title>WLB — Session Reliquary</title>
     <link rel="stylesheet" href="/app.css">
   </head>
   <body>
     <header class="masthead">
       <div class="brand-shell">
-        <div class="seal" aria-hidden="true">W</div>
+        <div class="seal" aria-hidden="true"><span>W</span></div>
         <div>
-          <p class="eyebrow">Whitelist Bypass / Control plane</p>
+          <p class="eyebrow">Whitelist Bypass · Multi-session control plane</p>
           <h1>Session Reliquary</h1>
-          <p class="lede">Carrier orchestration · private session forge</p>
+          <p class="lede">Клиенты, независимые звонки и живая диагностика транспорта</p>
         </div>
       </div>
-      <div id="state" class="state" data-state="loading">loading</div>
+      <div class="build-stamp"><span>build</span><strong id="build">loading</strong></div>
     </header>
 
     <main>
-      <section class="card controls">
-        <div class="section-title">
-          <span>01</span>
-          <h2>Creator profile</h2>
-        </div>
-        <div class="grid">
-          <label>Platform
-            <select id="mode">
-              <option value="vk">VK Video</option>
-              <option value="telemost">Telemost</option>
-              <option value="wbstream">WB Stream</option>
-              <option value="dion">Dion</option>
-            </select>
-          </label>
-          <label>Resources
-            <select id="resources">
-              <option value="moderate">Moderate</option>
-              <option value="default" selected>Default</option>
-              <option value="unlimited">Unlimited</option>
-            </select>
-          </label>
-          <label>VK reliability
-            <select id="videoReliability">
-              <option value="auto" selected>Auto / negotiated KCP</option>
-              <option value="raw">Legacy raw</option>
-            </select>
-          </label>
-          <label>KCP transport profile
-            <select id="kcpProfile">
-              <option value="stable">Stable / lossy SFU</option>
-              <option value="balanced" selected>Balanced / recommended</option>
-              <option value="fast">Fast / clean carrier</option>
-            </select>
-          </label>
-          <label>Display name
-            <input id="displayName" value="Headless" maxlength="80">
-          </label>
-        </div>
-        <label>Existing call link <span class="optional">optional</span>
-          <input id="existingLink" type="password" autocomplete="off" placeholder="Leave empty to create a call">
-        </label>
-        <div class="actions">
-          <button id="start" class="primary">Create session</button>
-          <button id="stop" class="secondary">Stop</button>
-        </div>
-        <p id="error" class="error" hidden></p>
+      <section class="stat-rail" aria-label="Состояние сервера">
+        <article><span>Активные сессии</span><strong id="activeCount">—</strong><small id="sessionLimit">из —</small></article>
+        <article><span>Клиентские профили</span><strong id="clientCount">—</strong><small>постоянные настройки</small></article>
+        <article><span>VK credentials</span><strong id="vkProvider">—</strong><small>read-only secret</small></article>
+        <article><span>Control plane</span><strong class="good">online</strong><small>порт 9200</small></article>
       </section>
 
-      <section class="card session">
-        <div class="section-title">
-          <span>02</span>
-          <h2>Session</h2>
-        </div>
-        <dl>
-          <div><dt>State</dt><dd id="sessionState">—</dd></div>
-          <div><dt>Mode</dt><dd id="sessionMode">—</dd></div>
-          <div><dt>KCP profile</dt><dd id="sessionKcpProfile">—</dd></div>
-          <div><dt>Build</dt><dd id="build">—</dd></div>
-        </dl>
-        <label>Join link
-          <div class="copy-row">
-            <input id="sessionLink" readonly type="password" placeholder="Waiting for Creator">
-            <button id="reveal" class="small">Reveal</button>
-            <button id="copy" class="small">Copy</button>
+      <div class="workspace">
+        <aside class="card forge">
+          <div class="section-title"><span>01</span><div><h2>Client Forge</h2><p>Создай отдельный профиль доступа</p></div></div>
+          <form id="profileForm">
+            <input id="editingId" type="hidden">
+            <label>Название клиента
+              <input id="profileName" maxlength="80" placeholder="Например: Phone / Laptop / Friend" required>
+            </label>
+            <div class="grid two">
+              <label>Провайдер
+                <select id="mode">
+                  <option value="vk">VK Video</option>
+                  <option value="telemost">Telemost</option>
+                  <option value="wbstream">WB Stream</option>
+                  <option value="dion">Dion</option>
+                </select>
+              </label>
+              <label>Лимит сессий
+                <select id="maxSessions">
+                  <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option>
+                </select>
+              </label>
+              <label>Ресурсы
+                <select id="resources">
+                  <option value="moderate">Moderate</option>
+                  <option value="default" selected>Default</option>
+                  <option value="unlimited">Unlimited</option>
+                </select>
+              </label>
+              <label>KCP профиль
+                <select id="kcpProfile">
+                  <option value="stable">Stable</option>
+                  <option value="balanced" selected>Balanced</option>
+                  <option value="fast">Fast</option>
+                </select>
+              </label>
+            </div>
+            <label>Имя в звонке
+              <input id="displayName" value="Headless" maxlength="80">
+            </label>
+            <label>Срок действия <span class="optional">необязательно</span>
+              <input id="expiresAt" type="datetime-local">
+            </label>
+            <label class="switch-row"><input id="enabled" type="checkbox" checked><span>Клиент активен</span></label>
+            <div class="actions">
+              <button class="primary" type="button" id="saveProfile">Сохранить профиль</button>
+              <button class="ghost" type="button" id="cancelEdit" hidden>Отмена</button>
+            </div>
+          </form>
+          <p id="error" class="error" hidden></p>
+        </aside>
+
+        <section class="card clients">
+          <div class="section-title"><span>02</span><div><h2>Client Registry</h2><p>Каждый запуск создаёт отдельную ссылку</p></div></div>
+          <label class="launch-link">Существующая ссылка для следующего запуска <span>необязательно</span>
+            <input id="launchExistingLink" type="password" autocomplete="off" placeholder="Оставь пустым для нового звонка">
+          </label>
+          <div id="profiles" class="profile-list"><p class="empty">Профили ещё не созданы</p></div>
+        </section>
+
+        <section class="card sessions">
+          <div class="section-title"><span>03</span><div><h2>Active Chambers</h2><p>Несколько Creator работают независимо</p></div></div>
+          <div id="sessions" class="session-grid"><p class="empty">Нет запущенных сессий</p></div>
+        </section>
+
+        <section class="card diagnostics">
+          <div class="section-title"><span>04</span><div><h2>Diagnostics Nave</h2><p id="selectedTitle">Выбери сессию</p></div></div>
+          <div id="detailEmpty" class="detail-empty">Открой карточку сессии, чтобы увидеть ссылку, скорость, очереди и журнал.</div>
+          <div id="detail" hidden>
+            <div class="link-vault">
+              <label>Секретная ссылка подключения
+                <div class="copy-row">
+                  <input id="sessionLink" readonly type="password">
+                  <button id="reveal" type="button" class="small">Показать</button>
+                  <button id="copy" type="button" class="small">Копировать</button>
+                </div>
+              </label>
+            </div>
+            <div id="metrics" class="metrics-grid"></div>
+            <pre id="logs">Ожидание событий…</pre>
           </div>
-        </label>
-      </section>
-
-      <section class="card logs">
-        <div class="section-title">
-          <span>03</span>
-          <h2>Live diagnostics</h2>
-        </div>
-        <pre id="logs">Waiting for manager…</pre>
-      </section>
+        </section>
+      </div>
     </main>
     <script src="/app.js"></script>
   </body>

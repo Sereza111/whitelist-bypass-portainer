@@ -24,7 +24,7 @@ import (
 const (
 	vkReconnectInitialDelay = time.Second
 	vkReconnectMaxDelay     = 16 * time.Second
-	vkMaxReconnectAttempts = 10
+	vkMaxReconnectAttempts  = 10
 )
 
 const vkTopologyDirect = "DIRECT"
@@ -274,6 +274,15 @@ func (h *VKHeadlessJoiner) closeTransport() {
 	if sfu != nil {
 		sfu.Close()
 	}
+}
+
+// RequestReconnect is used by transport health checks when the VK signaling
+// and PeerConnection still report "connected" but the media carrier has
+// stopped forwarding packets. Closing WebTransport reuses the normal bounded
+// reconnect loop and replaces the tunnel behind the persistent SOCKS listener.
+func (h *VKHeadlessJoiner) RequestReconnect(reason string) {
+	h.logFn("headless: transport recovery requested: %s", reason)
+	h.closeTransport()
 }
 
 func (h *VKHeadlessJoiner) joinCall() error {

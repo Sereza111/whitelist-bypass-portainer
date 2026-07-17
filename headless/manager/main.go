@@ -25,7 +25,7 @@ import (
 )
 
 var (
-	Version     = "0.4.0-alpha.5"
+	Version     = "0.5.0-alpha.1"
 	BuildCommit = "unknown"
 	BuildTime   = "unknown"
 )
@@ -43,18 +43,19 @@ type sessionRequest struct {
 }
 
 type sessionStatus struct {
-	State        string    `json:"state"`
-	Mode         string    `json:"mode"`
-	Resources    string    `json:"resources"`
-	DisplayName  string    `json:"displayName"`
-	Reliability  string    `json:"videoReliability"`
-	KCPProfile   string    `json:"kcpProfile"`
-	StartedAt    time.Time `json:"startedAt,omitempty"`
-	SessionLink  string    `json:"sessionLink,omitempty"`
-	ExitError    string    `json:"exitError,omitempty"`
-	BuildVersion string    `json:"buildVersion"`
-	BuildCommit  string    `json:"buildCommit"`
-	Logs         []string  `json:"logs"`
+	State        string            `json:"state"`
+	Mode         string            `json:"mode"`
+	Resources    string            `json:"resources"`
+	DisplayName  string            `json:"displayName"`
+	Reliability  string            `json:"videoReliability"`
+	KCPProfile   string            `json:"kcpProfile"`
+	StartedAt    time.Time         `json:"startedAt,omitempty"`
+	SessionLink  string            `json:"sessionLink,omitempty"`
+	ExitError    string            `json:"exitError,omitempty"`
+	BuildVersion string            `json:"buildVersion"`
+	BuildCommit  string            `json:"buildCommit"`
+	Logs         []string          `json:"logs"`
+	Metrics      map[string]string `json:"metrics,omitempty"`
 }
 
 type manager struct {
@@ -124,6 +125,10 @@ func (r *logRing) snapshot() []string {
 
 func newManager() *manager {
 	dataDir := envOr("DATA_DIR", "/data")
+	return newManagerAt(dataDir)
+}
+
+func newManagerAt(dataDir string) *manager {
 	return &manager{
 		binsDir:    envOr("BINS_DIR", "/opt/wlb/bin"),
 		secretsDir: envOr("SECRETS_DIR", "/run/secrets/wlb"),
@@ -227,7 +232,7 @@ func (m *manager) commandFor(req sessionRequest) (*exec.Cmd, error) {
 		args = append(args, "--upstream-pass", value)
 	}
 	cmd := exec.Command(binaryPath, args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	configureChildProcess(cmd)
 	return cmd, nil
 }
 
@@ -339,13 +344,13 @@ func (m *manager) stop() error {
 	m.mu.Unlock()
 
 	m.logs.add("[manager] stopping Creator pid=%d", pid)
-	_ = syscall.Kill(-pid, syscall.SIGTERM)
+	_ = signalChildProcess(cmd, false)
 	select {
 	case <-done:
 		return nil
 	case <-time.After(5 * time.Second):
 		m.logs.add("[manager] Creator did not stop in time; killing process group")
-		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		_ = signalChildProcess(cmd, true)
 		<-done
 		return nil
 	}
@@ -368,7 +373,44 @@ func (m *manager) status() sessionStatus {
 	}
 	m.mu.Unlock()
 	status.Logs = m.logs.snapshot()
+	status.Metrics = latestMetrics(status.Logs)
+	if status.State == "running" || status.State == "link-ready" {
+		status.State = deriveRuntimeState(status.State, status.Logs)
+	}
 	return status
+}
+
+func latestMetrics(lines []string) map[string]string {
+	for i := len(lines) - 1; i >= 0; i-- {
+		marker := strings.Index(lines[i], "METRICS ")
+		if marker < 0 {
+			continue
+		}
+		values := make(map[string]string)
+		for _, field := range strings.Fields(lines[i][marker+len("METRICS "):]) {
+			key, value, ok := strings.Cut(field, "=")
+			if ok && key != "" {
+				values[key] = value
+			}
+		}
+		return values
+	}
+	return nil
+}
+
+func deriveRuntimeState(fallback string, lines []string) string {
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := lines[i]
+		switch {
+		case strings.Contains(line, "stalled") || strings.Contains(line, "Rejoining"):
+			return "degraded"
+		case strings.Contains(line, "=== TUNNEL CONNECTED ===") || strings.Contains(line, "handshake status=ok"):
+			return "connected"
+		case strings.Contains(line, "CALL CREATED") || strings.Contains(line, "Wrote call link"):
+			return "waiting-for-client"
+		}
+	}
+	return fallback
 }
 
 func main() {
@@ -382,7 +424,11 @@ func main() {
 	}
 	log.Printf("[build] version=%s commit=%s built=%s", Version, BuildCommit, BuildTime)
 
-	mgr := newManager()
+	dataDir := envOr("DATA_DIR", "/data")
+	cp, err := newControlPlane(dataDir, envInt("MAX_SESSIONS", 4))
+	if err != nil {
+		log.Fatalf("control plane: %v", err)
+	}
 	webRoot, err := fs.Sub(webFiles, "web")
 	if err != nil {
 		log.Fatal(err)
@@ -392,31 +438,7 @@ func main() {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte("ok\n"))
 	})
-	mux.Handle("GET /api/status", requireAuth(username, password, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, mgr.status())
-	})))
-	mux.Handle("POST /api/start", requireAuth(username, password, sameOrigin(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
-		decoder := json.NewDecoder(r.Body)
-		decoder.DisallowUnknownFields()
-		var req sessionRequest
-		if err := decoder.Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
-		}
-		if err := mgr.start(req); err != nil {
-			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
-			return
-		}
-		writeJSON(w, http.StatusAccepted, mgr.status())
-	}))))
-	mux.Handle("POST /api/stop", requireAuth(username, password, sameOrigin(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		if err := mgr.stop(); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		writeJSON(w, http.StatusOK, mgr.status())
-	}))))
+	registerControlAPIRoutes(mux, cp, username, password, envOr("SECRETS_DIR", "/run/secrets/wlb"))
 	mux.Handle("/", requireAuth(username, password, http.FileServer(http.FS(webRoot))))
 
 	handler := securityHeaders(mux)
@@ -434,22 +456,39 @@ func main() {
 	}()
 
 	if strings.EqualFold(os.Getenv("AUTO_START"), "true") {
-		if err := mgr.start(sessionRequest{
-			Mode:             envOr("CREATOR_MODE", "vk"),
-			Resources:        envOr("RESOURCES", "default"),
-			DisplayName:      envOr("DISPLAY_NAME", "Headless"),
-			ExistingLink:     os.Getenv("EXISTING_LINK"),
-			VideoReliability: envOr("VIDEO_RELIABILITY", "auto"),
-			KCPProfile:       envOr("KCP_PROFILE", "balanced"),
-		}); err != nil {
-			mgr.logs.add("[manager] auto-start failed: %v", err)
+		var profile clientProfile
+		for _, candidate := range cp.listProfiles() {
+			if candidate.Name == "Autostart" {
+				profile = candidate
+				break
+			}
+		}
+		var createErr error
+		if profile.ID == "" {
+			enabled := true
+			profile, createErr = cp.createProfile(profileInput{
+				Name: "Autostart", Enabled: &enabled, MaxSessions: 1,
+				Config: sessionRequest{
+					Mode: envOr("CREATOR_MODE", "vk"), Resources: envOr("RESOURCES", "default"),
+					DisplayName:      envOr("DISPLAY_NAME", "Headless"),
+					VideoReliability: envOr("VIDEO_RELIABILITY", "auto"), KCPProfile: envOr("KCP_PROFILE", "balanced"),
+				},
+			})
+		}
+		if createErr == nil {
+			config := profile.Config
+			config.ExistingLink = os.Getenv("EXISTING_LINK")
+			_, createErr = cp.startSession(sessionInput{ClientID: profile.ID, Config: &config})
+		}
+		if createErr != nil {
+			log.Printf("[manager] auto-start failed: %v", createErr)
 		}
 	}
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 	<-sig
-	_ = mgr.stop()
+	cp.stopAll()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = server.Shutdown(ctx)

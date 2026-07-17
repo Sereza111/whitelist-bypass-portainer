@@ -756,6 +756,9 @@ func main() {
 			if *videoReliability == "auto" {
 				adaptive = tunnel.NewAdaptiveKCPTunnel(tun, log.Printf)
 				adaptive.SetKCPProfile(*kcpProfile)
+				adaptive.SetOnStall(func() {
+					bridge.requestReconnect("KCP acknowledgements stalled")
+				})
 				dataTunnel = adaptive
 				bridgeReadBuf = tunnel.AdaptiveKCPRelayReadBuf
 				capabilities |= tunnel.CapabilityVideoKCP1
@@ -787,4 +790,14 @@ func main() {
 		return ur
 	}
 	bridge.run(callInfo, cookieStr, cfg)
+}
+
+func (b *Bridge) requestReconnect(reason string) {
+	log.Printf("[vk-ws]    transport recovery requested: %s", reason)
+	b.mu.Lock()
+	sfu := b.sfu
+	b.mu.Unlock()
+	if sfu != nil {
+		sfu.Close()
+	}
 }

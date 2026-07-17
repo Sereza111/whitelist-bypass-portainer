@@ -24,13 +24,13 @@ import (
 	"syscall"
 	"time"
 
-	joinerCommon "whitelist-bypass/relay/pion/headless-joiner-common"
 	"whitelist-bypass/relay/common"
+	"whitelist-bypass/relay/desktoptun"
 	"whitelist-bypass/relay/dion"
 	"whitelist-bypass/relay/pion"
+	joinerCommon "whitelist-bypass/relay/pion/headless-joiner-common"
 	"whitelist-bypass/relay/tunnel"
 	"whitelist-bypass/relay/wbstream"
-	"whitelist-bypass/relay/desktoptun"
 )
 
 type statusEmitter struct{}
@@ -180,9 +180,9 @@ func main() {
 	tunReady := make(chan struct{})
 	var tunOnce sync.Once
 	var (
-		pendingMu      sync.Mutex
-		pending        []string
-		tunStarted     bool
+		pendingMu  sync.Mutex
+		pending    []string
+		tunStarted bool
 	)
 	bringUpTun := func() {
 		tunOnce.Do(func() {
@@ -245,8 +245,9 @@ func main() {
 	}
 
 	var (
-		bridge   *tunnel.RelayBridge
-		bridgeMu sync.Mutex
+		bridge                  *tunnel.RelayBridge
+		bridgeMu                sync.Mutex
+		requestCarrierReconnect func(string)
 	)
 	onConnected := func(t tunnel.DataTunnel) {
 		readBuf := common.VP8BufSize
@@ -260,6 +261,11 @@ func main() {
 			}
 			adaptive = tunnel.NewAdaptiveKCPTunnel(t, log.Printf)
 			adaptive.SetKCPProfile(*kcpProfile)
+			adaptive.SetOnStall(func() {
+				if requestCarrierReconnect != nil {
+					requestCarrierReconnect("KCP acknowledgements stalled")
+				}
+			})
 			t = adaptive
 			readBuf = tunnel.AdaptiveKCPRelayReadBuf
 		}
@@ -319,7 +325,7 @@ func main() {
 	case "vk":
 		selfHealReconnect = true
 		runVK(*link, *displayName, *tunnelMode, *vp8FPS, *vp8Batch, *dualTrack,
-			onConnected, addCandidate)
+			onConnected, addCandidate, func(fn func(string)) { requestCarrierReconnect = fn })
 	case "dion", "dn":
 		runDion(*link, *displayName, onConnected, addCandidate)
 	default:
@@ -444,6 +450,7 @@ func runTelemost(link, name string, fps, batch int,
 func runVK(link, name, mode string, fps, batch int, dualTrack bool,
 	onConnected func(tunnel.DataTunnel),
 	onCandidate func(int, string),
+	onReconnectReady func(func(string)),
 ) {
 	emitter := statusEmitter{}
 	statusFn := func(s string) { emitter.EmitStatus(s) }
@@ -477,6 +484,9 @@ func runVK(link, name, mode string, fps, batch int, dualTrack bool,
 	)
 	inner.OnConnected = onConnected
 	inner.OnRemoteCandidate = onCandidate
+	if onReconnectReady != nil {
+		onReconnectReady(inner.RequestReconnect)
+	}
 	go inner.RunWithParams(string(patched))
 }
 

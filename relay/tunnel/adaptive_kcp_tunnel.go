@@ -69,6 +69,10 @@ func (t *AdaptiveKCPTunnel) SetKCPProfile(profile string) string {
 	return t.kcp.SetProfile(profile)
 }
 
+func (t *AdaptiveKCPTunnel) SetOnStall(fn func()) {
+	t.kcp.SetOnStall(fn)
+}
+
 func (t *AdaptiveKCPTunnel) EnableRawCompatibility() bool {
 	if !t.mode.CompareAndSwap(0, 1) {
 		return false

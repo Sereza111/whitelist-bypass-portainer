@@ -4,8 +4,9 @@
 Direct Creator находятся в одном контейнере. Отдельный Creator Stack вместе с
 панелью не нужен.
 
-> Один запущенный Creator обслуживает один Joiner. Для телефона и ПК создавайте
-> разные сессии последовательно либо используйте будущий multi-session manager.
+> Один запущенный Creator обслуживает один Joiner. Для телефона и ПК создайте
+> отдельные клиентские профили: manager умеет держать несколько Creator
+> одновременно.
 
 ## Что требуется
 
@@ -30,11 +31,17 @@ Direct Creator находятся в одном контейнере. Отдел
 | `WLB_SECRETS_DIR` | `/opt/whitelist-bypass/secrets` |
 | `VIDEO_RELIABILITY` | `auto` |
 | `KCP_PROFILE` | `balanced` |
+| `MAX_SESSIONS` | `4` (подберите под CPU/RAM сервера) |
 | `AUTO_START` | `false` |
 
 5. Deploy stack.
 6. Проверьте Published Ports: `9200:8080`.
 7. Откройте `http://SERVER_IP:9200`.
+
+В `Client Forge` создайте профиль устройства. `Лимит сессий` ограничивает
+только этот профиль, а `MAX_SESSIONS` — весь сервер. Профиль можно отключить,
+ограничить по времени, изменить или удалить. Кнопка `Запустить` создаёт
+независимую сессию; ссылка и METRICS находятся в `Diagnostics Nave`.
 
 `portainer-stack-panel.yml` оставлен как совместимый alias того же
 развёртывания. Не запускайте одновременно `portainer-stack-direct.yml` и
@@ -65,7 +72,10 @@ Cookies, токены и join links нельзя коммитить в Git.
 
 В логах matching пары должны появиться `adaptive-kcp-active-<profile>` и
 `legacy=false`. METRICS показывает `tx_kbps`, `rx_kbps`,
-`kcp_wait_snd`, `kcp_out_queue`, `kcp_dropped` и backpressure.
+`kcp_wait_snd`, `kcp_out_queue`, `kcp_dropped`, `kcp_stalls`, время простоя
+входящего потока и backpressure. При заполненном KCP-окне без входящих данных
+manager/client запрашивает ограниченное переподключение carrier вместо вечного
+зависания.
 
 ## Дополнительные варианты
 

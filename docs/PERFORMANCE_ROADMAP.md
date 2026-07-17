@@ -168,8 +168,15 @@ VLESS не исправляет loss, pacing или head-of-line blocking на V
 - переполнение output queue учитывается как loss вместо удержания KCP mutex;
 - `WaitSnd` ограничивает producer и создаёт измеримый backpressure;
 - balanced/stable включают congestion control;
+- окна отправки/приёма увеличены до 256/1024/2048 для
+  stable/balanced/fast после измеренного заполнения `WaitSnd=256`;
+- bounded output queue увеличена до 1024 segments;
+- 12-секундный silent-stall detector срабатывает только при полном `WaitSnd`
+  и отсутствии входящих KCP segments, после чего запрашивает штатный reconnect
+  carrier;
 - доступны профили `stable`, `balanced`, `fast`;
-- METRICS содержит throughput, KCP output queue, drops и backpressure.
+- METRICS содержит throughput, KCP output queue, drops, backpressure,
+  `kcp_stalls` и `kcp_input_idle_ms`.
 
 ## Рекомендуемый первый кодовый спринт
 

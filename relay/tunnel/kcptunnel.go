@@ -12,15 +12,22 @@ import (
 const (
 	kcpConversationID = 0x77627374
 	kcpUpdateInterval = 10 * time.Millisecond
-	kcpBalancedWindow = 256
-	kcpFastWindow     = 512
-	kcpStableWindow   = 128
-	kcpSegmentMTU     = 1000
-	kcpReceiveBufSize = 128 * 1024
-	kcpStatsEvery     = 500
-	kcpOutputQueueDepth = 256
+	// Video carriers regularly see 100ms+ base RTT and multi-second RTT while
+	// an SFU reshapes a burst. The old 128/256 windows capped throughput to
+	// roughly window/RTT (the 256 profile measured 0.5-0.7 Mbps at 3-4s RTT).
+	// Keep the conservative profile available, but give normal profiles enough
+	// bandwidth-delay product for a transcontinental call.
+	kcpBalancedWindow   = 1024
+	kcpFastWindow       = 2048
+	kcpStableWindow     = 256
+	kcpSegmentMTU       = 1000
+	kcpReceiveBufSize   = 128 * 1024
+	kcpStatsEvery       = 500
+	kcpOutputQueueDepth = 1024
 	kcpBackpressurePoll = 5 * time.Millisecond
 )
+
+var kcpStallTimeout = 12 * time.Second
 
 const (
 	KCPProfileFast     = "fast"
@@ -38,11 +45,13 @@ type KCPTunnel struct {
 	onData  func([]byte)
 	onClose func()
 
-	stopCh   chan struct{}
-	stopOnce sync.Once
-	outputCh chan []byte
-	profile  string
+	stopCh     chan struct{}
+	stopOnce   sync.Once
+	outputCh   chan []byte
+	profile    string
 	maxWaitSnd int
+	stallMu    sync.Mutex
+	onStall    func()
 
 	sentMessages      atomic.Uint64
 	deliveredMessages atomic.Uint64
@@ -52,6 +61,9 @@ type KCPTunnel struct {
 	droppedSegments   atomic.Uint64
 	inputSegments     atomic.Uint64
 	backpressureNanos atomic.Uint64
+	lastInputUnixNano atomic.Int64
+	stallRecoveries   atomic.Uint64
+	stallNotified     atomic.Bool
 }
 
 func NewKCPTunnel(inner DataTunnel, logFn func(string, ...any)) *KCPTunnel {
@@ -62,10 +74,10 @@ func NewKCPTunnel(inner DataTunnel, logFn func(string, ...any)) *KCPTunnel {
 
 func newKCPTunnel(inner DataTunnel, segmentMTU int, logFn func(string, ...any)) *KCPTunnel {
 	t := &KCPTunnel{
-		inner:   inner,
-		logFn:   logFn,
-		recvBuf: make([]byte, kcpReceiveBufSize),
-		stopCh:  make(chan struct{}),
+		inner:    inner,
+		logFn:    logFn,
+		recvBuf:  make([]byte, kcpReceiveBufSize),
+		stopCh:   make(chan struct{}),
 		outputCh: make(chan []byte, kcpOutputQueueDepth),
 	}
 	t.kcp = kcp.NewKCP(kcpConversationID, func(buf []byte, size int) {
@@ -84,6 +96,7 @@ func newKCPTunnel(inner DataTunnel, segmentMTU int, logFn func(string, ...any)) 
 		}
 	})
 	t.kcp.SetMtu(segmentMTU)
+	t.lastInputUnixNano.Store(time.Now().UnixNano())
 	t.SetProfile(KCPProfileBalanced)
 	inner.SetOnData(t.handleInnerData)
 	inner.SetOnClose(t.handleInnerClose)
@@ -162,6 +175,15 @@ func (t *KCPTunnel) SetOnClose(fn func()) {
 	t.mu.Unlock()
 }
 
+// SetOnStall installs a recovery hook used by VK Creator/Joiner to close the
+// signaling transport and force a clean WebRTC rejoin. KCP cannot recover when
+// the SFU silently stops forwarding a still-"connected" video track.
+func (t *KCPTunnel) SetOnStall(fn func()) {
+	t.stallMu.Lock()
+	t.onStall = fn
+	t.stallMu.Unlock()
+}
+
 func (t *KCPTunnel) Reconfigure(fps, batch int) {
 	t.inner.Reconfigure(fps, batch)
 }
@@ -175,6 +197,8 @@ func (t *KCPTunnel) handleInnerData(segment []byte) {
 		return
 	}
 	t.inputSegments.Add(1)
+	t.lastInputUnixNano.Store(time.Now().UnixNano())
+	t.stallNotified.Store(false)
 	t.mu.Lock()
 	t.kcp.Input(segment, kcp.IKCP_PACKET_REGULAR, true)
 	cb := t.onData
@@ -215,19 +239,21 @@ func (t *KCPTunnel) TunnelMetrics() TunnelMetrics {
 	profile := t.profile
 	t.mu.Unlock()
 	return TunnelMetrics{
-		Kind:              "kcp-vp8-" + profile,
-		SentBytes:         t.sentBytes.Load(),
-		ReceivedBytes:     t.deliveredBytes.Load(),
-		SentFrames:        t.sentMessages.Load(),
-		ReceivedFrames:    t.deliveredMessages.Load(),
-		KCPInputSegments:  t.inputSegments.Load(),
-		KCPOutputSegments: t.outputSegments.Load(),
-		KCPDroppedSegments: t.droppedSegments.Load(),
-		KCPWaitSnd:        waitSnd,
+		Kind:                 "kcp-vp8-" + profile,
+		SentBytes:            t.sentBytes.Load(),
+		ReceivedBytes:        t.deliveredBytes.Load(),
+		SentFrames:           t.sentMessages.Load(),
+		ReceivedFrames:       t.deliveredMessages.Load(),
+		KCPInputSegments:     t.inputSegments.Load(),
+		KCPOutputSegments:    t.outputSegments.Load(),
+		KCPDroppedSegments:   t.droppedSegments.Load(),
+		KCPWaitSnd:           waitSnd,
 		KCPBackpressureNanos: t.backpressureNanos.Load(),
 		KCPOutputQueueDepth:  len(t.outputCh),
 		KCPOutputQueueCap:    cap(t.outputCh),
-		TrackCount:        1,
+		KCPStallRecoveries:   t.stallRecoveries.Load(),
+		KCPLastInputAgeNanos: uint64(time.Since(time.Unix(0, t.lastInputUnixNano.Load()))),
+		TrackCount:           1,
 	}
 }
 
@@ -264,7 +290,21 @@ func (t *KCPTunnel) updateLoop() {
 			t.mu.Lock()
 			t.kcp.Update()
 			waitSnd := t.kcp.WaitSnd()
+			maxWaitSnd := t.maxWaitSnd
 			t.mu.Unlock()
+			lastInput := time.Unix(0, t.lastInputUnixNano.Load())
+			if waitSnd >= maxWaitSnd && time.Since(lastInput) >= kcpStallTimeout && t.stallNotified.CompareAndSwap(false, true) {
+				t.stallRecoveries.Add(1)
+				if t.logFn != nil {
+					t.logFn("kcptunnel: stalled wait_snd=%d no_input_for=%s; requesting carrier reconnect", waitSnd, time.Since(lastInput).Round(time.Second))
+				}
+				t.stallMu.Lock()
+				onStall := t.onStall
+				t.stallMu.Unlock()
+				if onStall != nil {
+					go onStall()
+				}
+			}
 			ticks++
 			if ticks%kcpStatsEvery == 0 && t.logFn != nil {
 				t.logFn("kcptunnel: sent=%d delivered=%d out_segs=%d dropped_segs=%d in_segs=%d wait_snd=%d",

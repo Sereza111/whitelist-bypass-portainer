@@ -39,16 +39,17 @@ Portainer and a headless Joiner in Video mode.
   `.github/workflows/windows-joiner.yml`.
 - `MsgHello/MsgHelloAck` capability negotiation and periodic transport metrics
   are implemented. Unanswered handshakes fall back to legacy mode.
-- `headless/manager` and `portainer-stack-panel.yml` provide a single-session
-  authenticated panel MVP. It supervises Creator subprocesses without Docker
-  socket access; multi-session SQLite/vault/SSE work is still pending.
+- `headless/manager` and `portainer-stack-panel.yml` provide an authenticated
+  multi-session panel. Profiles persist in atomic JSON, every session has an
+  isolated Creator subprocess, link/log/metrics directory, and global plus
+  per-client limits. SQLite history/vault/SSE work is still pending.
 - `portainer-stack.yml` is now the recommended single deployment containing
   the panel and Creator supervisor. The VK community bot moved to
   `portainer-stack-bot.yml`; direct/panel stacks must not run together.
 - Adaptive KCP defaults to the balanced profile: bounded non-blocking output
-  queue, WaitSnd backpressure, 256 window and congestion control. Stable and
-  fast profiles are available; METRICS reports kbps, output queue, drops and
-  backpressure.
+  queue, WaitSnd backpressure, 1024 window and congestion control. Stable uses
+  256 and fast 2048. A silent-stall detector requests carrier recovery;
+  METRICS reports kbps, output queue, drops, backpressure and recoveries.
 
 ## Next implementation order
 

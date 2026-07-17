@@ -4,7 +4,7 @@ plugins {
 }
 
 val versionBuild = System.getenv("BUILD_NUMBER")?.toIntOrNull() ?: 0
-val buildVersion = System.getenv("BUILD_VERSION") ?: "0.4.0-alpha.5"
+val buildVersion = System.getenv("BUILD_VERSION") ?: "0.5.0-alpha.1"
 
 android {
     namespace = "bypass.whitelist"
@@ -16,7 +16,7 @@ android {
         applicationId = "bypass.whitelist"
         minSdk = 23
         targetSdk = 36
-        versionCode = 400_000 + (versionBuild % 100_000)
+        versionCode = 500_000 + (versionBuild % 100_000)
         versionName = buildVersion
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
