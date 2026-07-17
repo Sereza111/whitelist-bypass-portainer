@@ -15,7 +15,10 @@ RUN LDFLAGS="-s -w -X whitelist-bypass/relay/common.Version=${BUILD_VERSION} -X 
  && go -C /src/headless/telemost  build -trimpath -ldflags="$LDFLAGS" -o /out/headless-telemost-creator . \
  && go -C /src/headless/wbstream  build -trimpath -ldflags="$LDFLAGS" -o /out/headless-wbstream-creator . \
  && go -C /src/headless/dion      build -trimpath -ldflags="$LDFLAGS" -o /out/headless-dion-creator . \
- && go -C /src/headless/vk-bot    build -trimpath -ldflags="$LDFLAGS" -o /out/headless-vk-bot .
+ && go -C /src/headless/vk-bot    build -trimpath -ldflags="$LDFLAGS" -o /out/headless-vk-bot . \
+ && go -C /src/headless/manager   test ./... \
+ && MANAGER_LDFLAGS="-s -w -X main.Version=${BUILD_VERSION} -X main.BuildCommit=${BUILD_COMMIT} -X main.BuildTime=${BUILD_TIME}" \
+ && go -C /src/headless/manager   build -trimpath -ldflags="$MANAGER_LDFLAGS" -o /out/wlb-manager .
 
 FROM debian:bookworm-slim
 LABEL org.opencontainers.image.licenses="MIT" \
@@ -35,6 +38,7 @@ COPY --from=build /out/headless-telemost-creator  /opt/wlb/bin/
 COPY --from=build /out/headless-wbstream-creator  /opt/wlb/bin/
 COPY --from=build /out/headless-dion-creator      /opt/wlb/bin/
 COPY --from=build /out/headless-vk-bot            /usr/local/bin/
+COPY --from=build /out/wlb-manager                /usr/local/bin/
 
 COPY LICENSE NOTICE /usr/share/licenses/whitelist-bypass/
 COPY headless/docker/entrypoint.sh /usr/local/bin/wlb-entrypoint

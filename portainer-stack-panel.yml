@@ -1,0 +1,48 @@
+services:
+  manager:
+    image: ${WLB_IMAGE:-ghcr.io/sereza111/whitelist-bypass-portainer:latest}
+    container_name: whitelist-bypass-manager
+    pull_policy: always
+    restart: unless-stopped
+    stop_grace_period: 15s
+    entrypoint:
+      - /usr/bin/tini
+      - --
+      - /usr/local/bin/wlb-manager
+    command:
+      - --listen
+      - :8080
+    environment:
+      PANEL_USERNAME: ${PANEL_USERNAME:-admin}
+      PANEL_PASSWORD: ${PANEL_PASSWORD:?Set a strong PANEL_PASSWORD of at least 12 characters}
+      AUTO_START: ${AUTO_START:-false}
+      CREATOR_MODE: ${CREATOR_MODE:-vk}
+      RESOURCES: ${RESOURCES:-default}
+      DISPLAY_NAME: ${DISPLAY_NAME:-Headless}
+      EXISTING_LINK: ${EXISTING_LINK:-}
+      VK_PEER_ID: ${VK_PEER_ID:-}
+      VIDEO_RELIABILITY: ${VIDEO_RELIABILITY:-auto}
+      UPSTREAM_SOCKS: ${UPSTREAM_SOCKS:-}
+      UPSTREAM_USER: ${UPSTREAM_USER:-}
+      UPSTREAM_PASS: ${UPSTREAM_PASS:-}
+    ports:
+      - "${PANEL_BIND_IP:-127.0.0.1}:${PANEL_PORT:-8080}:8080"
+    volumes:
+      - whitelist-bypass-manager-data:/data
+      - type: bind
+        source: ${WLB_SECRETS_DIR:-/opt/whitelist-bypass/secrets}
+        target: /run/secrets/wlb
+        read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  whitelist-bypass-manager-data:
+    name: whitelist-bypass-manager-data

@@ -39,6 +39,9 @@ Portainer and a headless Joiner in Video mode.
   `.github/workflows/windows-joiner.yml`.
 - `MsgHello/MsgHelloAck` capability negotiation and periodic transport metrics
   are implemented. Unanswered handshakes fall back to legacy mode.
+- `headless/manager` and `portainer-stack-panel.yml` provide a single-session
+  authenticated panel MVP. It supervises Creator subprocesses without Docker
+  socket access; multi-session SQLite/vault/SSE work is still pending.
 
 ## Next implementation order
 

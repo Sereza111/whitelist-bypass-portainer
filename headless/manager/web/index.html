@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>WLB Manager</title>
+    <link rel="stylesheet" href="/app.css">
+  </head>
+  <body>
+    <header class="masthead">
+      <div>
+        <p class="eyebrow">Whitelist Bypass / Control plane</p>
+        <h1>Session Reliquary</h1>
+      </div>
+      <div id="state" class="state" data-state="loading">loading</div>
+    </header>
+
+    <main>
+      <section class="card controls">
+        <div class="section-title">
+          <span>01</span>
+          <h2>Creator profile</h2>
+        </div>
+        <div class="grid">
+          <label>Platform
+            <select id="mode">
+              <option value="vk">VK Video</option>
+              <option value="telemost">Telemost</option>
+              <option value="wbstream">WB Stream</option>
+              <option value="dion">Dion</option>
+            </select>
+          </label>
+          <label>Resources
+            <select id="resources">
+              <option value="moderate">Moderate</option>
+              <option value="default" selected>Default</option>
+              <option value="unlimited">Unlimited</option>
+            </select>
+          </label>
+          <label>VK reliability
+            <select id="videoReliability">
+              <option value="auto" selected>Auto / negotiated KCP</option>
+              <option value="raw">Legacy raw</option>
+            </select>
+          </label>
+          <label>Display name
+            <input id="displayName" value="Headless" maxlength="80">
+          </label>
+        </div>
+        <label>Existing call link <span class="optional">optional</span>
+          <input id="existingLink" type="password" autocomplete="off" placeholder="Leave empty to create a call">
+        </label>
+        <div class="actions">
+          <button id="start" class="primary">Create session</button>
+          <button id="stop" class="secondary">Stop</button>
+        </div>
+        <p id="error" class="error" hidden></p>
+      </section>
+
+      <section class="card session">
+        <div class="section-title">
+          <span>02</span>
+          <h2>Session</h2>
+        </div>
+        <dl>
+          <div><dt>State</dt><dd id="sessionState">—</dd></div>
+          <div><dt>Mode</dt><dd id="sessionMode">—</dd></div>
+          <div><dt>Build</dt><dd id="build">—</dd></div>
+        </dl>
+        <label>Join link
+          <div class="copy-row">
+            <input id="sessionLink" readonly type="password" placeholder="Waiting for Creator">
+            <button id="reveal" class="small">Reveal</button>
+            <button id="copy" class="small">Copy</button>
+          </div>
+        </label>
+      </section>
+
+      <section class="card logs">
+        <div class="section-title">
+          <span>03</span>
+          <h2>Live diagnostics</h2>
+        </div>
+        <pre id="logs">Waiting for manager…</pre>
+      </section>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>
