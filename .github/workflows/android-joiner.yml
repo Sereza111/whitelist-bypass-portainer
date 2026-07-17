@@ -94,7 +94,10 @@ jobs:
           trap report_native_failure EXIT
           export ANDROID_NDK_HOME="${ANDROID_SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}"
           toolchain="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
-          ldflags="-s -w -X whitelist-bypass/relay/common.Version=${BUILD_VERSION} -X whitelist-bypass/relay/common.BuildCommit=${BUILD_COMMIT} -X whitelist-bypass/relay/common.BuildTime=${BUILD_TIME}"
+          # anet intentionally links net.zoneCache on Android. Go 1.26 rejects
+          # that known dependency pattern unless the linkname check is disabled.
+          # Remove this workaround when github.com/wlynxg/anet/issues/11 ships.
+          ldflags="-s -w -checklinkname=0 -X whitelist-bypass/relay/common.Version=${BUILD_VERSION} -X whitelist-bypass/relay/common.BuildCommit=${BUILD_COMMIT} -X whitelist-bypass/relay/common.BuildTime=${BUILD_TIME}"
 
           go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20260508232728-bebd421c7fa8
           gomobile init
