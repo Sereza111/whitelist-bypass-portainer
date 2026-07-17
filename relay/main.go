@@ -22,6 +22,8 @@ func (s stdLogger) OnLog(msg string) {
 }
 
 func main() {
+	common.MaybePrintVersion()
+	common.LogBuild(log.Printf)
 	mode := flag.String("mode", "", "joiner or creator")
 	wsPort := flag.Int("ws-port", 9000, "WebSocket port for browser connection")
 	socksHost := flag.String("socks-host", common.SocksLocalhostIP, "SOCKS5 listen address (joiner mode; use 0.0.0.0 to expose on LAN)")
@@ -31,12 +33,16 @@ func main() {
 	upstreamSocks := flag.String("upstream-socks", "", "creator mode: route tunneled egress through this SOCKS5 proxy (host:port), e.g. a local VPN client")
 	upstreamUser := flag.String("upstream-user", "", "upstream SOCKS5 username")
 	upstreamPass := flag.String("upstream-pass", "", "upstream SOCKS5 password")
+	videoReliability := flag.String("video-reliability", "auto", "VK Video reliability: auto or raw")
 	flag.String("local-ip", "", "local IP address (unused, passed via hook)")
 	flag.Parse()
 
 	if *mode == "" {
 		fmt.Fprintf(os.Stderr, "Usage: relay --mode dc-joiner|dc-creator|vk-video-joiner|vk-video-creator|telemost-video-joiner|telemost-video-creator\n")
 		os.Exit(1)
+	}
+	if *videoReliability != "auto" && *videoReliability != "raw" {
+		log.Fatal("--video-reliability must be auto or raw")
 	}
 
 	cb := stdLogger{}
@@ -68,23 +74,51 @@ func main() {
 		rb.SetUpstreamSocks(*upstreamSocks, *upstreamUser, *upstreamPass)
 	}
 
-	newPersistentJoinerBridge := func(onConfigAck func()) func(tunnel.DataTunnel) {
+	newPersistentJoinerBridge := func(onConfigAck func(), negotiateVKVideoKCP bool) func(tunnel.DataTunnel) {
 		var (
 			bridge   *tunnel.RelayBridge
 			bridgeMu sync.Mutex
 		)
 		return func(tun tunnel.DataTunnel) {
 			readBuf := common.VP8BufSize
+			trackCount := 1
+			var adaptive *tunnel.AdaptiveKCPTunnel
 			if _, ok := tun.(*tunnel.DCTunnel); ok {
 				readBuf = common.DCBufSize
+			} else if negotiateVKVideoKCP && *videoReliability == "auto" {
+				if multi, ok := tun.(*tunnel.MultiTrackTunnel); ok {
+					trackCount = multi.SubTunnelCount()
+				}
+				adaptive = tunnel.NewAdaptiveKCPTunnel(tun, log.Printf)
+				tun = adaptive
+				readBuf = tunnel.AdaptiveKCPRelayReadBuf
 			}
 			bridgeMu.Lock()
 			defer bridgeMu.Unlock()
+			configureAdaptive := func() {
+				if adaptive == nil {
+					return
+				}
+				bridge.SetOnHandshake(func(result tunnel.HandshakeResult) {
+					if result.Supports(tunnel.CapabilityVideoKCP1) {
+						adaptive.EnableKCP()
+						return
+					}
+					adaptive.EnableRawCompatibility()
+				})
+				bridge.ConfigureHandshake(
+					tunnel.CapabilityMetricsV1|tunnel.CapabilityVideoKCP1,
+					common.VP8BufSize,
+					tunnel.ReliabilityRawVP8,
+					trackCount,
+				)
+			}
 			if bridge == nil {
 				bridge = tunnel.NewRelayBridgeWithAuth(tun, "joiner", readBuf, log.Printf, *socksUser, *socksPass)
 				if onConfigAck != nil {
 					bridge.SetOnConfigAck(onConfigAck)
 				}
+				configureAdaptive()
 				bridge.SetPersistentListener(true)
 				bridge.MarkReady()
 				addr := fmt.Sprintf("%s:%d", *socksHost, *socksPort)
@@ -99,6 +133,7 @@ func main() {
 			if onConfigAck != nil {
 				bridge.SetOnConfigAck(onConfigAck)
 			}
+			configureAdaptive()
 			log.Printf("relay: tunnel swapped after reconnect")
 		}
 	}
@@ -114,7 +149,7 @@ func main() {
 		startVideo(*mode, c, joinerCallback)
 	case "vk-headless-joiner":
 		c := android.NewVKHeadlessJoiner(log.Printf)
-		c.OnConnected = newPersistentJoinerBridge(nil)
+		c.OnConnected = newPersistentJoinerBridge(nil, true)
 		c.Run()
 	case "vk-video-creator":
 		c := pion.NewVKClient(log.Printf)
@@ -122,7 +157,7 @@ func main() {
 		startVideo(*mode, c, creatorCallback)
 	case "telemost-headless-joiner":
 		c := android.NewTelemostHeadlessJoiner(log.Printf)
-		c.OnConnected = newPersistentJoinerBridge(nil)
+		c.OnConnected = newPersistentJoinerBridge(nil, false)
 		c.Run()
 	case "telemost-video-joiner":
 		c := pion.NewTelemostClient(log.Printf)
@@ -134,11 +169,11 @@ func main() {
 		startVideo(*mode, c, creatorCallback)
 	case "wbstream-headless-joiner":
 		c := android.NewWBStreamHeadlessJoiner(log.Printf)
-		c.OnConnected = newPersistentJoinerBridge(c.MarkConfigAcked)
+		c.OnConnected = newPersistentJoinerBridge(c.MarkConfigAcked, false)
 		c.Run()
 	case "dion-headless-joiner":
 		c := android.NewDionHeadlessJoiner(log.Printf)
-		c.OnConnected = newPersistentJoinerBridge(nil)
+		c.OnConnected = newPersistentJoinerBridge(nil, false)
 		c.Run()
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown mode: %s\n", *mode)

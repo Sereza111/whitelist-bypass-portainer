@@ -1,0 +1,148 @@
+name: Build Android Joiner
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+    paths:
+      - 'android-app/**'
+      - 'relay/**'
+      - '.github/workflows/android-joiner.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-joiner-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ANDROID_API: '23'
+  ANDROID_COMPILE_SDK: '36'
+  ANDROID_BUILD_TOOLS: '36.0.0'
+  ANDROID_NDK_VERSION: '27.2.12479018'
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.1'
+          cache-dependency-path: relay/go.sum
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK and NDK
+        shell: bash
+        run: |
+          sdkmanager "platforms;android-${ANDROID_COMPILE_SDK}" \
+            "build-tools;${ANDROID_BUILD_TOOLS}" \
+            "ndk;${ANDROID_NDK_VERSION}"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Set build metadata
+        shell: bash
+        run: |
+          short_sha="${GITHUB_SHA::7}"
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="0.4.0-alpha.4+${short_sha}"
+          fi
+          echo "BUILD_VERSION=${version}" >> "${GITHUB_ENV}"
+          echo "BUILD_COMMIT=${GITHUB_SHA}" >> "${GITHUB_ENV}"
+          echo "BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "${GITHUB_ENV}"
+          echo "BUILD_NUMBER=${GITHUB_RUN_NUMBER}" >> "${GITHUB_ENV}"
+
+      - name: Test shared relay protocol
+        working-directory: relay
+        run: go test ./tunnel ./androidbind
+
+      - name: Build Android native components from source
+        working-directory: relay
+        shell: bash
+        run: |
+          set -euo pipefail
+          export ANDROID_NDK_HOME="${ANDROID_SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}"
+          toolchain="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          ldflags="-s -w -X whitelist-bypass/relay/common.Version=${BUILD_VERSION} -X whitelist-bypass/relay/common.BuildCommit=${BUILD_COMMIT} -X whitelist-bypass/relay/common.BuildTime=${BUILD_TIME}"
+
+          go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20260508232728-bebd421c7fa8
+          gomobile init
+
+          mkdir -p ../android-app/app/libs
+          gomobile bind -v \
+            -target=android/arm,android/arm64 \
+            -androidapi "${ANDROID_API}" \
+            -o ../android-app/app/libs/mobile.aar \
+            ./androidbind
+
+          mkdir -p ../android-app/app/src/main/jniLibs/armeabi-v7a
+          mkdir -p ../android-app/app/src/main/jniLibs/arm64-v8a
+
+          CGO_ENABLED=1 GOOS=android GOARCH=arm GOARM=7 \
+            CC="${toolchain}/armv7a-linux-androideabi${ANDROID_API}-clang" \
+            go build -trimpath -buildmode=pie -ldflags "${ldflags}" \
+            -o ../android-app/app/src/main/jniLibs/armeabi-v7a/librelay.so .
+
+          CGO_ENABLED=1 GOOS=android GOARCH=arm64 \
+            CC="${toolchain}/aarch64-linux-android${ANDROID_API}-clang" \
+            go build -trimpath -buildmode=pie -ldflags "${ldflags}" \
+            -o ../android-app/app/src/main/jniLibs/arm64-v8a/librelay.so .
+
+          file ../android-app/app/src/main/jniLibs/*/librelay.so
+
+      - name: Build installable debug APK
+        working-directory: android-app
+        run: gradle --no-daemon clean assembleDebug
+
+      - name: Verify and stage APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="android-app/app/build/outputs/apk/debug/app-debug.apk"
+          test -f "${apk}"
+          test -f android-app/app/libs/mobile.aar
+          unzip -l "${apk}" | grep -q 'lib/arm64-v8a/librelay.so'
+          unzip -l "${apk}" | grep -q 'lib/armeabi-v7a/librelay.so'
+          "${ANDROID_SDK_ROOT}/build-tools/${ANDROID_BUILD_TOOLS}/apksigner" verify --verbose "${apk}"
+          mkdir -p prebuilts
+          output="prebuilts/whitelist-bypass-android-${BUILD_VERSION}.apk"
+          cp "${apk}" "${output}"
+          sha256sum "${output}" > "${output}.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: whitelist-bypass-android-${{ env.BUILD_VERSION }}
+          path: |
+            prebuilts/*.apk
+            prebuilts/*.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Whitelist Bypass ${{ github.ref_name }}
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          make_latest: false
+          files: |
+            prebuilts/*.apk
+            prebuilts/*.sha256
+
