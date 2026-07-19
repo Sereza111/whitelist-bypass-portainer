@@ -92,7 +92,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("[obf] init failed: %v", err)
 	}
-	log.Printf("[obf] key-source=%q localEpoch=0x%08x", roomID, obf.LocalEpoch())
+	log.Printf("[obf] ready localEpoch=0x%08x", obf.LocalEpoch())
 
 	var activeBridge *tunnel.RelayBridge
 	makeSession := func(token, access, server string) *wbstream.Session {

@@ -15,7 +15,6 @@ import (
 	"whitelist-bypass/relay/common"
 )
 
-
 type vkConfig struct {
 	AppID           string `json:"appID"`
 	ApiVersion      string `json:"apiVersion"`
@@ -45,7 +44,6 @@ func RunVKAuth(joinLink string, displayName string, logFn func(string, ...any), 
 		}
 	}
 	client := &http.Client{Timeout: 60 * time.Second, Transport: transport}
-
 
 	httpPost := func(targetURL string, form url.Values, extraHeaders map[string]string) (map[string]interface{}, error) {
 		req, _ := http.NewRequest("POST", targetURL, strings.NewReader(form.Encode()))
@@ -129,7 +127,7 @@ func RunVKAuth(joinLink string, displayName string, logFn func(string, ...any), 
 		if respObj, ok := previewResp["response"].(map[string]interface{}); ok {
 			if okLink, ok := respObj["ok_join_link"].(string); ok {
 				cfg.OkJoinLink = okLink
-				logFn("vk-auth: okJoinLink=%s", okLink)
+				logFn("vk-auth: call preview link received")
 			}
 		}
 	}
@@ -186,15 +184,15 @@ func RunVKAuth(joinLink string, displayName string, logFn func(string, ...any), 
 					captchaAttempt = "1"
 				}
 				callParams = url.Values{
-					"v":               {cfg.ApiVersion},
-					"vk_join_link":    {joinLink},
-					"name":            {displayName},
-					"captcha_key":     {""},
-					"captcha_sid":     {captchaErr.captchaSid},
+					"v":                {cfg.ApiVersion},
+					"vk_join_link":     {joinLink},
+					"name":             {displayName},
+					"captcha_key":      {""},
+					"captcha_sid":      {captchaErr.captchaSid},
 					"is_sound_captcha": {"0"},
-					"success_token":   {successToken},
-					"captcha_ts":      {captchaErr.captchaTs},
-					"captcha_attempt": {captchaAttempt},
+					"success_token":    {successToken},
+					"captcha_ts":       {captchaErr.captchaTs},
+					"captcha_attempt":  {captchaAttempt},
 				}
 				continue
 			}

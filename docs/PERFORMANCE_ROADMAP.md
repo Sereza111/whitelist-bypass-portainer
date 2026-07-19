@@ -211,6 +211,24 @@ KCP. Во время Speedtest входящий поток продолжал п
 приоритет коротких интерактивных потоков. `CLOSE` нельзя просто переносить в
 priority lane: сначала нужны sequence/drain semantics, иначе он обгонит DATA.
 
+## Windows alpha.3: Fast и stale routes
+
+Полевой запуск full-TUN с локальным `fast` против старой Creator-сессии
+(`caps=0x3`) за 10 секунд заполнил VP8 queue до `128/128`; `WaitSnd` достиг
+1397 при почти отсутствующем обратном трафике. Затем Windows-процесс получил
+access violation в socket poll path, а split-default routes могли остаться на
+неактивном Wintun и оборвать обычный интернет.
+
+Защита alpha.4:
+
+1. full-TUN принудительно ограничивает Fast до Balanced; Fast остаётся только
+   для SOCKS-only A/B;
+2. peer без capability profile/control также ограничивается Balanced;
+3. desktop watchdog удаляет stale `0.0.0.0/1` и `128.0.0.0/1` перед запуском и
+   после выхода child process;
+4. Windows artifact собирается свежей patch-версией Go;
+5. экспортируемый UI log скрывает join link и SOCKS password.
+
 ## Рекомендуемый первый кодовый спринт
 
 1. Metrics + benchmark harness.

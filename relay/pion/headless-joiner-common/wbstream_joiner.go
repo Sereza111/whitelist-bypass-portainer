@@ -77,7 +77,7 @@ func (j *WBStreamHeadlessJoiner) RunWithParams(jsonParams string) {
 		j.Status.EmitStatusError("obfuscator init: " + err.Error())
 		return
 	}
-	j.logFn("wbstream-joiner: obf key-source=%q localEpoch=0x%08x", params.RoomID, obf.LocalEpoch())
+	j.logFn("wbstream-joiner: obfuscator ready localEpoch=0x%08x", obf.LocalEpoch())
 
 	var settingEngine *webrtc.SettingEngine
 	if j.PCConfig != nil {

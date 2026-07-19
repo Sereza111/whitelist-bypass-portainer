@@ -105,6 +105,9 @@ func main() {
 					if result.Supports(tunnel.CapabilityVideoKCP1) {
 						if result.Supports(tunnel.CapabilityPriorityControl) {
 							adaptive.EnablePriorityControl()
+						} else {
+							effective := adaptive.SetKCPProfile(tunnel.PreferSaferKCPProfile(*kcpProfile, tunnel.KCPProfileBalanced))
+							log.Printf("relay: peer lacks profile/control capability; compatibility profile=%s", effective)
 						}
 						adaptive.EnableKCP()
 						return

@@ -140,7 +140,7 @@ func (h *VKHeadlessJoiner) RunWithParams(jsonParams string) {
 	h.vp8Batch = params.VP8Batch
 	h.dualTrack = params.DualTrack
 	h.logFn("headless: auth params received")
-	h.logFn("headless: obf key-source=%q localEpoch=0x%08x", params.JoinLink, obf.LocalEpoch())
+	h.logFn("headless: obfuscator ready localEpoch=0x%08x", obf.LocalEpoch())
 	h.logFn("headless:   appVersion=%s protocolVersion=%s vp8Fps=%d vp8Batch=%d",
 		params.AppVersion, params.ProtocolVersion, params.VP8FPS, params.VP8Batch)
 

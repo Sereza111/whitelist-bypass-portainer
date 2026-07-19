@@ -73,6 +73,22 @@ contains destination addresses and session-adjacent runtime data.
   bypass delayed bulk segments. Per-flow scheduling above one KCP conversation
   alone will not remove this transport-level head-of-line blocking.
 
+## Windows field result (2026-07-19)
+
+- Client `0.5.0-alpha.3` negotiated only `caps=0x3`, proving the running Creator
+  session was still pre-alpha.3 and had no priority/profile capability.
+- Full-TUN `fast + unlimited` filled the VP8 carrier queue to `128/128`; after
+  10 seconds `WaitSnd=1397` while RX was effectively zero. The Windows process
+  then crashed with access violation `0xc0000005` in the socket poll path and
+  could leave split-default routes pointing at the dead Wintun adapter.
+- A subsequent `balanced + default` run connected in about eight seconds and
+  stayed healthy with an empty queue and `WaitSnd` near zero.
+- Desktop full-TUN must clamp Fast to Balanced. Fast remains only a controlled
+  SOCKS-only experiment. When a peer lacks priority/profile negotiation, both
+  sides cap the compatibility profile at Balanced.
+- Electron must redact join links/passwords from exported logs and invoke a
+  route-cleanup watchdog before start and after every child exit.
+
 ## Current transport status
 
 1. ACK/UNA progress is measured independently from inbound traffic. Sustained

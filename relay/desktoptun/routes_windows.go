@@ -79,6 +79,21 @@ func deleteRouteByPrefix(prefix, adapter string) error {
 	return err
 }
 
+// CleanupStaleRoutes removes split-default routes left behind when a previous
+// desktop Joiner was terminated before Tunnel.Stop could run. Without this
+// cleanup Windows keeps sending internet traffic into an inactive Wintun
+// adapter until the routes are removed manually or the machine is restarted.
+func CleanupStaleRoutes(adapter string) error {
+	quotedAdapter := strings.ReplaceAll(adapter, "'", "''")
+	script := "$adapter='" + quotedAdapter + "'; " +
+		"Get-NetRoute -AddressFamily IPv4 -ErrorAction SilentlyContinue | " +
+		"Where-Object { $_.InterfaceAlias -eq $adapter -and " +
+		"@('0.0.0.0/1','128.0.0.0/1') -contains $_.DestinationPrefix } | " +
+		"Remove-NetRoute -Confirm:$false -ErrorAction Stop"
+	_, err := runHidden("powershell", "-NoProfile", "-Command", script)
+	return err
+}
+
 // addHostRoute installs a /32 route for ip via the given gateway. Used
 // for the joiner's signaling + SFU bypasses.
 func addHostRoute(ip, gateway string, metric int) error {

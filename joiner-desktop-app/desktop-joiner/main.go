@@ -112,13 +112,25 @@ func main() {
 	dualTrack := flag.Bool("dual-track", false, "VK/WB Stream: dual-track tunnel (second screenshare channel) for higher throughput")
 	videoReliability := flag.String("video-reliability", "auto", "VK Video reliability: auto or raw")
 	kcpProfile := flag.String("kcp-profile", tunnel.KCPProfileBalanced, "KCP profile: fast, balanced, or stable")
+	cleanupRoutes := flag.Bool("cleanup-routes", false, "remove stale Windows split-default routes and exit")
 	flag.Parse()
+	if *cleanupRoutes {
+		if err := desktoptun.CleanupStaleRoutes(tunAdapter); err != nil {
+			log.Fatalf("[desktoptun] cleanup stale routes: %v", err)
+		}
+		log.Printf("[desktoptun] stale routes cleaned")
+		return
+	}
 
 	if *platform == "" || *link == "" {
 		log.Fatal("--platform and --link are required")
 	}
 	if *videoReliability != "auto" && *videoReliability != "raw" {
 		log.Fatal("--video-reliability must be auto or raw")
+	}
+	if *kcpProfile == tunnel.KCPProfileFast && !*noTun {
+		log.Printf("[transport] fast profile is unsafe with system-wide TUN; using balanced (use SOCKS-only for controlled Fast tests)")
+		*kcpProfile = tunnel.KCPProfileBalanced
 	}
 
 	switch *resources {
@@ -137,6 +149,9 @@ func main() {
 	// code touches the network.
 	var tun *desktoptun.Tunnel
 	if !*noTun {
+		if err := desktoptun.CleanupStaleRoutes(tunAdapter); err != nil {
+			log.Printf("[desktoptun] preflight stale-route cleanup: %v", err)
+		}
 		cfg := desktoptun.Config{
 			AdapterName: tunAdapter,
 			TunnelIP:    tunIP,
@@ -155,6 +170,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("[desktoptun] init: %v", err)
 		}
+		defer tun.Stop()
 	}
 
 	// Add bypass routes for the signaling hosts before any traffic
@@ -279,6 +295,9 @@ func main() {
 				if result.Supports(tunnel.CapabilityVideoKCP1) {
 					if result.Supports(tunnel.CapabilityPriorityControl) {
 						adaptive.EnablePriorityControl()
+					} else {
+						effective := adaptive.SetKCPProfile(tunnel.PreferSaferKCPProfile(*kcpProfile, tunnel.KCPProfileBalanced))
+						log.Printf("[transport] peer lacks profile/control capability; compatibility profile=%s", effective)
 					}
 					adaptive.EnableKCP()
 				} else {

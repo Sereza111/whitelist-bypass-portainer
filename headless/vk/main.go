@@ -741,7 +741,7 @@ func main() {
 	if obfErr != nil {
 		log.Fatalf("[config] obfuscator init failed: %v", obfErr)
 	}
-	log.Printf("[obf] key-source=%q localEpoch=0x%08x", callInfo.JoinLink, obf.LocalEpoch())
+	log.Printf("[obf] ready localEpoch=0x%08x", obf.LocalEpoch())
 	bridge := &Bridge{}
 	bridge.newRelay = func() Relay {
 		ur := NewTunnelRelay()
@@ -770,6 +770,9 @@ func main() {
 					if result.Supports(tunnel.CapabilityVideoKCP1) {
 						if result.Supports(tunnel.CapabilityPriorityControl) {
 							adaptive.EnablePriorityControl()
+						} else {
+							effective := adaptive.SetKCPProfile(tunnel.PreferSaferKCPProfile(*kcpProfile, tunnel.KCPProfileBalanced))
+							log.Printf("[transport] peer lacks profile/control capability; compatibility profile=%s", effective)
 						}
 						adaptive.EnableKCP()
 						if result.Supports(tunnel.CapabilityPriorityControl) {

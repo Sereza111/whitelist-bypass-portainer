@@ -1,5 +1,5 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
-import { spawn, ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { IPC, JoinerSettings } from '../constants';
@@ -65,6 +65,36 @@ function send(channel: string, payload: unknown) {
   }
 }
 
+function sanitizeLogText(text: string): string {
+  return text
+    .replace(/(--link\s+)("[^"]*"|\S+)/gi, '$1[REDACTED]')
+    .replace(/(--socks-pass\s+)("[^"]*"|\S+)/gi, '$1[REDACTED]')
+    .replace(/(vk-auth:\s+okJoinLink=)\S+/gi, '$1[REDACTED]')
+	.replace(/(obf\s+key-source=)("[^"]*"|\S+)/gi, '$1[REDACTED]')
+    .replace(/((?:sessionKey|anonymToken|access_token|password)[=:]\s*)\S+/gi, '$1[REDACTED]');
+}
+
+function safeCommandArgs(args: string[]): string[] {
+  const safe = [...args];
+  for (let i = 0; i < safe.length - 1; i++) {
+    if (safe[i] === '--link' || safe[i] === '--socks-pass') safe[i + 1] = '[REDACTED]';
+  }
+  return safe;
+}
+
+function cleanupStaleWindowsRoutes(exe: string) {
+  if (process.platform !== 'win32' || !existsSync(exe)) return;
+  const result = spawnSync(exe, ['--cleanup-routes'], {
+    windowsHide: true,
+    encoding: 'utf8',
+    timeout: 10_000,
+  });
+  if (result.error || result.status !== 0) {
+    const detail = result.error?.message || sanitizeLogText(result.stderr || '').trim() || `exit ${result.status}`;
+    send(IPC.LOG, `[main] stale-route cleanup warning: ${detail}\n`);
+  }
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 900,
@@ -99,6 +129,7 @@ function spawnJoiner(settings: JoinerSettings): { ok: boolean; error?: string } 
   if (!existsSync(exe)) {
     return { ok: false, error: `desktop-joiner binary not found at ${exe}` };
   }
+  cleanupStaleWindowsRoutes(exe);
   const tunSupported =
     process.platform === 'win32' || process.platform === 'linux' || process.platform === 'darwin';
   const noTun = tunSupported ? settings.noTun : true;
@@ -130,7 +161,7 @@ function spawnJoiner(settings: JoinerSettings): { ok: boolean; error?: string } 
     process.getuid && process.getuid() !== 0;
   const spawnCmd = elevateOnLinux ? 'pkexec' : exe;
   const spawnArgs = elevateOnLinux ? [exe, ...args] : args;
-  const commandLine = [spawnCmd, ...spawnArgs].map((s) => (/\s/.test(s) ? `"${s}"` : s)).join(' ');
+  const commandLine = [spawnCmd, ...safeCommandArgs(spawnArgs)].map((s) => (/\s/.test(s) ? `"${s}"` : s)).join(' ');
   send(IPC.LOG, `[main] spawning: ${commandLine}\n`);
   try {
     joinerProcess = spawn(spawnCmd, spawnArgs, { windowsHide: true });
@@ -145,9 +176,11 @@ function spawnJoiner(settings: JoinerSettings): { ok: boolean; error?: string } 
     send(IPC.STATUS, 'stopped');
     send(IPC.RUNNING, false);
     joinerProcess = null;
+	cleanupStaleWindowsRoutes(exe);
   });
   const handleOutput = (text: string) => {
-    send(IPC.LOG, text);
+	const safeText = sanitizeLogText(text);
+	send(IPC.LOG, safeText);
     if (text.includes('TUNNEL ACTIVE')) send(IPC.STATUS, 'active');
     if (text.includes('TUNNEL CONNECTED')) {
       send(IPC.STATUS, 'connected');
@@ -174,6 +207,7 @@ function spawnJoiner(settings: JoinerSettings): { ok: boolean; error?: string } 
     send(IPC.STATUS, 'stopped');
     send(IPC.RUNNING, false);
     joinerProcess = null;
+	cleanupStaleWindowsRoutes(exe);
 
     if (userRequestedStop || !lastSettings) return;
     if (retryCount >= MAX_RETRIES) {
@@ -214,7 +248,10 @@ ipcMain.handle(IPC.STOP, async () => {
 function stopJoiner() {
   userRequestedStop = true;
   closeCaptchaWindow();
-  if (!joinerProcess) return;
+  if (!joinerProcess) {
+    cleanupStaleWindowsRoutes(resolveJoinerExe());
+    return;
+  }
   // On Linux when the Go binary was spawned via pkexec, it runs as
   // root and we (the user) cannot SIGTERM it. The binary watches
   // stdin: writing "QUIT\n" and closing the pipe triggers the same
