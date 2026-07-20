@@ -4,6 +4,7 @@ import java.security.SecureRandom
 
 object Net {
     const val LOCALHOST = "127.0.0.1"
+    const val ANY_IPV4 = "0.0.0.0"
 }
 
 object Ports {
@@ -15,24 +16,41 @@ object Ports {
 enum class SocksAuthMode { AUTO, MANUAL }
 
 object SocksAuth {
-    private val autoUser: String
-    private val autoPass: String
+	private fun randomString(length: Int): String {
+		val random = SecureRandom()
+		val chars = "abcdefghijklmnopqrstuvwxyz0123456789"
+		return buildString {
+			repeat(length) { append(chars[random.nextInt(chars.length)]) }
+		}
+	}
 
-    init {
-        val random = SecureRandom()
-        val chars = "abcdefghijklmnopqrstuvwxyz0123456789"
-        fun randomString(length: Int) = buildString {
-            repeat(length) { append(chars[random.nextInt(chars.length)]) }
-        }
-        autoUser = randomString(16)
-        autoPass = randomString(24)
-    }
+	@Synchronized
+	private fun ensureAutoCredentials(): Pair<String, String> {
+		var user = Prefs.socksAutoUser
+		var pass = Prefs.socksAutoPass
+		if (user.isBlank()) {
+			user = randomString(16)
+			Prefs.socksAutoUser = user
+		}
+		if (pass.isBlank()) {
+			pass = randomString(24)
+			Prefs.socksAutoPass = pass
+		}
+		return user to pass
+	}
 
-    val user: String
-        get() = if (Prefs.socksAuthMode == SocksAuthMode.MANUAL) Prefs.socksUser else autoUser
+	val generatedUser: String get() = ensureAutoCredentials().first
+	val generatedPass: String get() = ensureAutoCredentials().second
 
-    val pass: String
-        get() = if (Prefs.socksAuthMode == SocksAuthMode.MANUAL) Prefs.socksPass else autoPass
+	val user: String
+		get() = if (Prefs.socksAuthMode == SocksAuthMode.MANUAL &&
+			Prefs.socksUser.isNotBlank() && Prefs.socksPass.isNotBlank()
+		) Prefs.socksUser else generatedUser
+
+	val pass: String
+		get() = if (Prefs.socksAuthMode == SocksAuthMode.MANUAL &&
+			Prefs.socksUser.isNotBlank() && Prefs.socksPass.isNotBlank()
+		) Prefs.socksPass else generatedPass
 }
 
 enum class DnsMode(val label: String) {
@@ -58,7 +76,10 @@ object PrefsKeys {
     const val SOCKS_PORT = "socks_port"
     const val SOCKS_AUTH_MODE = "socks_auth_mode"
     const val SOCKS_USER = "socks_user"
-    const val SOCKS_PASS = "socks_pass"
+	const val SOCKS_PASS = "socks_pass"
+	const val SOCKS_AUTO_USER = "socks_auto_user"
+	const val SOCKS_AUTO_PASS = "socks_auto_pass"
+	const val ALLOW_LAN = "allow_lan"
     const val PROXY_ONLY = "proxy_only"
     const val DNS_MODE = "dns_mode"
     const val DNS_PRIMARY = "dns_primary"
@@ -89,4 +110,3 @@ object Vpn {
     const val DNS_SECONDARY = "8.8.4.4"
     const val SESSION_NAME = "WhitelistBypass"
 }
-

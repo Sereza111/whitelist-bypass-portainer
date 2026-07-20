@@ -23,6 +23,25 @@
     <main>
       <section class="form panel">
         <div class="section-heading"><span>01</span><h2>Connection rite</h2></div>
+		<label class="check mode-toggle">
+		  <input id="phoneGateway" type="checkbox" />
+		  Route this PC through the Android phone
+		</label>
+		<div id="phoneGatewayFields" class="phone-gateway" hidden>
+		  <label>
+			Paste configuration copied from Android
+			<textarea id="phoneConfig" rows="5" placeholder="WhitelistBypass phone SOCKS5&#10;Host: 192.168.43.1&#10;Port: 1080&#10;User: ...&#10;Password: ..."></textarea>
+		  </label>
+		  <div class="row">
+			<label>Phone IPv4<input id="phoneHost" type="text" placeholder="192.168.43.1" /></label>
+			<label>SOCKS5 port<input id="phonePort" type="number" value="1080" min="1" max="65535" /></label>
+		  </div>
+		  <div class="row">
+			<label>Username<input id="phoneUser" type="text" autocomplete="off" /></label>
+			<label>Password<input id="phonePass" type="password" autocomplete="off" /></label>
+		  </div>
+		  <span class="hint warning">Use only your own phone on a trusted Wi-Fi network or hotspot. Android LAN sharing must remain enabled.</span>
+		</div>
         <label>
           Join link
           <input id="link" type="text" placeholder="Paste call link" />

@@ -76,12 +76,12 @@ class RelayController(
                 return@Thread
             }
             try {
-                Androidbind.startJoiner(Ports.DC_WS, Prefs.socksPort, Prefs.socksHost, SocksAuth.user, SocksAuth.pass, cb)
+                Androidbind.startJoiner(Ports.DC_WS, Prefs.socksPort, Prefs.effectiveSocksHost, SocksAuth.user, SocksAuth.pass, cb)
             } catch (e: Exception) {
                 if (isRunning) onLog("Relay error: ${e.message}")
             }
         }.also { it.start() }
-        onLog("Relay started DC mode (SOCKS5 ${SocksAuth.user}:${SocksAuth.pass}@${Prefs.socksHost}:${Prefs.socksPort}, WS :${Ports.DC_WS})")
+        onLog("Relay started DC mode (SOCKS5 ${SocksAuth.user}:[REDACTED]@${Prefs.effectiveSocksHost}:${Prefs.socksPort}, WS :${Ports.DC_WS})")
     }
 
     private fun startPion(mode: TunnelMode, platform: CallPlatform) {
@@ -103,7 +103,7 @@ class RelayController(
                     relayBin.absolutePath,
                     "--mode", relayMode,
                     "--ws-port", "${Ports.PION_SIGNALING}",
-                    "--socks-host", Prefs.socksHost,
+                    "--socks-host", Prefs.effectiveSocksHost,
                     "--socks-port", "${Prefs.socksPort}",
                     "--socks-user", SocksAuth.user,
                     "--socks-pass", SocksAuth.pass
@@ -111,7 +111,7 @@ class RelayController(
                 pb.redirectErrorStream(true)
                 val proc = pb.start()
                 synchronized(this) { pionProcess = proc }
-                onLog("Pion relay started mode=$relayMode (signaling :${Ports.PION_SIGNALING}, SOCKS5 ${SocksAuth.user}:${SocksAuth.pass}@${Prefs.socksHost}:${Prefs.socksPort})")
+                onLog("Pion relay started mode=$relayMode (signaling :${Ports.PION_SIGNALING}, SOCKS5 ${SocksAuth.user}:[REDACTED]@${Prefs.effectiveSocksHost}:${Prefs.socksPort})")
                 val stdinWriter = BufferedWriter(OutputStreamWriter(proc.outputStream))
                 proc.inputStream.bufferedReader().forEachLine { line ->
                     if (line.startsWith("RESOLVE:")) {
@@ -156,4 +156,3 @@ class RelayController(
         return false
     }
 }
-

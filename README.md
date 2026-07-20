@@ -59,6 +59,12 @@ iOS пока не включён.
 `.exe` и SHA-256 checksum. Клиент уже содержит Wintun и запрашивает права
 администратора.
 
+Windows-клиент также умеет направить весь ПК через SOCKS5 уже подключённого
+Android-клиента. На телефоне включите **Settings → Proxy → Share SOCKS5 over
+LAN**, скопируйте конфигурацию, затем в Windows включите **Route this PC
+through the Android phone** и вставьте блок целиком. Подробности и ограничения:
+[Android Joiner](docs/ANDROID.md#раздать-активный-туннель-с-телефона-на-пк).
+
 В начале server/client логов должна совпадать строка:
 
 ```text

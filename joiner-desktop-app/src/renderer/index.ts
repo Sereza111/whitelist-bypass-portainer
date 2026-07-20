@@ -39,6 +39,12 @@ const stopBtn = $('stop') as HTMLButtonElement;
 const downloadLogsBtn = $('downloadLogs') as HTMLButtonElement;
 const platformHint = $('platformHint');
 const linkInput = input('link');
+const phoneGateway = input('phoneGateway');
+const phoneGatewayFields = $('phoneGatewayFields');
+const callOnlyInputIds = [
+	'link', 'name', 'socksPort', 'socksUser', 'socksPass', 'tunnelMode',
+	'videoReliability', 'kcpProfile', 'vp8Fps', 'vp8Batch', 'noTun', 'dualTrack',
+];
 
 stopBtn.disabled = true;
 
@@ -52,12 +58,46 @@ downloadLogsBtn.addEventListener('click', () => {
 });
 
 function refreshPlatformHint() {
+	if (phoneGateway.checked) {
+		platformHint.textContent = 'Phone SOCKS gateway mode';
+		platformHint.dataset.detected = '';
+		return;
+	}
   const p = detectPlatform(linkInput.value.trim());
   platformHint.textContent = `Detected platform: ${platformLabel(p)}`;
   platformHint.dataset.detected = p ?? '';
 }
 linkInput.addEventListener('input', refreshPlatformHint);
 refreshPlatformHint();
+
+function refreshConnectionMode() {
+	const usePhone = phoneGateway.checked;
+	phoneGatewayFields.hidden = !usePhone;
+	for (const id of callOnlyInputIds) {
+		input(id).closest('label')?.toggleAttribute('hidden', usePhone);
+	}
+	document.querySelectorAll<HTMLDivElement>('.form .row').forEach((row) => {
+		const children = Array.from(row.children) as HTMLElement[];
+		row.hidden = children.length > 0 && children.every((child) => child.hidden);
+	});
+	refreshPlatformHint();
+}
+
+phoneGateway.addEventListener('change', refreshConnectionMode);
+refreshConnectionMode();
+
+input('phoneConfig').addEventListener('input', () => {
+	const config = input('phoneConfig').value;
+	const read = (key: string) => config.match(new RegExp(`^${key}:\\s*(.+)$`, 'mi'))?.[1].trim() || '';
+	const host = read('Host');
+	const port = read('Port');
+	const user = read('User');
+	const pass = read('Password');
+	if (host) input('phoneHost').value = host;
+	if (port) input('phonePort').value = port;
+	if (user) input('phoneUser').value = user;
+	if (pass) input('phonePass').value = pass;
+});
 
 function appendLog(text: string) {
   logEl.textContent += text;
@@ -76,17 +116,31 @@ bridge.onRunning((running) => {
 
 startBtn.addEventListener('click', async () => {
   appendLog('\n[ui] starting joiner...\n');
+	const usePhone = phoneGateway.checked;
   const link = linkInput.value.trim();
-  if (!link) {
+	if (!usePhone && !link) {
     appendLog('[ui] link is required\n');
     return;
   }
-  const platform = detectPlatform(link);
-  if (!platform) {
+	const platform = usePhone ? 'vk' : detectPlatform(link);
+	if (!platform) {
     appendLog('[ui] link does not look like a WB Stream or Telemost call\n');
     return;
   }
+	const phoneHost = input('phoneHost').value.trim();
+	const phonePort = parseInt(input('phonePort').value, 10) || 0;
+	const phoneUser = input('phoneUser').value.trim();
+	const phonePass = input('phonePass').value;
+	if (usePhone && (!/^\d{1,3}(?:\.\d{1,3}){3}$/.test(phoneHost) || phonePort < 1 || phonePort > 65535)) {
+		appendLog('[ui] enter the phone IPv4 address and SOCKS5 port copied from Android\n');
+		return;
+	}
+	if (usePhone && (!phoneUser || !phonePass)) {
+		appendLog('[ui] phone SOCKS5 username and password are required\n');
+		return;
+	}
   const settings = {
+	connectionMode: usePhone ? 'phone' : 'call',
     platform,
     link,
     displayName: input('name').value.trim() || 'Joiner',
@@ -102,6 +156,10 @@ startBtn.addEventListener('click', async () => {
     dns: input('dns').value.trim() || '1.1.1.1,8.8.8.8',
     noTun: input('noTun').checked,
     dualTrack: input('dualTrack').checked,
+	phoneHost,
+	phonePort,
+	phoneUser,
+	phonePass,
   };
   const r = await bridge.start(settings);
   if (!r.ok) appendLog(`[ui] start failed: ${r.error}\n`);

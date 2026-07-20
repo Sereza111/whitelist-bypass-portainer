@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/url"
@@ -19,6 +20,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -113,6 +115,9 @@ func main() {
 	videoReliability := flag.String("video-reliability", "auto", "VK Video reliability: auto or raw")
 	kcpProfile := flag.String("kcp-profile", tunnel.KCPProfileBalanced, "KCP profile: fast, balanced, or stable")
 	cleanupRoutes := flag.Bool("cleanup-routes", false, "remove stale Windows split-default routes and exit")
+	remoteSocks := flag.String("remote-socks", "", "phone/LAN SOCKS5 endpoint as IPv4:port (starts system-wide TUN without joining a call)")
+	remoteSocksUser := flag.String("remote-socks-user", "", "username for phone/LAN SOCKS5")
+	remoteSocksPass := flag.String("remote-socks-pass", "", "password for phone/LAN SOCKS5")
 	flag.Parse()
 	if *cleanupRoutes {
 		if err := desktoptun.CleanupStaleRoutes(tunAdapter); err != nil {
@@ -122,9 +127,6 @@ func main() {
 		return
 	}
 
-	if *platform == "" || *link == "" {
-		log.Fatal("--platform and --link are required")
-	}
 	if *videoReliability != "auto" && *videoReliability != "raw" {
 		log.Fatal("--video-reliability must be auto or raw")
 	}
@@ -142,6 +144,28 @@ func main() {
 		debug.SetMemoryLimit(256 << 20)
 	default:
 		log.Fatalf("[config] unknown resources mode: %s", *resources)
+	}
+
+	if *remoteSocks != "" {
+		if *noTun {
+			log.Fatal("--remote-socks is a system-wide tunnel mode and cannot be combined with --no-tun")
+		}
+		host, port, err := parseRemoteSocksEndpoint(*remoteSocks)
+		if err != nil {
+			log.Fatalf("[phone-socks] %v", err)
+		}
+		if *remoteSocksUser == "" || *remoteSocksPass == "" {
+			log.Fatal("[phone-socks] --remote-socks-user and --remote-socks-pass are required")
+		}
+		if err := runRemoteSocksMode(host, port, *remoteSocksUser, *remoteSocksPass, splitCSV(*dns)); err != nil {
+			log.Printf("[phone-socks] startup aborted before routing traffic: %v", err)
+			os.Exit(3)
+		}
+		return
+	}
+
+	if *platform == "" || *link == "" {
+		log.Fatal("--platform and --link are required unless --remote-socks is used")
 	}
 
 	// One desktoptun.Tunnel covers both platforms. Created up-front so
@@ -374,6 +398,124 @@ func main() {
 	if lost {
 		os.Exit(2)
 	}
+}
+
+func parseRemoteSocksEndpoint(endpoint string) (string, int, error) {
+	host, portText, err := net.SplitHostPort(strings.TrimSpace(endpoint))
+	if err != nil {
+		return "", 0, fmt.Errorf("--remote-socks must be IPv4:port, for example 192.168.43.1:1080: %w", err)
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || ip.To4() == nil || ip.IsLoopback() || ip.IsUnspecified() {
+		return "", 0, fmt.Errorf("--remote-socks host must be a non-loopback IPv4 literal")
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil || port < 1 || port > 65535 {
+		return "", 0, fmt.Errorf("--remote-socks port must be between 1 and 65535")
+	}
+	return ip.To4().String(), port, nil
+}
+
+func runRemoteSocksMode(host string, port int, user, pass string, dns []string) error {
+	endpoint := net.JoinHostPort(host, strconv.Itoa(port))
+	if err := probeAuthenticatedSocks(endpoint, user, pass, 5*time.Second); err != nil {
+		return fmt.Errorf("authentication preflight failed for %s: %w", endpoint, err)
+	}
+
+	if err := desktoptun.CleanupStaleRoutes(tunAdapter); err != nil {
+		log.Printf("[desktoptun] preflight stale-route cleanup: %v", err)
+	}
+	tun, err := desktoptun.New(desktoptun.Config{
+		AdapterName: tunAdapter,
+		TunnelIP:    tunIP,
+		TunnelMask:  tunMask,
+		TunnelPeer:  tunPeer,
+		MTU:         tunMTU,
+		DNSServers:  dns,
+		SocksHost:   host,
+		SocksPort:   port,
+		SocksUser:   user,
+		SocksPass:   pass,
+		LogFn:       log.Printf,
+	})
+	if err != nil {
+		return fmt.Errorf("initialize TUN: %w", err)
+	}
+	if err := tun.Start(); err != nil {
+		return fmt.Errorf("start TUN: %w", err)
+	}
+
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	watchStdinQuit(sig)
+	fmt.Printf("\n  TUNNEL ACTIVE via phone SOCKS %s\n  adapter=%q DNS=%s\n\n",
+		endpoint, tunAdapter, strings.Join(dns, ","))
+	phoneLost := make(chan struct{}, 1)
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		failures := 0
+		for range ticker.C {
+			if err := probeAuthenticatedSocks(endpoint, user, pass, 3*time.Second); err != nil {
+				failures++
+				log.Printf("[phone-socks] health check failed %d/3: %v", failures, err)
+				if failures >= 3 {
+					select {
+					case phoneLost <- struct{}{}:
+					default:
+					}
+					return
+				}
+				continue
+			}
+			failures = 0
+		}
+	}()
+	select {
+	case <-sig:
+		log.Printf("[phone-socks] shutting down")
+	case <-phoneLost:
+		log.Printf("[phone-socks] phone gateway lost; restoring normal PC routes")
+	}
+	tun.Stop()
+	return nil
+}
+
+func probeAuthenticatedSocks(endpoint, user, pass string, timeout time.Duration) error {
+	if len(user) == 0 || len(user) > 255 || len(pass) == 0 || len(pass) > 255 {
+		return fmt.Errorf("SOCKS credentials must contain 1..255 bytes")
+	}
+	conn, err := net.DialTimeout("tcp", endpoint, timeout)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(timeout))
+	if _, err := conn.Write([]byte{5, 1, 2}); err != nil {
+		return fmt.Errorf("send method negotiation: %w", err)
+	}
+	reply := make([]byte, 2)
+	if _, err := io.ReadFull(conn, reply); err != nil {
+		return fmt.Errorf("read method negotiation: %w", err)
+	}
+	if reply[0] != 5 || reply[1] != 2 {
+		return fmt.Errorf("server did not require username/password authentication")
+	}
+	auth := make([]byte, 0, 3+len(user)+len(pass))
+	auth = append(auth, 1, byte(len(user)))
+	auth = append(auth, user...)
+	auth = append(auth, byte(len(pass)))
+	auth = append(auth, pass...)
+	if _, err := conn.Write(auth); err != nil {
+		return fmt.Errorf("send authentication: %w", err)
+	}
+	if _, err := io.ReadFull(conn, reply); err != nil {
+		return fmt.Errorf("read authentication: %w", err)
+	}
+	if reply[0] != 1 || reply[1] != 0 {
+		return fmt.Errorf("username or password rejected")
+	}
+	return nil
 }
 
 func splitCSV(s string) []string {

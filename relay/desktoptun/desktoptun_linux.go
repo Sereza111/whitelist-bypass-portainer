@@ -88,18 +88,40 @@ func (t *Tunnel) Start() error {
 	t.origIface = iface
 	t.log("[desktoptun] original default gateway %s via %q", gw, iface)
 
-	proxy := fmt.Sprintf("socks5://%s:%d", t.cfg.SocksHost, t.cfg.SocksPort)
-	if t.cfg.SocksUser != "" {
-		proxy = fmt.Sprintf("socks5://%s:%s@%s:%d",
-			t.cfg.SocksUser, t.cfg.SocksPass, t.cfg.SocksHost, t.cfg.SocksPort)
+	if proxyIP := socksBypassIPv4(t.cfg.SocksHost); proxyIP != nil {
+		addr := proxyIP.String()
+		switch {
+		case addr == gw:
+			t.log("[desktoptun] SOCKS gateway %s is the physical default gateway; existing on-link route preserved", addr)
+		case isOnLinkIPv4(iface, proxyIP):
+			t.log("[desktoptun] SOCKS gateway %s is on-link; existing connected route preserved", addr)
+		default:
+			if out, routeErr := runCmd("ip", "route", "add", addr+"/32", "via", gw, "dev", iface); routeErr != nil {
+				return fmt.Errorf("desktoptun: pin SOCKS gateway %s via %s: %w (%s)", addr, gw, routeErr, out)
+			}
+			t.bypass[addr] = struct{}{}
+			t.log("[desktoptun] SOCKS gateway bypass %s -> %s", addr, gw)
+		}
 	}
+	startSucceeded := false
+	defer func() {
+		if startSucceeded {
+			return
+		}
+		for ip := range t.bypass {
+			_, _ = runCmd("ip", "route", "del", ip+"/32")
+			delete(t.bypass, ip)
+		}
+	}()
+
+	proxy, safeProxy := socksProxyURL(t.cfg.SocksHost, t.cfg.SocksPort, t.cfg.SocksUser, t.cfg.SocksPass)
 	key := &engine.Key{
 		Proxy:  proxy,
 		Device: "tun://" + t.cfg.AdapterName,
 		MTU:    t.cfg.MTU,
 	}
 	t.log("[desktoptun] starting tun2socks engine adapter=%s mtu=%d proxy=%s",
-		t.cfg.AdapterName, t.cfg.MTU, proxy)
+		t.cfg.AdapterName, t.cfg.MTU, safeProxy)
 	engine.Insert(key)
 	engine.Start()
 
@@ -128,6 +150,7 @@ func (t *Tunnel) Start() error {
 	}
 
 	t.started = true
+	startSucceeded = true
 	t.log("[desktoptun] up: adapter=%s ip=%s peer=%s",
 		t.cfg.AdapterName, addr, t.cfg.TunnelPeer)
 	return nil

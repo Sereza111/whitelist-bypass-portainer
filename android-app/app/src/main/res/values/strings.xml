@@ -107,6 +107,8 @@
     <string name="settings_row_split">Split tunneling</string>
     <string name="settings_row_proxy">Proxy</string>
     <string name="settings_row_proxy_sub">SOCKS5 port %1$d</string>
+	<string name="settings_row_proxy_sub_lan">LAN SOCKS5 %1$s</string>
+	<string name="settings_row_proxy_lan_waiting">waiting for Wi-Fi/hotspot</string>
     <string name="settings_row_dns">DNS</string>
     <string name="settings_row_headless">Headless mode</string>
     <string name="settings_row_headless_sub">Skip the visible browser join</string>
@@ -161,7 +163,15 @@
     <string name="proxy_sub">Local SOCKS5 endpoint exposed to apps routed through the tunnel.</string>
     <string name="proxy_port_field_label">SOCKS5 port</string>
     <string name="proxy_host_field_label">SOCKS5 host</string>
-    <string name="proxy_host_hint">127.0.0.1</string>
+	<string name="proxy_host_hint">127.0.0.1</string>
+	<string name="proxy_lan_title">Share SOCKS5 over LAN</string>
+	<string name="proxy_lan_sub">Allow trusted Wi-Fi/hotspot devices to use this tunnel. Authentication is required. Reconnect after changing.</string>
+	<string name="proxy_lan_endpoint_label">PC connection settings</string>
+	<string name="proxy_lan_no_address">Connect to Wi-Fi or enable the phone hotspot to get a LAN address.</string>
+	<string name="proxy_lan_credentials">User: %1$s\nPass: %2$s</string>
+	<string name="proxy_lan_copy">Copy PC configuration</string>
+	<string name="proxy_lan_copied">SOCKS5 configuration copied</string>
+	<string name="proxy_lan_manual_auth_required">LAN sharing requires a non-empty user and password</string>
     <string name="proxy_auth_field_label">Authentication</string>
     <string name="proxy_user_field_label">User</string>
     <string name="proxy_pass_field_label">Pass</string>

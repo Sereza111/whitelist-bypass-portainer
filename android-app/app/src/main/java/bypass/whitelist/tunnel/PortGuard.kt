@@ -35,7 +35,7 @@ object PortGuard {
 
     private fun tryBind(port: Long): Boolean {
         return try {
-            ServerSocket(port.toInt(), 1, InetAddress.getByName(Prefs.socksHost)).use { true }
+            ServerSocket(port.toInt(), 1, InetAddress.getByName(Prefs.effectiveSocksHost)).use { true }
         } catch (e: Exception) {
             false
         }
@@ -120,4 +120,3 @@ object PortGuard {
         }
     }
 }
-

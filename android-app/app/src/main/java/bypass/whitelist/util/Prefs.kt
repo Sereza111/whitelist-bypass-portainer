@@ -57,9 +57,16 @@ object Prefs {
         get() = prefs.getBoolean(PrefsKeys.HEADLESS, true)
         set(value) = prefs.edit { putBoolean(PrefsKeys.HEADLESS, value) }
 
-    var socksHost: String
+	var socksHost: String
         get() = prefs.getString(PrefsKeys.SOCKS_HOST, Net.LOCALHOST) ?: Net.LOCALHOST
-        set(value) = prefs.edit { putString(PrefsKeys.SOCKS_HOST, value) }
+		set(value) = prefs.edit { putString(PrefsKeys.SOCKS_HOST, value) }
+
+	var allowLan: Boolean
+		get() = prefs.getBoolean(PrefsKeys.ALLOW_LAN, false)
+		set(value) = prefs.edit { putBoolean(PrefsKeys.ALLOW_LAN, value) }
+
+	val effectiveSocksHost: String
+		get() = if (allowLan) Net.ANY_IPV4 else Net.LOCALHOST
 
     var socksPort: Long
         get() = prefs.getLong(PrefsKeys.SOCKS_PORT, Ports.DEFAULT_SOCKS)
@@ -80,9 +87,17 @@ object Prefs {
         get() = prefs.getString(PrefsKeys.SOCKS_USER, "")!!
         set(value) = prefs.edit { putString(PrefsKeys.SOCKS_USER, value) }
 
-    var socksPass: String
+	var socksPass: String
         get() = prefs.getString(PrefsKeys.SOCKS_PASS, "")!!
-        set(value) = prefs.edit { putString(PrefsKeys.SOCKS_PASS, value) }
+		set(value) = prefs.edit { putString(PrefsKeys.SOCKS_PASS, value) }
+
+	internal var socksAutoUser: String
+		get() = prefs.getString(PrefsKeys.SOCKS_AUTO_USER, "") ?: ""
+		set(value) = prefs.edit { putString(PrefsKeys.SOCKS_AUTO_USER, value) }
+
+	internal var socksAutoPass: String
+		get() = prefs.getString(PrefsKeys.SOCKS_AUTO_PASS, "") ?: ""
+		set(value) = prefs.edit { putString(PrefsKeys.SOCKS_AUTO_PASS, value) }
 
     var proxyOnly: Boolean
         get() = prefs.getBoolean(PrefsKeys.PROXY_ONLY, false)
@@ -193,4 +208,3 @@ object Prefs {
         }
     }
 }
-

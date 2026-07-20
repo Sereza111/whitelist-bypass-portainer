@@ -13,6 +13,7 @@ import bypass.whitelist.R
 import bypass.whitelist.tunnel.SplitTunnelingMode
 import bypass.whitelist.tunnel.TunnelMode
 import bypass.whitelist.util.Callback
+import bypass.whitelist.util.LanProxy
 import bypass.whitelist.util.ParamCallback
 import bypass.whitelist.util.Prefs
 import bypass.whitelist.util.ThemeMode
@@ -119,7 +120,14 @@ class SettingsScreenFragment : Fragment(R.layout.fragment_settings_screen) {
             (activity as? MainActivityHost)?.pushSubPage(SplitTunnelingScreenFragment())
         }
 
-        addRow(card, R.drawable.ic_setting_proxy, getString(R.string.settings_row_proxy), getString(R.string.settings_row_proxy_sub, Prefs.socksPort), null) {
+        val proxySummary = if (Prefs.allowLan) {
+            val endpoint = LanProxy.endpoints(Prefs.socksPort).firstOrNull()
+                ?: getString(R.string.settings_row_proxy_lan_waiting)
+            getString(R.string.settings_row_proxy_sub_lan, endpoint)
+        } else {
+            getString(R.string.settings_row_proxy_sub, Prefs.socksPort)
+        }
+        addRow(card, R.drawable.ic_setting_proxy, getString(R.string.settings_row_proxy), proxySummary, null) {
             ProxyActionSheet.show(parentFragmentManager) { rebuild() }
         }
 

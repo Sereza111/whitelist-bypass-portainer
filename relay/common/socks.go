@@ -3,6 +3,7 @@ package common
 import (
 	"encoding/binary"
 	"fmt"
+	"io"
 	"net"
 )
 
@@ -25,8 +26,8 @@ const (
 	RTPBufSize   = 65536
 	// VP8BufSize fits one RTP packet: 1200 MTU - 1 VP8 descriptor - 64 tunnel wrapper - 9 protocol frame
 	// (tunnel wrapper = 20 vp8 keepalive header + 4 epoch + 24 XChaCha20 nonce + 16 Poly1305 tag)
-	VP8BufSize   = 1126
-	DCBufSize    = 32768
+	VP8BufSize = 1126
+	DCBufSize  = 32768
 )
 
 var (
@@ -38,46 +39,100 @@ var (
 	GenFail  = []byte{Ver, 0x01, 0x00, AtypIPv4, 0, 0, 0, 0, 0, 0}
 )
 
-func NegotiateAuth(conn net.Conn, buf []byte, n int, wantUser, wantPass string) bool {
-	if wantUser == "" {
-		conn.Write(NoAuth)
-		return true
+func NegotiateAuth(conn net.Conn, wantUser, wantPass string) bool {
+	header := make([]byte, 2)
+	if _, err := io.ReadFull(conn, header); err != nil || header[0] != Ver || header[1] == 0 {
+		return false
 	}
-	hasUserPass := false
-	methodCount := int(buf[1])
-	for i := 0; i < methodCount && i+2 < n; i++ {
-		if buf[2+i] == AuthUserPass {
-			hasUserPass = true
+	methods := make([]byte, int(header[1]))
+	if _, err := io.ReadFull(conn, methods); err != nil {
+		return false
+	}
+	wantedMethod := byte(AuthNone)
+	if wantUser != "" {
+		wantedMethod = AuthUserPass
+	}
+	hasWantedMethod := false
+	for _, method := range methods {
+		if method == wantedMethod {
+			hasWantedMethod = true
 			break
 		}
 	}
-	if !hasUserPass {
-		conn.Write([]byte{Ver, AuthNoMatch})
+	if !hasWantedMethod {
+		_, _ = conn.Write([]byte{Ver, AuthNoMatch})
 		return false
 	}
-	conn.Write([]byte{Ver, AuthUserPass})
-	authN, err := conn.Read(buf)
-	if err != nil || authN < 5 || buf[0] != 0x01 {
+	_, _ = conn.Write([]byte{Ver, wantedMethod})
+	if wantedMethod == AuthNone {
+		return true
+	}
+
+	if _, err := io.ReadFull(conn, header); err != nil || header[0] != 0x01 || header[1] == 0 {
 		return false
 	}
-	userLen := int(buf[1])
-	if authN < 2+userLen+1 {
-		conn.Write([]byte{0x01, 0x01})
+	userBytes := make([]byte, int(header[1]))
+	if _, err := io.ReadFull(conn, userBytes); err != nil {
 		return false
 	}
-	user := string(buf[2 : 2+userLen])
-	passLen := int(buf[2+userLen])
-	if authN < 2+userLen+1+passLen {
-		conn.Write([]byte{0x01, 0x01})
+	length := make([]byte, 1)
+	if _, err := io.ReadFull(conn, length); err != nil || length[0] == 0 {
+		_, _ = conn.Write([]byte{0x01, 0x01})
 		return false
 	}
-	pass := string(buf[3+userLen : 3+userLen+passLen])
+	passBytes := make([]byte, int(length[0]))
+	if _, err := io.ReadFull(conn, passBytes); err != nil {
+		return false
+	}
+	user := string(userBytes)
+	pass := string(passBytes)
 	if user != wantUser || pass != wantPass {
-		conn.Write([]byte{0x01, 0x01})
+		_, _ = conn.Write([]byte{0x01, 0x01})
 		return false
 	}
-	conn.Write([]byte{0x01, 0x00})
+	_, _ = conn.Write([]byte{0x01, 0x00})
 	return true
+}
+
+// ReadSOCKSRequest reads one complete variable-length SOCKS5 request from a
+// stream. TCP is allowed to split the request at any byte boundary, so callers
+// must not assume that a single Read returns the whole header and address.
+func ReadSOCKSRequest(conn net.Conn, buf []byte) (int, error) {
+	if len(buf) < 4 {
+		return 0, fmt.Errorf("SOCKS request buffer too small")
+	}
+	if _, err := io.ReadFull(conn, buf[:4]); err != nil {
+		return 0, err
+	}
+	if buf[0] != Ver {
+		return 0, fmt.Errorf("unsupported SOCKS version 0x%02x", buf[0])
+	}
+	n := 4
+	var remaining int
+	switch buf[3] {
+	case AtypIPv4:
+		remaining = 6
+	case AtypIPv6:
+		remaining = 18
+	case AtypDomain:
+		if len(buf) < 5 {
+			return 0, fmt.Errorf("SOCKS request buffer too small for domain")
+		}
+		if _, err := io.ReadFull(conn, buf[4:5]); err != nil {
+			return 0, err
+		}
+		n++
+		remaining = int(buf[4]) + 2
+	default:
+		return 0, fmt.Errorf("unsupported address type 0x%02x", buf[3])
+	}
+	if n+remaining > len(buf) {
+		return 0, fmt.Errorf("SOCKS request exceeds buffer")
+	}
+	if _, err := io.ReadFull(conn, buf[n:n+remaining]); err != nil {
+		return 0, err
+	}
+	return n + remaining, nil
 }
 
 func ParseAddress(buf []byte, n int) (host string, headerLen int, err error) {

@@ -220,7 +220,7 @@ class TunnelVpnService : VpnService() {
         startInProgress = false
         val fd = vpnFd!!.detachFd()
         vpnFd = null
-        Log.i(TAG, "VPN established, fd=$fd, SOCKS5 ${SocksAuth.user}:${SocksAuth.pass}@${Prefs.socksHost}:${Prefs.socksPort}")
+        Log.i(TAG, "VPN established, fd=$fd, SOCKS5 ${SocksAuth.user}:[REDACTED]@${Prefs.effectiveSocksHost}:${Prefs.socksPort}")
         updateStatus(VpnStatus.TUNNEL_ACTIVE)
         val startGeneration = bumpTunGeneration()
 
@@ -316,4 +316,3 @@ class TunnelVpnService : VpnService() {
             .build()
     }
 }
-

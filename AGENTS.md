@@ -89,6 +89,20 @@ contains destination addresses and session-adjacent runtime data.
 - Electron must redact join links/passwords from exported logs and invoke a
   route-cleanup watchdog before start and after every child exit.
 
+## Android LAN gateway (alpha.4)
+
+- Android can explicitly bind its authenticated SOCKS5 listener to
+  `0.0.0.0`; LAN sharing defaults off and auto credentials persist across app
+  restarts. Never allow an unauthenticated LAN listener.
+- Windows phone-gateway mode runs Wintun/tun2socks against the phone SOCKS5
+  endpoint and does not start a second call Joiner.
+- Validate SOCKS authentication before changing Windows routes. Preserve an
+  existing on-link route to the phone; otherwise pin the phone IPv4 outside
+  the split defaults. Three failed health checks must tear down Wintun so a
+  disappearing phone cannot leave the PC without normal internet.
+- Redact both local and remote SOCKS passwords. The Android copied config is a
+  secret and must never be committed or included in logs.
+
 ## Current transport status
 
 1. ACK/UNA progress is measured independently from inbound traffic. Sustained

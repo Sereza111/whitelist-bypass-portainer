@@ -832,17 +832,12 @@ func (rb *RelayBridge) handleSOCKS(conn net.Conn) {
 		return
 	}
 	buf := make([]byte, common.HandshakeBuf)
-	n, err := conn.Read(buf)
-	if err != nil || n < 2 || buf[0] != common.Ver {
+	if !common.NegotiateAuth(conn, rb.socksUser, rb.socksPass) {
 		conn.Close()
 		return
 	}
-	if !common.NegotiateAuth(conn, buf, n, rb.socksUser, rb.socksPass) {
-		conn.Close()
-		return
-	}
-	n, err = conn.Read(buf)
-	if err != nil || n < 7 || buf[0] != common.Ver {
+	n, err := common.ReadSOCKSRequest(conn, buf)
+	if err != nil {
 		conn.Close()
 		return
 	}

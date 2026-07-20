@@ -9,6 +9,7 @@ export const IPC = {
 export type JoinerPlatform = 'wbstream' | 'telemost' | 'vk' | 'dion';
 
 export interface JoinerSettings {
+	connectionMode: 'call' | 'phone';
   platform: JoinerPlatform;
   link: string;
   displayName: string;
@@ -24,4 +25,8 @@ export interface JoinerSettings {
   dns: string;
   noTun: boolean;
   dualTrack: boolean;
+	phoneHost: string;
+	phonePort: number;
+	phoneUser: string;
+	phonePass: string;
 }

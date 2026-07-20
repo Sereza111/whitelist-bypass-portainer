@@ -26,7 +26,6 @@ const (
 
 const readBufSize = 65536
 
-
 var framePool = sync.Pool{
 	New: func() any {
 		buf := make([]byte, 5+readBufSize)
@@ -72,7 +71,6 @@ func logMsg(format string, args ...any) {
 	}
 }
 
-
 type wsWriter struct {
 	ws   *websocket.Conn
 	ch   chan []byte
@@ -112,7 +110,6 @@ func (w *wsWriter) close() {
 	close(w.ch)
 	<-w.done
 }
-
 
 var activeJoiner struct {
 	sync.Mutex
@@ -387,17 +384,12 @@ func (j *joinerRelay) listenSOCKS(ln net.Listener) error {
 func (j *joinerRelay) handleSOCKS(conn net.Conn) {
 	<-j.ready
 	buf := make([]byte, common.HandshakeBuf)
-	n, err := conn.Read(buf)
-	if err != nil || n < 2 || buf[0] != common.Ver {
+	if !common.NegotiateAuth(conn, j.socksUser, j.socksPass) {
 		conn.Close()
 		return
 	}
-	if !common.NegotiateAuth(conn, buf, n, j.socksUser, j.socksPass) {
-		conn.Close()
-		return
-	}
-	n, err = conn.Read(buf)
-	if err != nil || n < 7 || buf[0] != common.Ver {
+	n, err := common.ReadSOCKSRequest(conn, buf)
+	if err != nil {
 		conn.Write(common.GenFail)
 		conn.Close()
 		return
@@ -471,4 +463,3 @@ func (j *joinerRelay) handleSOCKS(conn net.Conn) {
 		}
 	}()
 }
-

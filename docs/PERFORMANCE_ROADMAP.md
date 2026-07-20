@@ -118,8 +118,8 @@ drop, retransmit и итоговую задержку.
 - проверить DNS UDP > 1232 bytes и TCP fallback;
 - измерить HTTP/3; при нестабильном Video дать опцию блокировать UDP/443, чтобы
   браузер переходил на HTTP/2/TCP;
-- исправить SOCKS5 parser на `io.ReadFull`, а не предполагать один `Read` на
-  handshake/request.
+- SOCKS5 auth и variable-length request переведены на `io.ReadFull`; тесты
+  намеренно дробят handshake/request на отдельные TCP fragments.
 
 ## Сжатие
 

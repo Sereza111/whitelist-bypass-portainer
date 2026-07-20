@@ -69,6 +69,7 @@ function sanitizeLogText(text: string): string {
   return text
     .replace(/(--link\s+)("[^"]*"|\S+)/gi, '$1[REDACTED]')
     .replace(/(--socks-pass\s+)("[^"]*"|\S+)/gi, '$1[REDACTED]')
+	.replace(/(--remote-socks-pass\s+)("[^"]*"|\S+)/gi, '$1[REDACTED]')
     .replace(/(vk-auth:\s+okJoinLink=)\S+/gi, '$1[REDACTED]')
 	.replace(/(obf\s+key-source=)("[^"]*"|\S+)/gi, '$1[REDACTED]')
     .replace(/((?:sessionKey|anonymToken|access_token|password)[=:]\s*)\S+/gi, '$1[REDACTED]');
@@ -77,7 +78,9 @@ function sanitizeLogText(text: string): string {
 function safeCommandArgs(args: string[]): string[] {
   const safe = [...args];
   for (let i = 0; i < safe.length - 1; i++) {
-    if (safe[i] === '--link' || safe[i] === '--socks-pass') safe[i + 1] = '[REDACTED]';
+	if (safe[i] === '--link' || safe[i] === '--socks-pass' || safe[i] === '--remote-socks-pass') {
+		safe[i + 1] = '[REDACTED]';
+	}
   }
   return safe;
 }
@@ -132,29 +135,41 @@ function spawnJoiner(settings: JoinerSettings): { ok: boolean; error?: string } 
   cleanupStaleWindowsRoutes(exe);
   const tunSupported =
     process.platform === 'win32' || process.platform === 'linux' || process.platform === 'darwin';
-  const noTun = tunSupported ? settings.noTun : true;
+	const phoneMode = settings.connectionMode === 'phone';
+	if (phoneMode && !tunSupported) {
+		return { ok: false, error: `phone gateway TUN is not supported on ${process.platform}` };
+	}
+	const noTun = phoneMode ? false : (tunSupported ? settings.noTun : true);
   if (process.platform !== 'win32' && !noTun && process.getuid && process.getuid() !== 0) {
     send(IPC.LOG, `[main] WARNING: ${process.platform} TUN routing needs root; relaunch with sudo or untick the TUN option\n`);
   }
-  const args = [
-    '--platform', settings.platform,
-    '--link', settings.link,
-    '--name', settings.displayName,
-    '--socks-port', String(settings.socksPort),
-    '--tunnel-mode', settings.tunnelMode,
-    '--video-reliability', settings.videoReliability,
-    '--kcp-profile', settings.kcpProfile,
-    '--vp8-fps', String(settings.vp8Fps),
-    '--vp8-batch', String(settings.vp8Batch),
-    '--resources', settings.resources,
-    '--dns', settings.dns,
-  ];
-  if (settings.socksUser) args.push('--socks-user', settings.socksUser);
-  if (settings.socksPass) args.push('--socks-pass', settings.socksPass);
-  if (noTun) args.push('--no-tun');
-  if (settings.dualTrack && (settings.platform === 'vk' || settings.platform === 'wbstream')) {
-    args.push('--dual-track');
-  }
+	const args = phoneMode ? [
+		'--remote-socks', `${settings.phoneHost}:${settings.phonePort}`,
+		'--remote-socks-user', settings.phoneUser,
+		'--remote-socks-pass', settings.phonePass,
+		'--resources', settings.resources,
+		'--dns', settings.dns,
+	] : [
+		'--platform', settings.platform,
+		'--link', settings.link,
+		'--name', settings.displayName,
+		'--socks-port', String(settings.socksPort),
+		'--tunnel-mode', settings.tunnelMode,
+		'--video-reliability', settings.videoReliability,
+		'--kcp-profile', settings.kcpProfile,
+		'--vp8-fps', String(settings.vp8Fps),
+		'--vp8-batch', String(settings.vp8Batch),
+		'--resources', settings.resources,
+		'--dns', settings.dns,
+	];
+	if (!phoneMode) {
+		if (settings.socksUser) args.push('--socks-user', settings.socksUser);
+		if (settings.socksPass) args.push('--socks-pass', settings.socksPass);
+		if (noTun) args.push('--no-tun');
+		if (settings.dualTrack && (settings.platform === 'vk' || settings.platform === 'wbstream')) {
+			args.push('--dual-track');
+		}
+	}
 
   const elevateOnLinux =
     process.platform === 'linux' && !noTun &&
@@ -210,6 +225,10 @@ function spawnJoiner(settings: JoinerSettings): { ok: boolean; error?: string } 
 	cleanupStaleWindowsRoutes(exe);
 
     if (userRequestedStop || !lastSettings) return;
+	if (lastSettings.connectionMode === 'phone' && code === 3) {
+		send(IPC.LOG, '[main] phone gateway configuration failed; reconnect Android or correct the copied SOCKS5 settings, then press Start\n');
+		return;
+	}
     if (retryCount >= MAX_RETRIES) {
       send(IPC.LOG, `[main] auto-reconnect: giving up after ${MAX_RETRIES} attempts\n`);
       return;
