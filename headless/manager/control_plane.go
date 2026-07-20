@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -14,17 +15,20 @@ import (
 	"time"
 )
 
-const controlPlaneSchema = 1
+const controlPlaneSchema = 2
 
 type clientProfile struct {
-	ID          string         `json:"id"`
-	Name        string         `json:"name"`
-	Enabled     bool           `json:"enabled"`
-	MaxSessions int            `json:"maxSessions"`
-	ExpiresAt   *time.Time     `json:"expiresAt,omitempty"`
-	Config      sessionRequest `json:"config"`
-	CreatedAt   time.Time      `json:"createdAt"`
-	UpdatedAt   time.Time      `json:"updatedAt"`
+	ID                 string         `json:"id"`
+	Name               string         `json:"name"`
+	Enabled            bool           `json:"enabled"`
+	MaxSessions        int            `json:"maxSessions"`
+	ExpiresAt          *time.Time     `json:"expiresAt,omitempty"`
+	Config             sessionRequest `json:"config"`
+	CreatedAt          time.Time      `json:"createdAt"`
+	UpdatedAt          time.Time      `json:"updatedAt"`
+	AutoRestart        bool           `json:"autoRestart"`
+	RecoveryKey        string         `json:"recoveryKey"`
+	RecoveryGeneration int            `json:"recoveryGeneration"`
 }
 
 type profileInput struct {
@@ -33,6 +37,7 @@ type profileInput struct {
 	MaxSessions int            `json:"maxSessions"`
 	ExpiresAt   *time.Time     `json:"expiresAt,omitempty"`
 	Config      sessionRequest `json:"config"`
+	AutoRestart *bool          `json:"autoRestart,omitempty"`
 }
 
 type sessionInput struct {
@@ -41,11 +46,25 @@ type sessionInput struct {
 }
 
 type managedSession struct {
-	ID         string
-	ClientID   string
-	ClientName string
-	CreatedAt  time.Time
-	Manager    *manager
+	ID           string
+	ClientID     string
+	ClientName   string
+	CreatedAt    time.Time
+	Manager      *manager
+	Config       sessionRequest
+	AutoRestart  bool
+	StopCh       chan struct{}
+	StopOnce     sync.Once
+	StateMu      sync.Mutex
+	Generation   int
+	RestartCount int
+	NextRetryAt  *time.Time
+}
+
+func (session *managedSession) isRecovering() bool {
+	session.StateMu.Lock()
+	defer session.StateMu.Unlock()
+	return session.NextRetryAt != nil
 }
 
 type sessionView struct {
@@ -102,8 +121,17 @@ func (cp *controlPlane) load() error {
 	if err := json.Unmarshal(body, &snapshot); err != nil {
 		return fmt.Errorf("decode control-plane state: %w", err)
 	}
+	migrated := snapshot.Schema < controlPlaneSchema
 	for _, profile := range snapshot.Profiles {
+		if profile.RecoveryKey == "" {
+			profile.RecoveryKey = randomSecret()
+			profile.AutoRestart = true
+			migrated = true
+		}
 		cp.profiles[profile.ID] = profile
+	}
+	if migrated {
+		return cp.saveLocked()
 	}
 	return nil
 }
@@ -178,10 +206,18 @@ func (cp *controlPlane) normalizeProfile(input profileInput, previous *clientPro
 		Config:      config,
 		CreatedAt:   now,
 		UpdatedAt:   now,
+		AutoRestart: true,
+		RecoveryKey: randomSecret(),
 	}
 	if previous != nil {
 		profile.ID = previous.ID
 		profile.CreatedAt = previous.CreatedAt
+		profile.AutoRestart = previous.AutoRestart
+		profile.RecoveryKey = previous.RecoveryKey
+		profile.RecoveryGeneration = previous.RecoveryGeneration
+	}
+	if input.AutoRestart != nil {
+		profile.AutoRestart = *input.AutoRestart
 	}
 	return profile, nil
 }
@@ -227,7 +263,8 @@ func (cp *controlPlane) deleteProfile(id string) error {
 		return os.ErrNotExist
 	}
 	for _, session := range cp.sessions {
-		if session.ClientID == id && session.Manager.status().State != "stopped" && session.Manager.status().State != "failed" {
+		state := session.Manager.status().State
+		if session.ClientID == id && ((state != "stopped" && state != "failed") || session.isRecovering()) {
 			return errors.New("stop this client's active sessions before deleting it")
 		}
 	}
@@ -258,7 +295,7 @@ func (cp *controlPlane) startSession(input sessionInput) (sessionView, error) {
 	activeTotal, activeClient := 0, 0
 	for _, session := range cp.sessions {
 		state := session.Manager.status().State
-		if state != "stopped" && state != "failed" {
+		if (state != "stopped" && state != "failed") || session.isRecovering() {
 			activeTotal++
 			if session.ClientID == input.ClientID {
 				activeClient++
@@ -277,11 +314,25 @@ func (cp *controlPlane) startSession(input sessionInput) (sessionView, error) {
 	if input.Config != nil {
 		config = *input.Config
 	}
+	profile.RecoveryGeneration++
+	cp.profiles[profile.ID] = profile
+	if err := cp.saveLocked(); err != nil {
+		cp.mu.Unlock()
+		return sessionView{}, fmt.Errorf("persist recovery generation: %w", err)
+	}
+	config.RecoveryProfile = profile.ID
+	config.RecoveryName = profile.Name
+	config.RecoveryKey = profile.RecoveryKey
+	config.RecoveryGeneration = profile.RecoveryGeneration
 	id := randomID("session")
 	sessionDir := filepath.Join(cp.dataDir, "sessions", id)
 	mgr := newManagerAt(sessionDir)
 	created := time.Now().UTC()
-	session := &managedSession{ID: id, ClientID: input.ClientID, ClientName: profile.Name, CreatedAt: created, Manager: mgr}
+	session := &managedSession{
+		ID: id, ClientID: input.ClientID, ClientName: profile.Name, CreatedAt: created,
+		Manager: mgr, Config: config, AutoRestart: profile.AutoRestart,
+		StopCh: make(chan struct{}), Generation: profile.RecoveryGeneration,
+	}
 	cp.sessions[id] = session
 	cp.mu.Unlock()
 	if err := mgr.start(config); err != nil {
@@ -290,7 +341,82 @@ func (cp *controlPlane) startSession(input sessionInput) (sessionView, error) {
 		cp.mu.Unlock()
 		return sessionView{}, err
 	}
+	if session.AutoRestart {
+		go cp.superviseSession(session)
+	}
 	return cp.view(session), nil
+}
+
+func (cp *controlPlane) superviseSession(session *managedSession) {
+	for {
+		done := session.Manager.doneChannel()
+		if done == nil {
+			return
+		}
+		cycleStarted := time.Now()
+		select {
+		case <-done:
+		case <-session.StopCh:
+			return
+		}
+		if time.Since(cycleStarted) >= 2*time.Minute {
+			session.StateMu.Lock()
+			session.RestartCount = 0
+			session.StateMu.Unlock()
+		}
+		for {
+			session.StateMu.Lock()
+			session.RestartCount++
+			delay := recoveryDelay(session.RestartCount)
+			next := time.Now().UTC().Add(delay)
+			session.NextRetryAt = &next
+			session.StateMu.Unlock()
+			timer := time.NewTimer(delay)
+			select {
+			case <-timer.C:
+			case <-session.StopCh:
+				timer.Stop()
+				return
+			}
+			cp.mu.Lock()
+			profile, exists := cp.profiles[session.ClientID]
+			_, retained := cp.sessions[session.ID]
+			if !exists || !retained || !profile.Enabled || !profile.AutoRestart ||
+				(profile.ExpiresAt != nil && time.Now().After(*profile.ExpiresAt)) {
+				cp.mu.Unlock()
+				return
+			}
+			profile.RecoveryGeneration++
+			cp.profiles[profile.ID] = profile
+			if err := cp.saveLocked(); err != nil {
+				cp.mu.Unlock()
+				continue
+			}
+			cp.mu.Unlock()
+			session.StateMu.Lock()
+			session.Generation = profile.RecoveryGeneration
+			config := session.Config
+			config.ExistingLink = ""
+			config.RecoveryGeneration = session.Generation
+			session.NextRetryAt = nil
+			session.StateMu.Unlock()
+			if err := session.Manager.start(config); err != nil {
+				continue
+			}
+			break
+		}
+	}
+}
+
+func recoveryDelay(attempt int) time.Duration {
+	delays := []time.Duration{2 * time.Second, 5 * time.Second, 10 * time.Second, 30 * time.Second, time.Minute, 2 * time.Minute, 5 * time.Minute}
+	if attempt < 1 {
+		return delays[0]
+	}
+	if attempt > len(delays) {
+		return delays[len(delays)-1]
+	}
+	return delays[attempt-1]
 }
 
 func (cp *controlPlane) listSessions() []sessionView {
@@ -319,9 +445,18 @@ func (cp *controlPlane) session(id string) (sessionView, bool) {
 }
 
 func (cp *controlPlane) view(session *managedSession) sessionView {
+	status := session.Manager.status()
+	session.StateMu.Lock()
+	status.Generation = session.Generation
+	status.RestartCount = session.RestartCount
+	status.NextRetryAt = session.NextRetryAt
+	if session.NextRetryAt != nil && status.State != "stopping" {
+		status.State = "recovering"
+	}
+	session.StateMu.Unlock()
 	return sessionView{
 		ID: session.ID, ClientID: session.ClientID, ClientName: session.ClientName,
-		CreatedAt: session.CreatedAt, Status: session.Manager.status(),
+		CreatedAt: session.CreatedAt, Status: status,
 	}
 }
 
@@ -332,6 +467,10 @@ func (cp *controlPlane) stopSession(id string) (sessionView, error) {
 	if !ok {
 		return sessionView{}, os.ErrNotExist
 	}
+	session.StopOnce.Do(func() { close(session.StopCh) })
+	session.StateMu.Lock()
+	session.NextRetryAt = nil
+	session.StateMu.Unlock()
 	if err := session.Manager.stop(); err != nil {
 		return sessionView{}, err
 	}
@@ -350,6 +489,7 @@ func (cp *controlPlane) deleteSession(id string) error {
 		cp.mu.Unlock()
 		return errors.New("stop the session before removing it")
 	}
+	session.StopOnce.Do(func() { close(session.StopCh) })
 	delete(cp.sessions, id)
 	cp.mu.Unlock()
 	return os.RemoveAll(filepath.Join(cp.dataDir, "sessions", id))
@@ -363,6 +503,10 @@ func (cp *controlPlane) stopAll() {
 	}
 	cp.mu.Unlock()
 	for _, session := range sessions {
+		session.StopOnce.Do(func() { close(session.StopCh) })
+		session.StateMu.Lock()
+		session.NextRetryAt = nil
+		session.StateMu.Unlock()
 		_ = session.Manager.stop()
 	}
 }
@@ -373,4 +517,12 @@ func randomID(prefix string) string {
 		return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
 	}
 	return prefix + "-" + hex.EncodeToString(value[:])
+}
+
+func randomSecret() string {
+	var value [32]byte
+	if _, err := rand.Read(value[:]); err != nil {
+		return randomID("recovery")
+	}
+	return base64.RawURLEncoding.EncodeToString(value[:])
 }

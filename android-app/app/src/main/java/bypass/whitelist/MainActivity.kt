@@ -1,10 +1,16 @@
 package bypass.whitelist
 
+import android.Manifest
 import android.animation.ArgbEvaluator
+import android.content.BroadcastReceiver
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.net.VpnService
+import android.os.Build
 import android.os.Bundle
 import android.view.View
 import android.view.animation.AccelerateDecelerateInterpolator
@@ -16,6 +22,7 @@ import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -24,6 +31,7 @@ import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentManager
 import androidx.viewpager2.adapter.FragmentStateAdapter
 import androidx.viewpager2.widget.ViewPager2
+import bypass.whitelist.recovery.RecoveryNotificationListener
 import bypass.whitelist.tunnel.CallConfig
 import bypass.whitelist.tunnel.CallPlatform
 import bypass.whitelist.tunnel.HeadlessJoinController
@@ -92,7 +100,13 @@ class MainActivity :
     @Volatile private var overlayVisible: Boolean = false
     @Volatile private var resetGeneration: Long = 0L
     private var pendingConnectConfig: CallConfig? = null
+	private var recoveryInProgress: Boolean = false
     private val navColorEvaluator = ArgbEvaluator()
+	private val recoveryReceiver = object : BroadcastReceiver() {
+		override fun onReceive(context: Context?, intent: Intent?) {
+			handleRecoveryUpdate(intent?.getStringExtra(RecoveryNotificationListener.EXTRA_DESTINATION_ID))
+		}
+	}
 
     private val vpnLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -100,11 +114,23 @@ class MainActivity :
         if (result.resultCode == RESULT_OK) startVpnService()
         else appendLog("VPN permission denied")
     }
+	private val notificationPermissionLauncher = registerForActivityResult(
+		ActivityResultContracts.RequestPermission()
+	) { }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContentView(R.layout.activity_main)
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+			ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+		) {
+			notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+		}
+        ContextCompat.registerReceiver(
+			this, recoveryReceiver, IntentFilter(RecoveryNotificationListener.ACTION_RECOVERY_UPDATE),
+			ContextCompat.RECEIVER_NOT_EXPORTED,
+		)
 
         bottomNav = findViewById(R.id.bottomNav)
         navMain = findViewById(R.id.navMain)
@@ -220,8 +246,11 @@ class MainActivity :
         TunnelServiceState.vpnStatusCallback = { status ->
             runOnUiThread {
                 if (resetInProgress) {
-                    mainFragment()?.onStatusChanged(VpnStatus.STOPPING)
-                    mainFragment()?.onStatusTextChanged("Stopping previous session...")
+					val resetStatus = if (recoveryInProgress) VpnStatus.RECOVERING else VpnStatus.STOPPING
+					mainFragment()?.onStatusChanged(resetStatus)
+					mainFragment()?.onStatusTextChanged(
+						if (recoveryInProgress) getString(R.string.vpn_recovering) else "Stopping previous session..."
+					)
                     return@runOnUiThread
                 }
                 lastStatus = status
@@ -247,10 +276,12 @@ class MainActivity :
         when {
             resetInProgress -> {
                 connected = false
-                lastStatus = VpnStatus.STOPPING
+				lastStatus = if (recoveryInProgress) VpnStatus.RECOVERING else VpnStatus.STOPPING
                 mainFragment()?.onConnectedChanged(false)
-                mainFragment()?.onStatusChanged(VpnStatus.STOPPING)
-                mainFragment()?.onStatusTextChanged("Stopping previous session...")
+				mainFragment()?.onStatusChanged(lastStatus ?: VpnStatus.STOPPING)
+				mainFragment()?.onStatusTextChanged(
+					if (recoveryInProgress) getString(R.string.vpn_recovering) else "Stopping previous session..."
+				)
             }
             TunnelServiceState.isTunnelActive(this) -> {
                 if (!connected || lastStatus != VpnStatus.TUNNEL_ACTIVE) {
@@ -279,6 +310,7 @@ class MainActivity :
     }
 
     override fun onDestroy() {
+		runCatching { unregisterReceiver(recoveryReceiver) }
         navPageChangeCallback?.let(tabContainer::unregisterOnPageChangeCallback)
         navPageChangeCallback = null
         TunnelVpnService.onDisconnect = null
@@ -474,6 +506,11 @@ class MainActivity :
     }
 
     private fun handleIntent(intent: Intent?) {
+		if (intent?.action == ACTION_RECOVERY_UPDATE) {
+			intent.action = null
+			handleRecoveryUpdate(intent.getStringExtra(RecoveryNotificationListener.EXTRA_DESTINATION_ID))
+			return
+		}
         if (intent?.action != ACTION_AUTO_START) return
         intent.action = null
         val isConnecting = lastStatus == VpnStatus.CONNECTING
@@ -485,6 +522,27 @@ class MainActivity :
             onDisconnectPressed()
         }
     }
+
+	private fun handleRecoveryUpdate(destinationId: String?) {
+		val config = Prefs.savedDestinations.firstOrNull { it.id == destinationId } ?: return
+		mainFragment()?.onDestinationsChanged()
+		if (!config.recoveryPending) return
+		if (Prefs.activeDestinationId != config.id) {
+			Toast.makeText(this, R.string.recovery_notification_text, Toast.LENGTH_LONG).show()
+			return
+		}
+		lastStatus = VpnStatus.RECOVERING
+		recoveryInProgress = true
+		mainFragment()?.onStatusChanged(VpnStatus.RECOVERING)
+		mainFragment()?.onStatusTextChanged(getString(R.string.vpn_recovering))
+		pendingConnectConfig = config
+		if (TunnelServiceState.isAnyTunnelComponentRunning(this) || !PortGuard.isPortAvailable(Prefs.socksPort)) {
+			fullReset()
+		} else {
+			pendingConnectConfig = null
+			startJoinFor(config)
+		}
+	}
 
     private fun selectNavTab(itemId: Int, animatePager: Boolean = true) {
         if (currentTabId == itemId) return
@@ -676,6 +734,9 @@ class MainActivity :
             fullReset()
             return
         }
+		if (config.recoveryPending) {
+			Prefs.updateDestination(config.copy(recoveryPending = false))
+		}
         val url = config.url.trim()
         if (url.isEmpty()) return
 
@@ -691,6 +752,7 @@ class MainActivity :
         }
 
         activeJoinUrl = url
+		recoveryInProgress = false
         logWriter.reset()
         runOnUiThread { logsFragment()?.refresh() }
         appendLog("Loading: ${maskUrl(url)}")
@@ -742,7 +804,9 @@ class MainActivity :
         removeJoinFragment()
         setJoinOverlayVisible(false)
         mainFragment()?.onConnectedChanged(false)
-        mainFragment()?.onStatusChanged(VpnStatus.CALL_DISCONNECTED)
+		mainFragment()?.onStatusChanged(
+			if (pendingConnectConfig != null) VpnStatus.RECOVERING else VpnStatus.CALL_DISCONNECTED
+		)
     }
 
     private fun fullReset() {
@@ -750,7 +814,7 @@ class MainActivity :
         resetInProgress = true
         val resetId = ++resetGeneration
         connected = false
-        lastStatus = VpnStatus.STOPPING
+		lastStatus = if (recoveryInProgress) VpnStatus.RECOVERING else VpnStatus.STOPPING
         val controller = activeHeadlessController
         activeHeadlessController = null
         activeJoinUrl = ""
@@ -761,8 +825,8 @@ class MainActivity :
         HeadlessSessionService.requestStop(this)
         setJoinOverlayVisible(false)
         mainFragment()?.onConnectedChanged(false)
-        mainFragment()?.onStatusChanged(VpnStatus.STOPPING)
-        mainFragment()?.onStatusTextChanged("Stopping previous session...")
+		mainFragment()?.onStatusChanged(lastStatus ?: VpnStatus.STOPPING)
+		mainFragment()?.onStatusTextChanged(if (recoveryInProgress) getString(R.string.vpn_recovering) else "Stopping previous session...")
         thread(name = "full-reset-shutdown") {
             controller?.close()
             var attempts = 0
@@ -823,6 +887,7 @@ class MainActivity :
 
     private fun forceUnlockReset(message: String) {
         resetInProgress = false
+		recoveryInProgress = false
         pendingConnectConfig = null
         connected = false
         activeJoinUrl = ""
@@ -868,6 +933,7 @@ class MainActivity :
 
     companion object {
         const val ACTION_AUTO_START = "bypass.whitelist.AUTO_START"
+		const val ACTION_RECOVERY_UPDATE = "bypass.whitelist.OPEN_RECOVERY"
         private const val SUB_PAGE_TAG = "sub_page"
         private const val STATE_CURRENT_TAB_ID = "current_tab_id"
         private const val CALL_LINK = ""
@@ -876,4 +942,3 @@ class MainActivity :
         private const val TAB_LOGS = 2
     }
 }
-

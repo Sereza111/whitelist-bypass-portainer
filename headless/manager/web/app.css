@@ -95,6 +95,10 @@ button:disabled { opacity:.3; cursor:default; }
 .status-rune { width:10px; height:10px; transform:rotate(45deg); border:1px solid var(--amber); background:#2d2014; }
 [data-state="connected"] .status-rune,[data-state="link-ready"] .status-rune,[data-state="waiting-for-client"] .status-rune { border-color:var(--green); background:#254334; box-shadow:0 0 12px rgba(105,161,132,.35); }
 [data-state="failed"] .status-rune,[data-state="degraded"] .status-rune { border-color:var(--danger); background:#571d2a; }
+[data-state="recovering"] { border-color:var(--amber); background:linear-gradient(135deg,#120b0f,#21130e); }
+[data-state="recovering"] .status-rune { border-color:#e0a15d; background:#7f4925; animation:recovery-pulse 1.15s ease-in-out infinite; }
+[data-state="recovering"] .session-open small { color:#e8b77e; }
+@keyframes recovery-pulse{0%,100%{transform:rotate(45deg) scale(.75);box-shadow:0 0 0 rgba(224,161,93,0)}50%{transform:rotate(225deg) scale(1.25);box-shadow:0 0 18px rgba(224,161,93,.65)}}
 .session-rate { display:flex; justify-content:space-between; margin:10px 0; padding:8px 0; border-top:1px solid var(--line-soft); border-bottom:1px solid var(--line-soft); color:#817477; font:9px Consolas,monospace; }
 .session-actions { justify-content:flex-end; }
 .detail-empty,.empty { padding:26px; margin:0; border:1px dashed #3b2b33; color:#73676c; text-align:center; }

@@ -1,12 +1,15 @@
 package bypass.whitelist.ui
 
 import android.os.Bundle
+import android.content.Intent
+import android.provider.Settings
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.view.isNotEmpty
+import androidx.core.app.NotificationManagerCompat
 import androidx.fragment.app.Fragment
 import bypass.whitelist.App
 import bypass.whitelist.R
@@ -148,6 +151,14 @@ class SettingsScreenFragment : Fragment(R.layout.fragment_settings_screen) {
         addSwitchRow(card, R.drawable.ic_setting_reconnect, getString(R.string.settings_row_reconnect), getString(R.string.settings_row_reconnect_sub), Prefs.connectOnStart) { checked ->
             Prefs.connectOnStart = checked
         }
+		val recoveryAccess = NotificationManagerCompat.getEnabledListenerPackages(requireContext()).contains(requireContext().packageName)
+		addRow(
+			card, R.drawable.ic_setting_reconnect, getString(R.string.settings_row_recovery),
+			getString(R.string.settings_row_recovery_sub),
+			if (recoveryAccess) getString(R.string.settings_row_recovery_on) else getString(R.string.settings_row_recovery_off),
+		) {
+			startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+		}
         return section
     }
 

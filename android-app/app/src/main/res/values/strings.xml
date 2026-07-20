@@ -96,6 +96,13 @@
 
     <string name="paste_from_clipboard">Paste from clipboard</string>
     <string name="clipboard_empty">Clipboard is empty</string>
+	<string name="recovery_pairing_label">AUTO RECOVERY · paste the mobile block from the server panel</string>
+	<string name="recovery_profile_hint">Profile ID</string>
+	<string name="recovery_key_hint">Recovery key</string>
+	<string name="recovery_pairing_incomplete">Both recovery profile and key are required</string>
+	<string name="recovery_notification_title">Protected route renewed</string>
+	<string name="recovery_notification_text">A new signed server link is ready</string>
+	<string name="vpn_recovering">Restoring protected connection…</string>
 
 
     <string name="settings_row_tunnel_mode">Tunnel mode</string>
@@ -114,6 +121,10 @@
     <string name="settings_row_headless_sub">Skip the visible browser join</string>
     <string name="settings_row_reconnect">Reconnect on app start</string>
     <string name="settings_row_reconnect_sub">Restore the last session automatically</string>
+	<string name="settings_row_recovery">Automatic recovery</string>
+	<string name="settings_row_recovery_sub">Allow signed VK updates to renew an expired call</string>
+	<string name="settings_row_recovery_on">Ready</string>
+	<string name="settings_row_recovery_off">Grant access</string>
 
     <string name="settings_toast_destinations_cleared">All calls removed</string>
     <string name="settings_toast_reset_done">Settings reset</string>

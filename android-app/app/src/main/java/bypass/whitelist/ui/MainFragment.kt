@@ -235,6 +235,7 @@ class MainFragment : Fragment(R.layout.fragment_main_screen) {
     private fun isHostConnecting(): Boolean = when (hostStatus()) {
         VpnStatus.STOPPING,
         VpnStatus.CONNECTING,
+		VpnStatus.RECOVERING,
         VpnStatus.STARTING,
         VpnStatus.CALL_CONNECTED,
         VpnStatus.DATACHANNEL_OPEN -> true
@@ -243,4 +244,3 @@ class MainFragment : Fragment(R.layout.fragment_main_screen) {
 
     private fun hostStatus(): VpnStatus? = host()?.currentStatus()
 }
-

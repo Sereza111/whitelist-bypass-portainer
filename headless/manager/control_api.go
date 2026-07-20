@@ -17,13 +17,14 @@ type providerStatus struct {
 }
 
 type overviewResponse struct {
-	BuildVersion   string           `json:"buildVersion"`
-	BuildCommit    string           `json:"buildCommit"`
-	BuildTime      string           `json:"buildTime"`
-	MaxSessions    int              `json:"maxSessions"`
-	ActiveSessions int              `json:"activeSessions"`
-	ClientCount    int              `json:"clientCount"`
-	Providers      []providerStatus `json:"providers"`
+	BuildVersion     string           `json:"buildVersion"`
+	BuildCommit      string           `json:"buildCommit"`
+	BuildTime        string           `json:"buildTime"`
+	MaxSessions      int              `json:"maxSessions"`
+	ActiveSessions   int              `json:"activeSessions"`
+	ClientCount      int              `json:"clientCount"`
+	Providers        []providerStatus `json:"providers"`
+	RecoveryDelivery bool             `json:"recoveryDelivery"`
 }
 
 func registerControlAPIRoutes(mux *http.ServeMux, cp *controlPlane, username, password, secretsDir string) {
@@ -46,6 +47,7 @@ func registerControlAPIRoutes(mux *http.ServeMux, cp *controlPlane, username, pa
 			BuildVersion: Version, BuildCommit: BuildCommit, BuildTime: BuildTime,
 			MaxSessions: cp.maxSessions, ActiveSessions: active,
 			ClientCount: len(cp.listProfiles()), Providers: inspectProviders(secretsDir),
+			RecoveryDelivery: strings.TrimSpace(os.Getenv("VK_PEER_ID")) != "",
 		})
 	}))
 
@@ -176,7 +178,7 @@ func inspectProviders(secretsDir string) []providerStatus {
 
 func isActiveState(state string) bool {
 	switch strings.ToLower(state) {
-	case "starting", "running", "link-ready", "waiting-for-client", "connected", "degraded", "stopping":
+	case "starting", "running", "link-ready", "waiting-for-client", "connected", "degraded", "recovering", "stopping":
 		return true
 	default:
 		return false

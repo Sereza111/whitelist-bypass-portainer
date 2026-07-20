@@ -81,6 +81,9 @@ func TestControlAPIProfileLifecycle(t *testing.T) {
 	if created.ID == "" || created.Name != "Phone" || created.MaxSessions != 2 {
 		t.Fatalf("unexpected created profile: %#v", created)
 	}
+	if !created.AutoRestart || len(created.RecoveryKey) < 32 {
+		t.Fatalf("recovery defaults missing: %#v", created)
+	}
 
 	response = controlAPIRequest(t, mux, http.MethodGet, "/api/profiles", "")
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), created.ID) {
@@ -162,6 +165,38 @@ func TestControlPlaneProfilePersistence(t *testing.T) {
 	}
 }
 
+func TestControlPlaneMigratesRecoveryDefaults(t *testing.T) {
+	dataDir := t.TempDir()
+	now := time.Now().UTC()
+	legacy := controlPlaneSnapshot{
+		Schema: 1,
+		Profiles: []clientProfile{{
+			ID: "client-legacy", Name: "Legacy phone", Enabled: true, MaxSessions: 1,
+			Config:    sessionRequest{Mode: "vk", Resources: "default", DisplayName: "Phone", VideoReliability: "auto", KCPProfile: "balanced"},
+			CreatedAt: now, UpdatedAt: now,
+		}},
+	}
+	body, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, "control-plane.json"), body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cp, err := newControlPlane(dataDir, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profiles := cp.listProfiles()
+	if len(profiles) != 1 || !profiles[0].AutoRestart || len(profiles[0].RecoveryKey) < 32 {
+		t.Fatalf("legacy recovery migration failed: %#v", profiles)
+	}
+	persisted, err := os.ReadFile(filepath.Join(dataDir, "control-plane.json"))
+	if err != nil || !strings.Contains(string(persisted), `"schema": 2`) {
+		t.Fatalf("migrated schema was not persisted: err=%v body=%s", err, persisted)
+	}
+}
+
 func TestControlPlaneEnforcesClientAndServerLimits(t *testing.T) {
 	cp, err := newControlPlane(t.TempDir(), 1)
 	if err != nil {
@@ -238,5 +273,14 @@ func TestLatestMetricsAndRuntimeState(t *testing.T) {
 	lines = append(lines, "kcptunnel: stalled wait_snd=1024")
 	if state := deriveRuntimeState("running", lines); state != "degraded" {
 		t.Fatalf("stalled state=%q", state)
+	}
+}
+
+func TestRecoveryDelayIsBounded(t *testing.T) {
+	if recoveryDelay(1) != 2*time.Second || recoveryDelay(4) != 30*time.Second {
+		t.Fatalf("unexpected early recovery delays")
+	}
+	if recoveryDelay(100) != 5*time.Minute {
+		t.Fatalf("recovery delay is not capped")
 	}
 }

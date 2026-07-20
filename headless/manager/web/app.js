@@ -26,8 +26,23 @@ function showError(message = '') {
   byId('error').hidden = !message;
 }
 
+async function copyText(value) {
+	if (navigator.clipboard?.writeText) {
+		try { await navigator.clipboard.writeText(value); return; } catch (_) {}
+	}
+	const area = document.createElement('textarea');
+	area.value = value;
+	area.style.position = 'fixed';
+	area.style.opacity = '0';
+	document.body.appendChild(area);
+	area.select();
+	const copied = document.execCommand('copy');
+	area.remove();
+	if (!copied) throw new Error('Браузер запретил копирование — включи HTTPS или скопируй вручную.');
+}
+
 function activeState(state) {
-  return ['starting', 'running', 'link-ready', 'waiting-for-client', 'connected', 'degraded', 'stopping'].includes(state);
+  return ['starting', 'running', 'link-ready', 'waiting-for-client', 'connected', 'degraded', 'recovering', 'stopping'].includes(state);
 }
 
 function profilePayload() {
@@ -35,6 +50,7 @@ function profilePayload() {
   return {
     name: byId('profileName').value.trim(),
     enabled: byId('enabled').checked,
+	autoRestart: byId('autoRestart').checked,
     maxSessions: Number(byId('maxSessions').value),
     expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null,
     config: {
@@ -54,6 +70,7 @@ function resetForm() {
   byId('resources').value = 'default';
   byId('kcpProfile').value = 'balanced';
   byId('enabled').checked = true;
+	byId('autoRestart').checked = true;
   byId('expiresAt').value = '';
   byId('cancelEdit').hidden = true;
   byId('saveProfile').textContent = 'Сохранить профиль';
@@ -70,6 +87,7 @@ function editProfile(id) {
   byId('kcpProfile').value = profile.config.kcpProfile;
   byId('maxSessions').value = String(profile.maxSessions);
   byId('enabled').checked = profile.enabled;
+	byId('autoRestart').checked = profile.autoRestart !== false;
   byId('expiresAt').value = profile.expiresAt ? toLocalDateTime(profile.expiresAt) : '';
   byId('cancelEdit').hidden = false;
   byId('saveProfile').textContent = 'Обновить профиль';
@@ -91,6 +109,7 @@ async function toggleProfile(id) {
     body: JSON.stringify({
       name: profile.name,
       enabled: !profile.enabled,
+	  autoRestart: profile.autoRestart,
       maxSessions: profile.maxSessions,
       expiresAt: profile.expiresAt || null,
       config: profile.config,
@@ -140,16 +159,45 @@ function renderProfiles() {
       <div class="profile-glyph">${escapeHTML(profile.name.slice(0, 1).toUpperCase())}</div>
       <div class="profile-copy">
         <div class="profile-heading"><h3>${escapeHTML(profile.name)}</h3><span>${profile.enabled ? 'ACTIVE' : 'LOCKED'}</span></div>
-        <p>${escapeHTML(profile.config.mode.toUpperCase())} · ${escapeHTML(profile.config.kcpProfile)} · limit ${profile.maxSessions}</p>
+		<p>${escapeHTML(profile.config.mode.toUpperCase())} · ${profile.autoRestart ? 'AUTO RECOVERY' : 'MANUAL'} · limit ${profile.maxSessions}</p>
       </div>
       <div class="profile-actions">
         <button class="small start-client" data-id="${profile.id}" ${profile.enabled ? '' : 'disabled'}>Запустить</button>
+		<button class="small mobile-client" data-id="${profile.id}">В телефон</button>
         <button class="small toggle-client" data-id="${profile.id}">${profile.enabled ? 'Отключить' : 'Включить'}</button>
         <button class="icon edit-client" data-id="${profile.id}" title="Изменить">✎</button>
         <button class="icon danger delete-client" data-id="${profile.id}" title="Удалить">×</button>
       </div>
     </article>`;
   }).join('');
+}
+
+async function copyMobileProfile(id) {
+	const profile = app.profiles.find((item) => item.id === id);
+	if (!profile) return;
+	const session = app.sessions
+		.filter((item) => item.clientId === id && item.status?.sessionLink)
+		.sort((a, b) => (b.status.generation || 0) - (a.status.generation || 0))[0];
+	const block = [
+		'WLB Recovery Profile',
+		`Name: ${profile.name}`,
+		`Profile: ${profile.id}`,
+		`Key: ${profile.recoveryKey}`,
+		`Generation: ${session?.status?.generation || 0}`,
+		`Link: ${session?.status?.sessionLink || '<start profile first>'}`,
+	].join('\n');
+	await copyText(block);
+	showError('Профиль восстановления скопирован — вставь его в Android-клиент.');
+}
+
+function friendlyState(status) {
+	const labels = {
+		starting: 'Создаю защищённый звонок', running: 'Подготавливаю канал',
+		'link-ready': 'Ссылка готова', 'waiting-for-client': 'Жду устройство',
+		connected: 'Защищённый канал активен', degraded: 'Стабилизирую соединение',
+		recovering: 'Восстанавливаю связь', stopping: 'Останавливаю', stopped: 'Остановлен', failed: 'Ожидаю восстановления',
+	};
+	return labels[status.state] || status.state;
 }
 
 function renderSessions() {
@@ -183,7 +231,7 @@ function renderSessions() {
     return `<article class="session-card ${selected}" data-session-id="${session.id}" data-state="${escapeHTML(status.state)}">
       <button class="session-open" data-id="${session.id}">
         <span class="status-rune"></span>
-        <span><strong>${escapeHTML(session.clientName)}</strong><small>${escapeHTML(status.state)}</small></span>
+		<span><strong>${escapeHTML(session.clientName)}</strong><small>${escapeHTML(friendlyState(status))}</small></span>
       </button>
       <div class="session-rate"><span class="session-tx">TX ${escapeHTML(tx)}</span><span class="session-rx">RX ${escapeHTML(rx)} kbps</span></div>
       <div class="session-actions">
@@ -209,7 +257,7 @@ async function renderDetail() {
   const metrics = status.metrics || {};
   byId('detail').hidden = false;
   byId('detailEmpty').hidden = true;
-  byId('selectedTitle').textContent = `${session.clientName} · ${status.state}`;
+  byId('selectedTitle').textContent = `${session.clientName} · ${friendlyState(status)}`;
   byId('sessionLink').value = status.sessionLink || '';
   byId('metrics').innerHTML = [
     metricCard('Download', metrics.rx_kbps, 'kbps'),
@@ -218,6 +266,8 @@ async function renderDetail() {
     metricCard('Carrier queue', metrics.queue || '—', 'frames'),
     metricCard('Dropped', metrics.kcp_dropped || '0', 'segments'),
     metricCard('Recoveries', metrics.kcp_stalls || '0', 'stalls'),
+	metricCard('Call generation', status.generation || '1'),
+	metricCard('Creator restarts', status.restartCount || '0'),
   ].join('');
   const atBottom = byId('logs').scrollTop + byId('logs').clientHeight >= byId('logs').scrollHeight - 24;
   byId('logs').textContent = (status.logs || []).join('\n') || 'Событий пока нет';
@@ -226,6 +276,7 @@ async function renderDetail() {
 
 function bindDynamicActions() {
   document.querySelectorAll('.start-client').forEach((button) => button.onclick = () => run(() => startProfile(button.dataset.id)));
+	document.querySelectorAll('.mobile-client').forEach((button) => button.onclick = () => run(() => copyMobileProfile(button.dataset.id)));
   document.querySelectorAll('.toggle-client').forEach((button) => button.onclick = () => run(() => toggleProfile(button.dataset.id)));
   document.querySelectorAll('.edit-client').forEach((button) => button.onclick = () => editProfile(button.dataset.id));
   document.querySelectorAll('.delete-client').forEach((button) => button.onclick = () => run(() => deleteProfile(button.dataset.id)));
@@ -259,8 +310,8 @@ async function refresh() {
     byId('sessionLimit').textContent = `из ${overview.maxSessions}`;
     byId('clientCount').textContent = overview.clientCount;
     const vk = overview.providers.find((provider) => provider.id === 'vk');
-    byId('vkProvider').textContent = vk?.configured ? 'ready' : 'missing';
-    byId('vkProvider').className = vk?.configured ? 'good' : 'bad';
+	byId('vkProvider').textContent = !vk?.configured ? 'missing' : (overview.recoveryDelivery ? 'ready + recovery' : 'set VK_PEER_ID');
+	byId('vkProvider').className = vk?.configured && overview.recoveryDelivery ? 'good' : 'bad';
     renderProfiles();
     renderSessions();
     bindDynamicActions();
@@ -294,7 +345,7 @@ byId('reveal').addEventListener('click', () => {
   byId('reveal').textContent = field.type === 'password' ? 'Показать' : 'Скрыть';
 });
 byId('copy').addEventListener('click', async () => {
-  if (byId('sessionLink').value) await navigator.clipboard.writeText(byId('sessionLink').value);
+  if (byId('sessionLink').value) await copyText(byId('sessionLink').value);
 });
 
 run(refresh);

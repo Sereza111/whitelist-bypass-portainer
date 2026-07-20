@@ -122,6 +122,46 @@
             android:textColorHint="@color/ink_3"
             android:textSize="12sp" />
 
+		<TextView
+			android:layout_width="wrap_content"
+			android:layout_height="wrap_content"
+			android:layout_marginTop="14dp"
+			android:text="@string/recovery_pairing_label"
+			android:textColor="@color/ink_3"
+			android:textSize="10sp" />
+
+		<LinearLayout
+			android:layout_width="match_parent"
+			android:layout_height="wrap_content"
+			android:layout_marginTop="6dp"
+			android:orientation="horizontal">
+
+			<EditText
+				android:id="@+id/inputRecoveryProfile"
+				android:layout_width="0dp"
+				android:layout_height="wrap_content"
+				android:layout_weight="1"
+				android:background="@drawable/bg_input"
+				android:hint="@string/recovery_profile_hint"
+				android:inputType="text"
+				android:padding="12dp"
+				android:textColor="@color/ink"
+				android:textSize="11sp" />
+
+			<EditText
+				android:id="@+id/inputRecoveryKey"
+				android:layout_width="0dp"
+				android:layout_height="wrap_content"
+				android:layout_marginStart="8dp"
+				android:layout_weight="1"
+				android:background="@drawable/bg_input"
+				android:hint="@string/recovery_key_hint"
+				android:inputType="textPassword"
+				android:padding="12dp"
+				android:textColor="@color/ink"
+				android:textSize="11sp" />
+		</LinearLayout>
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -149,4 +189,3 @@
         </LinearLayout>
     </LinearLayout>
 </androidx.core.widget.NestedScrollView>
-

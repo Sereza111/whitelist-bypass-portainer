@@ -12,6 +12,10 @@ data class CallConfig(
     val vp8Fps: Int? = null,
     val vp8Batch: Int? = null,
     val dualTrack: Boolean? = null,
+	val recoveryProfile: String? = null,
+	val recoveryKey: String? = null,
+	val recoveryGeneration: Int = 0,
+	val recoveryPending: Boolean = false,
 ) {
     val platform: CallPlatform get() = CallPlatform.fromUrl(url)
 
@@ -37,6 +41,10 @@ data class CallConfig(
         vp8Fps?.let { put("vp8Fps", it) }
         vp8Batch?.let { put("vp8Batch", it) }
         dualTrack?.let { put("dualTrack", it) }
+		recoveryProfile?.let { put("recoveryProfile", it) }
+		recoveryKey?.let { put("recoveryKey", it) }
+		put("recoveryGeneration", recoveryGeneration)
+		put("recoveryPending", recoveryPending)
     }
 
     companion object {
@@ -51,6 +59,10 @@ data class CallConfig(
             vp8Fps = if (obj.has("vp8Fps")) obj.getInt("vp8Fps") else null,
             vp8Batch = if (obj.has("vp8Batch")) obj.getInt("vp8Batch") else null,
             dualTrack = if (obj.has("dualTrack")) obj.getBoolean("dualTrack") else null,
+			recoveryProfile = obj.optString("recoveryProfile").takeIf { it.isNotBlank() },
+			recoveryKey = obj.optString("recoveryKey").takeIf { it.isNotBlank() },
+			recoveryGeneration = obj.optInt("recoveryGeneration", 0),
+			recoveryPending = obj.optBoolean("recoveryPending", false),
         )
 
         fun listToJson(items: List<CallConfig>): String {
@@ -83,4 +95,3 @@ data class CallConfig(
         }
     }
 }
-

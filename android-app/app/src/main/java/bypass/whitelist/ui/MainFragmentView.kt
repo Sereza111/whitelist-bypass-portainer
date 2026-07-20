@@ -114,7 +114,7 @@ class MainFragmentView(private val root: View) {
             collapsedToActive = true
             renderCalls()
             stopPulse()
-        } else if (status == VpnStatus.CONNECTING || status == VpnStatus.STARTING || status == VpnStatus.STOPPING || status == VpnStatus.CALL_CONNECTED || status == VpnStatus.DATACHANNEL_OPEN) {
+        } else if (status == VpnStatus.CONNECTING || status == VpnStatus.RECOVERING || status == VpnStatus.STARTING || status == VpnStatus.STOPPING || status == VpnStatus.CALL_CONNECTED || status == VpnStatus.DATACHANNEL_OPEN) {
             heroLabel.text = context.getString(R.string.hero_cancel)
             hero.setBackgroundResource(R.drawable.bg_hero_active)
             heroLabel.setTextColor(context.getColor(R.color.accent_emerald))
@@ -255,7 +255,11 @@ class MainFragmentView(private val root: View) {
         val statusDot = row.findViewById<View>(R.id.rowStatusDot)
 
         nameView.text = config.name
-        linkView.text = config.url
+		linkView.text = if (config.recoveryProfile != null) {
+			"AUTO RECOVERY · ${config.platformLabel} · GEN ${config.recoveryGeneration}"
+		} else {
+			config.url
+		}
         glyphView.text = config.platformGlyph
 
         if (isActive) {
@@ -319,4 +323,3 @@ class MainFragmentView(private val root: View) {
         pingResult.visibility = View.GONE
     }
 }
-

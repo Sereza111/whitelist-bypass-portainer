@@ -103,6 +103,19 @@ contains destination addresses and session-adjacent runtime data.
 - Redact both local and remote SOCKS passwords. The Android copied config is a
   secret and must never be committed or included in logs.
 
+## Signed VK recovery (alpha.5)
+
+- Manager profiles persist an auto-restart policy and per-profile recovery
+  key. A failed Creator is restarted with capped backoff while retaining the
+  logical session and increasing its generation.
+- VK Creator sends `WLB1.<base64url-json>.<base64url-hmac>` to `VK_PEER_ID`
+  after creating a fresh call. Never log the envelope, link or recovery key.
+- Android accepts recovery notifications only for a paired profile, valid
+  HMAC, recent timestamp and strictly increasing generation.
+- The intended deployment uses a separate server VK account for cookies and
+  the user's personal VK id as `VK_PEER_ID`; self-messages are not a reliable
+  notification channel.
+
 ## Current transport status
 
 1. ACK/UNA progress is measured independently from inbound traffic. Sustained

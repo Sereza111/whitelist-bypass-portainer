@@ -25,7 +25,7 @@ import (
 )
 
 var (
-	Version     = "0.5.0-alpha.4"
+	Version     = "0.5.0-alpha.5"
 	BuildCommit = "unknown"
 	BuildTime   = "unknown"
 )
@@ -34,12 +34,16 @@ var (
 var webFiles embed.FS
 
 type sessionRequest struct {
-	Mode             string `json:"mode"`
-	Resources        string `json:"resources"`
-	DisplayName      string `json:"displayName"`
-	ExistingLink     string `json:"existingLink"`
-	VideoReliability string `json:"videoReliability"`
-	KCPProfile       string `json:"kcpProfile"`
+	Mode               string `json:"mode"`
+	Resources          string `json:"resources"`
+	DisplayName        string `json:"displayName"`
+	ExistingLink       string `json:"existingLink"`
+	VideoReliability   string `json:"videoReliability"`
+	KCPProfile         string `json:"kcpProfile"`
+	RecoveryProfile    string `json:"-"`
+	RecoveryName       string `json:"-"`
+	RecoveryKey        string `json:"-"`
+	RecoveryGeneration int    `json:"-"`
 }
 
 type sessionStatus struct {
@@ -56,6 +60,9 @@ type sessionStatus struct {
 	BuildCommit  string            `json:"buildCommit"`
 	Logs         []string          `json:"logs"`
 	Metrics      map[string]string `json:"metrics,omitempty"`
+	Generation   int               `json:"generation,omitempty"`
+	RestartCount int               `json:"restartCount,omitempty"`
+	NextRetryAt  *time.Time        `json:"nextRetryAt,omitempty"`
 }
 
 type manager struct {
@@ -212,6 +219,14 @@ func (m *manager) commandFor(req sessionRequest) (*exec.Cmd, error) {
 		}
 		args = append(args, "--video-reliability", req.VideoReliability)
 		args = append(args, "--kcp-profile", req.KCPProfile)
+		if req.RecoveryProfile != "" && req.RecoveryKey != "" {
+			args = append(args,
+				"--recovery-profile", req.RecoveryProfile,
+				"--recovery-name", req.RecoveryName,
+				"--recovery-key", req.RecoveryKey,
+				"--recovery-generation", fmt.Sprint(req.RecoveryGeneration),
+			)
+		}
 	case "telemost":
 		if req.ExistingLink != "" {
 			args = append(args, "--tm-link", req.ExistingLink)
@@ -234,6 +249,12 @@ func (m *manager) commandFor(req sessionRequest) (*exec.Cmd, error) {
 	cmd := exec.Command(binaryPath, args...)
 	configureChildProcess(cmd)
 	return cmd, nil
+}
+
+func (m *manager) doneChannel() <-chan struct{} {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.done
 }
 
 func (m *manager) start(req sessionRequest) error {

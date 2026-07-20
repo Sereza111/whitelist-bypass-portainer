@@ -2,6 +2,9 @@ package main
 
 import (
 	"bufio"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -12,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -34,6 +38,23 @@ type CallInfo struct {
 	StunServer StunServer
 	WSEndpoint string
 	WtEndpoint string
+}
+
+type recoveryNotice struct {
+	Profile    string
+	Name       string
+	Key        string
+	Generation int
+}
+
+type recoveryPayload struct {
+	Version    int    `json:"v"`
+	Profile    string `json:"profile"`
+	Name       string `json:"name"`
+	Provider   string `json:"provider"`
+	Generation int    `json:"generation"`
+	IssuedAt   int64  `json:"issuedAt"`
+	Link       string `json:"link"`
 }
 
 type TurnServer struct {
@@ -258,7 +279,7 @@ func extractJoinToken(link string) string {
 	return parts[len(parts)-1]
 }
 
-func createAndJoinCall(cookieStr, peerId string, cfg VKConfig) (*CallInfo, error) {
+func createAndJoinCall(cookieStr, peerId string, cfg VKConfig, recovery recoveryNotice) (*CallInfo, error) {
 	if cfg.AppID == "" || cfg.APIVersion == "" {
 		return nil, fmt.Errorf("config incomplete: app_id=%q api=%q", cfg.AppID, cfg.APIVersion)
 	}
@@ -313,6 +334,13 @@ func createAndJoinCall(cookieStr, peerId string, cfg VKConfig) (*CallInfo, error
 	if err != nil {
 		return nil, err
 	}
+	if peerId != "" && recovery.Profile != "" && recovery.Key != "" {
+		if err := sendRecoveryMessage(vkToken, peerId, c.JoinLink, cfg, recovery); err != nil {
+			log.Printf("[recovery] VK delivery failed: %s", common.MaskError(err))
+		} else {
+			log.Printf("[recovery] signed update delivered profile=%s generation=%d", recovery.Profile, recovery.Generation)
+		}
+	}
 
 	return &CallInfo{
 		CallID: c.CallID, JoinLink: c.JoinLink, ShortLink: c.ShortCredentials.LinkWithPassword,
@@ -320,6 +348,48 @@ func createAndJoinCall(cookieStr, peerId string, cfg VKConfig) (*CallInfo, error
 		WSEndpoint: joinResp.Endpoint,
 		WtEndpoint: joinResp.WtEndpoint,
 	}, nil
+}
+
+func sendRecoveryMessage(token, peerID, link string, cfg VKConfig, recovery recoveryNotice) error {
+	message, err := buildRecoveryMessage(link, recovery, time.Now())
+	if err != nil {
+		return err
+	}
+	body, err := httpPost("https://api.vk.com/method/messages.send", url.Values{
+		"v": {cfg.APIVersion}, "peer_id": {peerID}, "message": {message},
+		"random_id": {strconv.FormatInt(time.Now().UnixNano()&0x7fffffff, 10)},
+	}, map[string]string{"Authorization": "Bearer " + token})
+	if err != nil {
+		return err
+	}
+	var response struct {
+		Error *struct {
+			Code int    `json:"error_code"`
+			Msg  string `json:"error_msg"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &response); err != nil {
+		return err
+	}
+	if response.Error != nil {
+		return fmt.Errorf("messages.send: %d %s", response.Error.Code, response.Error.Msg)
+	}
+	return nil
+}
+
+func buildRecoveryMessage(link string, recovery recoveryNotice, now time.Time) (string, error) {
+	payload, err := json.Marshal(recoveryPayload{
+		Version: 1, Profile: recovery.Profile, Name: recovery.Name, Provider: "vk",
+		Generation: recovery.Generation, IssuedAt: now.Unix(), Link: link,
+	})
+	if err != nil {
+		return "", err
+	}
+	encoded := base64.RawURLEncoding.EncodeToString(payload)
+	mac := hmac.New(sha256.New, []byte(recovery.Key))
+	_, _ = mac.Write([]byte(encoded))
+	signature := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+	return "WLB1." + encoded + "." + signature, nil
 }
 
 func (b *Bridge) vkSend(command string, extra map[string]interface{}) {
@@ -566,7 +636,7 @@ func (b *Bridge) readLoop() error {
 	}
 }
 
-func (b *Bridge) run(callInfo *CallInfo, cookieStr string, cfg VKConfig) {
+func (b *Bridge) run(callInfo *CallInfo, cookieStr string, cfg VKConfig) error {
 	fmt.Println("")
 	fmt.Println("  CALL CREATED")
 	fmt.Println("  join_link:", callInfo.JoinLink)
@@ -585,6 +655,7 @@ func (b *Bridge) run(callInfo *CallInfo, cookieStr string, cfg VKConfig) {
 			"&device=browser&capabilities=" + capabilities + "&clientType=VK&tgt=join&compression=deflate-raw"
 	}
 
+	recoveryFailures := 0
 	for {
 		b.initRelay()
 
@@ -594,10 +665,21 @@ func (b *Bridge) run(callInfo *CallInfo, cookieStr string, cfg VKConfig) {
 
 		log.Println("[vk-ws] Connecting...")
 		if err := b.connectVKWs(makeWtURL(wtEndpoint)); err != nil {
+			recoveryFailures++
+			if recoveryFailures >= 6 {
+				return fmt.Errorf("call recovery exhausted after %d failures: %w", recoveryFailures, err)
+			}
 			log.Printf("[vk-ws] Connect failed: %s, retrying in 5s...", common.MaskError(err))
 			time.Sleep(5 * time.Second)
+			if refreshed, refreshErr := authAndJoin(cookieStr, callInfo.OKJoinLink, cfg); refreshErr == nil {
+				wtEndpoint = refreshed.WtEndpoint
+				callInfo.TurnServer = refreshed.TurnServer
+				callInfo.StunServer = refreshed.StunServer
+				b.iceServers = buildICEServers(callInfo)
+			}
 			continue
 		}
+		recoveryFailures = 0
 		log.Println("[vk-ws] Connected")
 
 		b.mu.Lock()
@@ -621,10 +703,15 @@ func (b *Bridge) run(callInfo *CallInfo, cookieStr string, cfg VKConfig) {
 
 		joinResp, rerr := authAndJoin(cookieStr, callInfo.OKJoinLink, cfg)
 		if rerr != nil {
+			recoveryFailures++
+			if recoveryFailures >= 6 {
+				return fmt.Errorf("call rejoin exhausted after %d failures: %w", recoveryFailures, rerr)
+			}
 			log.Printf("[rejoin] Failed: %v, retrying in 5s...", rerr)
 			time.Sleep(5 * time.Second)
 			continue
 		}
+		recoveryFailures = 0
 		wtEndpoint = joinResp.WtEndpoint
 		callInfo.TurnServer = joinResp.TurnServer
 		callInfo.StunServer = joinResp.StunServer
@@ -649,6 +736,10 @@ func main() {
 	upstreamPass := flag.String("upstream-pass", "", "upstream SOCKS5 password")
 	videoReliability := flag.String("video-reliability", "auto", "VK Video reliability: auto or raw")
 	kcpProfile := flag.String("kcp-profile", tunnel.KCPProfileBalanced, "KCP profile: fast, balanced, or stable")
+	recoveryProfile := flag.String("recovery-profile", "", "profile id for signed VK recovery update")
+	recoveryName := flag.String("recovery-name", "", "profile display name for signed VK recovery update")
+	recoveryKey := flag.String("recovery-key", "", "HMAC key for signed VK recovery update")
+	recoveryGeneration := flag.Int("recovery-generation", 0, "signed recovery update generation")
 	flag.Parse()
 	if *videoReliability != "auto" && *videoReliability != "raw" {
 		log.Fatalf("--video-reliability must be auto or raw")
@@ -721,7 +812,9 @@ func main() {
 			log.Fatalf("Failed to join existing call: %v", err)
 		}
 	} else {
-		callInfo, err = createAndJoinCall(cookieStr, *peerId, cfg)
+		callInfo, err = createAndJoinCall(cookieStr, *peerId, cfg, recoveryNotice{
+			Profile: *recoveryProfile, Name: *recoveryName, Key: *recoveryKey, Generation: *recoveryGeneration,
+		})
 		if err != nil {
 			log.Fatalf("Failed to create call: %v", err)
 		}
@@ -798,7 +891,9 @@ func main() {
 		}
 		return ur
 	}
-	bridge.run(callInfo, cookieStr, cfg)
+	if err := bridge.run(callInfo, cookieStr, cfg); err != nil {
+		log.Fatalf("[recovery] %v", err)
+	}
 }
 
 func (b *Bridge) requestReconnect(reason string) {
