@@ -14,6 +14,61 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
+## Active handoff (2026-07-21, UI redesign session)
+
+This session was UI/UX only plus one panel resilience fix. No transport,
+protocol, wire, or Go logic was touched. See `docs/UI_REDESIGN_2026-07-21.md`
+for the full detail. Summary:
+
+- Design language changed from the old blood/graphite palette to **classic
+  gothic marble**: brand "VL" with a fleur-de-lis, two themes — **Argent**
+  (white Carrara marble) and **Sable** (black marble) — with a day/night
+  toggle persisted in `localStorage` under key `wlb-theme`.
+- **Panel** (`headless/manager/web/`, served via `//go:embed web/*`): fully
+  recolored, added theme toggle, collapsible "Client Forge" form
+  (`wlb-forge` localStorage key), auto-scroll to diagnostics on session
+  select, and a refresh-loop hardening fix (per-section independent render +
+  9s `fetch` timeout so one slow `/api/sessions` no longer hides profiles or
+  wedges the panel — this was the "profiles appear only after several
+  reloads" bug). **Already on `main`, commit `4c87603`, pushed by the user.**
+- **Android** (`android-app/`): recolored via `values/colors.xml` (Argent) and
+  `values-night/colors.xml` (Sable). Kotlin only uses `R.color.*`, so the
+  palette swap propagates automatically. 5 raw-hex drawables moved onto new
+  `warn_amber_soft` / `error_red_soft` tokens; system-bar icon contrast driven
+  by a `light_system_bars` bool resource. Verified statically (palette parity,
+  all `@color`/`R.color` resolve) — **NOT built locally** (no Gradle/JDK).
+- **Windows Joiner** (`joiner-desktop-app/`): `styles/app.css` rewritten to
+  Argent/Sable CSS variables, fleur-de-lis sigil, header theme toggle (logic
+  in renderer bundle — the HTML CSP blocks inline scripts). `tsc --noEmit`
+  passes.
+- **Android + Windows commits live on branch `release/v0.5.0-alpha.8`**
+  (commits `6db24a7` Android, `7b56dc5` Windows) branched from `main@4c87603`.
+  **Not yet pushed.** Next agent/user: `git push -u origin
+  release/v0.5.0-alpha.8`, open PR to `main`, then tag `v0.5.0-alpha.8` to
+  trigger the release CI (APK/EXE/Docker). Verify the Android Gradle build in
+  CI since it was not built locally.
+- `.gitignore` extended to exclude field logs (`*.log`, `logpanel*.txt`) and
+  shared reference screenshots (`photo_*`), because they contain destination
+  IPs / session data and would trip the git secret-scan hook.
+
+### Still open (raised by user this session, NOT done)
+
+- **Speed / no-upload**: user's field test used the `fast` KCP profile, which
+  filled the queue (`kcp_wait_snd=2048/2048`, `kcp_dropped=2956`) and killed
+  the call mid-test — this is the documented one-way ACK stall made worse by
+  `fast`. Advised the user to switch the client profile to **Balanced** and
+  re-test; awaiting a fresh redacted server log before touching transport.
+  Real fix is P1 fair-mux / per-flow queues (see `docs/PERFORMANCE_ROADMAP.md`).
+- **Client install signature**: new APK/EXE still fail to install over an
+  older build ("signatures do not match"); user must uninstall first. A
+  persistent release-signing config in `android-joiner.yml` /
+  `windows-joiner.yml` is not yet set up.
+- **Panel/client UX depth**: user still finds the layouts not convenient
+  enough ("3X-UI"-level). Only visual + the two panel affordances above were
+  done; a deeper information-architecture pass was not.
+
+
+
 ## Active handoff (2026-07-21)
 
 - Read `docs/PROJECT_REPORT_2026-07-21.md` for the complete implementation,
