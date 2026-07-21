@@ -169,3 +169,21 @@ stopBtn.addEventListener('click', async () => {
   appendLog('\n[ui] stopping joiner...\n');
   await bridge.stop();
 });
+
+// Theme toggle: Argent (light marble) / Sable (black marble), persisted.
+function applyTheme(theme: string): void {
+  const next = theme === 'light' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  try { localStorage.setItem('wlb-theme', next); } catch (_) { /* ignore */ }
+  const label = document.getElementById('themeLabel');
+  if (label) label.textContent = next === 'light' ? 'Argent' : 'Sable';
+}
+(() => {
+  let stored = 'dark';
+  try { stored = localStorage.getItem('wlb-theme') || 'dark'; } catch (_) { /* ignore */ }
+  applyTheme(stored);
+  document.getElementById('themeToggle')?.addEventListener('click', () => {
+    const current = document.documentElement.getAttribute('data-theme');
+    applyTheme(current === 'light' ? 'dark' : 'light');
+  });
+})();

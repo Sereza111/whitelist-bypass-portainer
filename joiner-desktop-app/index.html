@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="utf-8" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'" />
@@ -9,15 +9,33 @@
   <body>
     <header>
       <div class="brand">
-        <div class="sigil" aria-hidden="true">W</div>
+        <div class="sigil" aria-hidden="true">
+          <svg viewBox="0 0 100 120">
+            <g fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M50 8 C45 30 45 50 50 62 C55 50 55 30 50 8 Z"/>
+              <path d="M52 50 C66 38 82 46 77 61 C73 73 59 71 54 60"/>
+              <path d="M48 50 C34 38 18 46 23 61 C27 73 41 71 46 60"/>
+              <path d="M31 69 H69"/>
+              <path d="M50 62 C45 79 39 91 28 98 M50 62 C55 79 61 91 72 98"/>
+              <path d="M50 68 C49 84 49 98 50 108 C51 98 51 84 50 68 Z"/>
+              <circle cx="50" cy="40" r="4.4"/>
+            </g>
+          </svg>
+        </div>
         <div>
           <p class="eyebrow">WHITELIST BYPASS / JOINER</p>
           <h1>Carrier Reliquary</h1>
         </div>
       </div>
-      <div class="status-wrap">
-        <span>transport state</span>
-        <div class="status" id="status" data-state="idle">idle</div>
+      <div class="header-side">
+        <button id="themeToggle" class="theme-toggle" type="button" aria-label="Toggle theme">
+          <span class="theme-glyph" aria-hidden="true"></span>
+          <span id="themeLabel">Sable</span>
+        </button>
+        <div class="status-wrap">
+          <span>transport state</span>
+          <div class="status" id="status" data-state="idle">idle</div>
+        </div>
       </div>
     </header>
     <main>
