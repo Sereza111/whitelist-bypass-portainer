@@ -128,6 +128,9 @@ contains destination addresses and session-adjacent runtime data.
 - Recovery messages use a compact, human-readable `WLB2` envelope so Android
   notification previews are less likely to truncate it. Android keeps `WLB1`
   verification for compatibility.
+- The Docker runtime identity is pinned to UID/GID `999:999`. Chromium packages
+  must not be allowed to shift this identity: existing `/data` volumes and
+  mounted cookie permissions depend on it.
 
 ## Current transport status
 

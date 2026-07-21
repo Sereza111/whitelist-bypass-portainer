@@ -73,6 +73,11 @@ Cookies, токены и join links нельзя коммитить в Git.
 mount; кнопка **Отключить аккаунт** удаляет только управляемую копию и возвращает
 старый файл как fallback.
 
+Образ `v0.5.0-alpha.7` закрепляет внутренний UID/GID `wlb` как `999:999`.
+Это сохраняет доступ к существующему `whitelist-bypass-manager-data` после
+обновлений образа. Если `alpha.6` перезапускался с `permission denied` для
+`/data/control-plane.json`, обновитесь на `alpha.7`; volume удалять не нужно.
+
 ## Transport
 
 Для matching server/client используйте:
