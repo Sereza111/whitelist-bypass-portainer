@@ -1,7 +1,7 @@
 const byId = (id) => document.getElementById(id);
 const app = {
   profiles: [], sessions: [], selected: null, refreshing: false,
-  profileSignature: '', sessionSignature: '',
+  profileSignature: '', sessionSignature: '', vkLoginStatus: null,
 };
 
 async function api(path, options = {}) {
@@ -330,6 +330,68 @@ async function saveProfile() {
   await refresh();
 }
 
+function vkLoginActive(state) {
+	return ['starting', 'waiting', 'authorizing'].includes(state);
+}
+
+function vkLoginStateLabel(state) {
+	return {
+		idle: 'Не подключён', mounted: 'Импортированный файл', starting: 'Запускаю окно', waiting: 'Жду сканирование',
+		authorizing: 'Подтверждаю вход', ready: 'Серверный VK готов', failed: 'Нужна новая попытка',
+	}[state] || state;
+}
+
+async function refreshVKLogin() {
+	const status = await api('/api/vk-login');
+	app.vkLoginStatus = status;
+	byId('vkLoginState').textContent = `${vkLoginStateLabel(status.state)}${status.accountId ? ` · ID ${status.accountId}` : ''}`;
+	byId('vkLoginMessage').textContent = status.message;
+	byId('vkLoginRune').dataset.state = status.state;
+	byId('vkLoginWarning').textContent = status.warning || '';
+	byId('vkLoginWarning').hidden = !status.warning;
+	const active = vkLoginActive(status.state);
+	byId('vkLoginStart').hidden = active;
+	byId('vkLoginStart').textContent = status.state === 'failed' ? 'Создать новый QR' : (status.managed ? 'Сменить аккаунт' : 'Создать QR');
+	byId('vkLoginStart').disabled = !status.browserAvailable;
+	byId('vkLoginCancel').hidden = !active;
+	byId('vkLoginForget').hidden = !status.managed || active;
+	byId('vkLoginScreen').hidden = !status.screenshotReady;
+	if (status.screenshotReady && !byId('vkLoginModal').hidden) {
+		byId('vkLoginScreenshot').src = `/api/vk-login/screenshot?t=${Date.now()}`;
+	}
+	if (!status.browserAvailable) {
+		byId('vkLoginMessage').textContent = 'Этот Docker-образ не содержит QR-браузер';
+	}
+}
+
+async function openVKLogin() {
+	byId('vkLoginModal').hidden = false;
+	document.body.classList.add('modal-open');
+	await refreshVKLogin();
+}
+
+function closeVKLogin() {
+	byId('vkLoginModal').hidden = true;
+	document.body.classList.remove('modal-open');
+}
+
+async function startVKLogin() {
+	await api('/api/vk-login/start', { method: 'POST', body: '{}' });
+	await refreshVKLogin();
+}
+
+async function cancelVKLogin() {
+	await api('/api/vk-login/cancel', { method: 'POST', body: '{}' });
+	await refreshVKLogin();
+}
+
+async function forgetVKLogin() {
+	if (!confirm('Отключить серверный VK, сохранённый через панель? Активный звонок продолжит работать до перезапуска.')) return;
+	await api('/api/vk-login/credentials', { method: 'DELETE' });
+	await refreshVKLogin();
+	await refresh();
+}
+
 byId('profileForm').addEventListener('submit', (event) => {
   event.preventDefault();
   run(saveProfile);
@@ -347,6 +409,20 @@ byId('reveal').addEventListener('click', () => {
 byId('copy').addEventListener('click', async () => {
   if (byId('sessionLink').value) await copyText(byId('sessionLink').value);
 });
+byId('vkLoginOpen').addEventListener('click', () => run(openVKLogin));
+byId('vkLoginClose').addEventListener('click', closeVKLogin);
+byId('vkLoginStart').addEventListener('click', () => run(startVKLogin));
+byId('vkLoginCancel').addEventListener('click', () => run(cancelVKLogin));
+byId('vkLoginForget').addEventListener('click', () => run(forgetVKLogin));
+byId('vkLoginModal').addEventListener('click', (event) => {
+	if (event.target === byId('vkLoginModal')) closeVKLogin();
+});
+document.addEventListener('keydown', (event) => {
+	if (event.key === 'Escape' && !byId('vkLoginModal').hidden) closeVKLogin();
+});
 
 run(refresh);
 setInterval(() => run(refresh), 2000);
+setInterval(() => {
+	if (!byId('vkLoginModal').hidden) run(refreshVKLogin);
+}, 1700);

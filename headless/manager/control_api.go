@@ -46,13 +46,13 @@ func registerControlAPIRoutes(mux *http.ServeMux, cp *controlPlane, username, pa
 		writeJSON(w, http.StatusOK, overviewResponse{
 			BuildVersion: Version, BuildCommit: BuildCommit, BuildTime: BuildTime,
 			MaxSessions: cp.maxSessions, ActiveSessions: active,
-			ClientCount: len(cp.listProfiles()), Providers: inspectProviders(secretsDir),
+			ClientCount: len(cp.listProfiles()), Providers: inspectProviders(secretsDir, cp.managedSecretsDir),
 			RecoveryDelivery: strings.TrimSpace(os.Getenv("VK_PEER_ID")) != "",
 		})
 	}))
 
 	mux.Handle("GET /api/providers", protect(func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, inspectProviders(secretsDir))
+		writeJSON(w, http.StatusOK, inspectProviders(secretsDir, cp.managedSecretsDir))
 	}))
 	mux.Handle("GET /api/profiles", protect(func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, cp.listProfiles())
@@ -158,7 +158,7 @@ func decodeRequest(w http.ResponseWriter, r *http.Request, value any) bool {
 	return true
 }
 
-func inspectProviders(secretsDir string) []providerStatus {
+func inspectProviders(secretsDir, managedSecretsDir string) []providerStatus {
 	providers := []providerStatus{
 		{ID: "vk", Name: "VK Video"},
 		{ID: "telemost", Name: "Telemost"},
@@ -170,8 +170,8 @@ func inspectProviders(secretsDir string) []providerStatus {
 		"wbstream": "cookies-wbstream.json", "dion": "cookies-dion.json",
 	}
 	for index := range providers {
-		info, err := os.Stat(filepath.Join(secretsDir, files[providers[index].ID]))
-		providers[index].Configured = err == nil && !info.IsDir() && info.Size() > 0
+		providers[index].Configured = fileReady(filepath.Join(managedSecretsDir, files[providers[index].ID])) ||
+			fileReady(filepath.Join(secretsDir, files[providers[index].ID]))
 	}
 	return providers
 }

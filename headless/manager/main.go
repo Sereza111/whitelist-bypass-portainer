@@ -25,7 +25,7 @@ import (
 )
 
 var (
-	Version     = "0.5.0-alpha.5"
+	Version     = "0.5.0-alpha.6"
 	BuildCommit = "unknown"
 	BuildTime   = "unknown"
 )
@@ -68,10 +68,11 @@ type sessionStatus struct {
 type manager struct {
 	mu sync.Mutex
 
-	binsDir    string
-	secretsDir string
-	dataDir    string
-	linkFile   string
+	binsDir           string
+	secretsDir        string
+	managedSecretsDir string
+	dataDir           string
+	linkFile          string
 
 	cmd     *exec.Cmd
 	done    chan struct{}
@@ -137,12 +138,13 @@ func newManager() *manager {
 
 func newManagerAt(dataDir string) *manager {
 	return &manager{
-		binsDir:    envOr("BINS_DIR", "/opt/wlb/bin"),
-		secretsDir: envOr("SECRETS_DIR", "/run/secrets/wlb"),
-		dataDir:    dataDir,
-		linkFile:   envOr("LINK_FILE", filepath.Join(dataDir, "manager-session-link.txt")),
-		state:      "stopped",
-		logs:       newLogRing(400),
+		binsDir:           envOr("BINS_DIR", "/opt/wlb/bin"),
+		secretsDir:        envOr("SECRETS_DIR", "/run/secrets/wlb"),
+		managedSecretsDir: envOr("MANAGED_SECRETS_DIR", "/data/managed-secrets"),
+		dataDir:           dataDir,
+		linkFile:          envOr("LINK_FILE", filepath.Join(dataDir, "manager-session-link.txt")),
+		state:             "stopped",
+		logs:              newLogRing(400),
 	}
 }
 
@@ -201,7 +203,10 @@ func (m *manager) commandFor(req sessionRequest) (*exec.Cmd, error) {
 		"dion":     "cookies-dion.json",
 	}
 	binaryPath := filepath.Join(m.binsDir, binaryNames[req.Mode])
-	cookiePath := filepath.Join(m.secretsDir, cookieNames[req.Mode])
+	cookiePath := filepath.Join(m.managedSecretsDir, cookieNames[req.Mode])
+	if !fileReady(cookiePath) {
+		cookiePath = filepath.Join(m.secretsDir, cookieNames[req.Mode])
+	}
 	if info, err := os.Stat(binaryPath); err != nil || info.IsDir() {
 		return nil, fmt.Errorf("creator binary unavailable: %s", binaryPath)
 	}
@@ -460,6 +465,8 @@ func main() {
 		_, _ = w.Write([]byte("ok\n"))
 	})
 	registerControlAPIRoutes(mux, cp, username, password, envOr("SECRETS_DIR", "/run/secrets/wlb"))
+	vkLogin := newVKLoginManager(cp.managedSecretsDir, envOr("SECRETS_DIR", "/run/secrets/wlb"))
+	registerVKLoginRoutes(mux, vkLogin, username, password)
 	mux.Handle("/", requireAuth(username, password, http.FileServer(http.FS(webRoot))))
 
 	handler := securityHeaders(mux)
@@ -509,6 +516,7 @@ func main() {
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 	<-sig
+	vkLogin.cancelLogin("Manager остановлен")
 	cp.stopAll()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

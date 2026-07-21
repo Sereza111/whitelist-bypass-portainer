@@ -23,7 +23,7 @@
       <section class="stat-rail" aria-label="Состояние сервера">
         <article><span>Активные сессии</span><strong id="activeCount">—</strong><small id="sessionLimit">из —</small></article>
         <article><span>Клиентские профили</span><strong id="clientCount">—</strong><small>постоянные настройки</small></article>
-        <article><span>VK credentials</span><strong id="vkProvider">—</strong><small>read-only secret</small></article>
+        <article class="vk-account-stat"><span>VK credentials</span><strong id="vkProvider">—</strong><small>закрытое хранилище</small><button id="vkLoginOpen" class="text-action" type="button">Войти через QR</button></article>
         <article><span>Control plane</span><strong class="good">online</strong><small>порт 9200</small></article>
       </section>
 
@@ -112,6 +112,34 @@
         </section>
       </div>
     </main>
+
+    <div id="vkLoginModal" class="modal-backdrop" hidden>
+      <section class="vk-login-modal" role="dialog" aria-modal="true" aria-labelledby="vkLoginTitle">
+        <button id="vkLoginClose" class="modal-close" type="button" aria-label="Закрыть">×</button>
+        <p class="eyebrow">Server identity · secure pairing</p>
+        <h2 id="vkLoginTitle">Вход серверного VK</h2>
+        <p class="vk-login-lede">Отсканируй код телефоном, выбрав второй аккаунт. Пароль и cookies через панель не передаются.</p>
+        <div class="vk-login-state">
+          <span id="vkLoginRune" class="status-rune"></span>
+          <div><strong id="vkLoginState">Ожидание</strong><small id="vkLoginMessage">Нажми «Создать QR»</small></div>
+        </div>
+        <div id="vkLoginScreen" class="vk-login-screen" hidden>
+          <img id="vkLoginScreenshot" alt="VK QR login">
+          <div class="scan-corners" aria-hidden="true"></div>
+        </div>
+        <p id="vkLoginWarning" class="error" hidden></p>
+        <div class="vk-login-help">
+          <span>1</span><p>Открой VK на телефоне под вторым аккаунтом</p>
+          <span>2</span><p>Отсканируй QR и подтверди вход</p>
+          <span>3</span><p>Панель сама сохранит сессию и закроет окно</p>
+        </div>
+        <div class="actions vk-login-actions">
+          <button id="vkLoginStart" class="primary" type="button">Создать QR</button>
+          <button id="vkLoginCancel" class="ghost" type="button" hidden>Отмена</button>
+          <button id="vkLoginForget" class="ghost danger" type="button" hidden>Отключить аккаунт</button>
+        </div>
+      </section>
+    </div>
     <script src="/app.js"></script>
   </body>
 </html>

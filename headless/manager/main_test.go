@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/chromedp/cdproto/network"
 )
 
 const testPanelPassword = "long-test-password"
@@ -282,5 +284,73 @@ func TestRecoveryDelayIsBounded(t *testing.T) {
 	}
 	if recoveryDelay(100) != 5*time.Minute {
 		t.Fatalf("recovery delay is not capped")
+	}
+}
+
+func TestVKLoginCookieExportAndManagedPrecedence(t *testing.T) {
+	managedDir := t.TempDir()
+	mountedDir := t.TempDir()
+	login := newVKLoginManager(managedDir, mountedDir)
+	cookies := []*network.Cookie{
+		{Name: "remixsid6", Value: "auth-value", Domain: ".vk.com", Path: "/", Secure: true, HTTPOnly: true},
+		{Name: "remixuid", Value: "12345", Domain: ".vk.com", Path: "/"},
+		{Name: "empty", Value: "", Domain: ".vk.com", Path: "/"},
+	}
+	if !hasVKAuthCookie(cookies) {
+		t.Fatal("VK auth cookie was not detected")
+	}
+	if header := cookieHeader(cookies); !strings.Contains(header, "remixsid6=auth-value") || strings.Contains(header, "empty=") {
+		t.Fatalf("unexpected cookie header: %q", header)
+	}
+	if err := login.saveCookies(cookies); err != nil {
+		t.Fatal(err)
+	}
+	if !fileReady(filepath.Join(managedDir, "cookies-vk.json")) {
+		t.Fatal("managed VK cookies were not written")
+	}
+
+	binsDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(binsDir, "headless-vk-creator"), []byte("test"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	mgr := newManagerAt(t.TempDir())
+	mgr.binsDir = binsDir
+	mgr.secretsDir = mountedDir
+	mgr.managedSecretsDir = managedDir
+	cmd, err := mgr.commandFor(sessionRequest{Mode: "vk", Resources: "default", VideoReliability: "auto", KCPProfile: "balanced"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(cmd.Args, " "), filepath.Join(managedDir, "cookies-vk.json")) {
+		t.Fatalf("Creator did not prefer panel-managed cookies: %v", cmd.Args)
+	}
+}
+
+func TestVKLoginAPINeverReturnsCookies(t *testing.T) {
+	managedDir := t.TempDir()
+	mountedDir := t.TempDir()
+	secret := `[{"name":"remixsid6","value":"must-not-leak"}]`
+	if err := os.WriteFile(filepath.Join(managedDir, "cookies-vk.json"), []byte(secret), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	login := newVKLoginManager(managedDir, mountedDir)
+	mux := http.NewServeMux()
+	registerVKLoginRoutes(mux, login, "admin", testPanelPassword)
+
+	response := controlAPIRequest(t, mux, http.MethodGet, "/api/vk-login", "")
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"managed":true`) {
+		t.Fatalf("unexpected QR status: code=%d body=%s", response.Code, response.Body.String())
+	}
+	if strings.Contains(response.Body.String(), "must-not-leak") || strings.Contains(response.Body.String(), "remixsid") {
+		t.Fatalf("VK cookies leaked through status API: %s", response.Body.String())
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/api/vk-login/start", strings.NewReader(`{}`))
+	request.SetBasicAuth("admin", testPanelPassword)
+	request.Header.Set("Origin", "https://attacker.example")
+	response = httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("cross-origin QR start status=%d", response.Code)
 	}
 }

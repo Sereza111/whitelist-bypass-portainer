@@ -1,7 +1,7 @@
 FROM --platform=$BUILDPLATFORM golang:1.26.5-bookworm AS build
 ARG TARGETOS
 ARG TARGETARCH
-ARG BUILD_VERSION=0.5.0-alpha.5
+ARG BUILD_VERSION=0.5.0-alpha.6
 ARG BUILD_COMMIT=unknown
 ARG BUILD_TIME=unknown
 ENV CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH
@@ -21,12 +21,14 @@ RUN LDFLAGS="-s -w -X whitelist-bypass/relay/common.Version=${BUILD_VERSION} -X 
  && go -C /src/headless/manager   build -trimpath -ldflags="$MANAGER_LDFLAGS" -o /out/wlb-manager .
 
 FROM debian:bookworm-slim
+ARG TARGETARCH
 LABEL org.opencontainers.image.licenses="MIT" \
       io.github.whitelist-bypass.upstream="https://github.com/kulikov0/whitelist-bypass" \
       io.github.whitelist-bypass.upstream-revision="64aa77acd5b52c34f5ddbd1ad0d861ea65bc8943"
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates tini \
+ && if [ "$TARGETARCH" != "386" ]; then apt-get install -y --no-install-recommends chromium fonts-liberation; fi \
  && rm -rf /var/lib/apt/lists/*
 
 RUN useradd --system --create-home --home /home/wlb --shell /usr/sbin/nologin wlb \
@@ -46,6 +48,7 @@ COPY headless/docker/direct-entrypoint.sh /usr/local/bin/wlb-direct-entrypoint
 RUN chmod +x /usr/local/bin/wlb-entrypoint /usr/local/bin/wlb-direct-entrypoint
 
 USER wlb
+ENV VK_LOGIN_BROWSER=/usr/bin/chromium
 WORKDIR /data
 VOLUME ["/data"]
 

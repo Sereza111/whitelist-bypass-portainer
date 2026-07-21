@@ -108,13 +108,26 @@ contains destination addresses and session-adjacent runtime data.
 - Manager profiles persist an auto-restart policy and per-profile recovery
   key. A failed Creator is restarted with capped backoff while retaining the
   logical session and increasing its generation.
-- VK Creator sends `WLB1.<base64url-json>.<base64url-hmac>` to `VK_PEER_ID`
-  after creating a fresh call. Never log the envelope, link or recovery key.
+- VK Creator sends the compact signed `WLB2` update to `VK_PEER_ID` after
+  creating a fresh call; Android still accepts legacy `WLB1`. Never log the
+  envelope, link or recovery key.
 - Android accepts recovery notifications only for a paired profile, valid
   HMAC, recent timestamp and strictly increasing generation.
 - The intended deployment uses a separate server VK account for cookies and
   the user's personal VK id as `VK_PEER_ID`; self-messages are not a reliable
   notification channel.
+
+## Panel-managed VK login (alpha.6)
+
+- Manager may launch an isolated Chromium QR session for at most four minutes.
+  Never accept a VK password in the panel or expose browser cookies through an
+  API, screenshot, log or error message.
+- QR cookies live at `/data/managed-secrets/cookies-vk.json` with mode `0600`
+  and take precedence over the read-only mounted secret. Deleting them restores
+  the mounted file as fallback.
+- Recovery messages use a compact, human-readable `WLB2` envelope so Android
+  notification previews are less likely to truncate it. Android keeps `WLB1`
+  verification for compatibility.
 
 ## Current transport status
 

@@ -30,8 +30,7 @@ class RecoveryNotificationListener : NotificationListenerService() {
 				}
             }
         }
-        val token = TOKEN.find(text)?.value ?: return
-        val update = verify(token) ?: return
+		val update = verifyCompact(text) ?: LEGACY_TOKEN.find(text)?.value?.let(::verifyLegacy) ?: return
         val destinations = Prefs.savedDestinations.toMutableList()
         val index = destinations.indexOfFirst { it.recoveryProfile == update.profile }
         if (index < 0) return
@@ -50,7 +49,25 @@ class RecoveryNotificationListener : NotificationListenerService() {
         showRecoveryNotification(current.id, update.generation)
     }
 
-    private fun verify(token: String): RecoveryUpdate? {
+	private fun verifyCompact(text: String): RecoveryUpdate? {
+		val match = COMPACT_TOKEN.find(text) ?: return null
+		val profile = match.groupValues[1]
+		val generation = match.groupValues[2].toIntOrNull()?.takeIf { it > 0 } ?: return null
+		val issuedAt = match.groupValues[3].toLongOrNull() ?: return null
+		if (!isRecent(issuedAt)) return null
+		val link = LINK.findAll(text)
+			.map { it.value.trimEnd('.', ',', ';', ')', ']', '}') }
+			.firstOrNull { it.contains("/call/") } ?: return null
+		if (!isValidLink(link)) return null
+		val config = Prefs.savedDestinations.firstOrNull { it.recoveryProfile == profile } ?: return null
+		val key = config.recoveryKey?.takeIf { it.length in 16..256 } ?: return null
+		val signature = decodeSignature(match.groupValues[4]) ?: return null
+		val signed = listOf(profile, generation.toString(), issuedAt.toString(), link).joinToString("\n")
+		if (!validSignature(key, signed, signature)) return null
+		return RecoveryUpdate(profile, generation, link)
+	}
+
+    private fun verifyLegacy(token: String): RecoveryUpdate? {
         val parts = token.split('.')
         if (parts.size != 3 || parts[0] != "WLB1") return null
         val encoded = parts[1]
@@ -65,15 +82,31 @@ class RecoveryNotificationListener : NotificationListenerService() {
 		if (key.length !in 16..256) return null
         val mac = Mac.getInstance("HmacSHA256")
         mac.init(SecretKeySpec(key.toByteArray(Charsets.UTF_8), "HmacSHA256"))
-        if (!java.security.MessageDigest.isEqual(mac.doFinal(encoded.toByteArray(Charsets.UTF_8)), signature)) return null
+		if (!java.security.MessageDigest.isEqual(mac.doFinal(encoded.toByteArray(Charsets.UTF_8)), signature)) return null
         val issuedAt = payload.optLong("issuedAt")
-        if (abs(System.currentTimeMillis() / 1000L - issuedAt) > MAX_MESSAGE_AGE_SECONDS) return null
+		if (!isRecent(issuedAt)) return null
         val link = payload.optString("link").trim()
-        if (!link.startsWith("https://") || link.length > 2048) return null
+		if (!isValidLink(link)) return null
 		val generation = payload.optInt("generation")
 		if (generation < 1) return null
 		return RecoveryUpdate(profile, generation, link)
     }
+
+	private fun decodeSignature(encoded: String): ByteArray? = runCatching {
+		Base64.decode(encoded, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
+	}.getOrNull()
+
+	private fun validSignature(key: String, signed: String, signature: ByteArray): Boolean {
+		val mac = Mac.getInstance("HmacSHA256")
+		mac.init(SecretKeySpec(key.toByteArray(Charsets.UTF_8), "HmacSHA256"))
+		return java.security.MessageDigest.isEqual(mac.doFinal(signed.toByteArray(Charsets.UTF_8)), signature)
+	}
+
+	private fun isRecent(issuedAt: Long): Boolean =
+		abs(System.currentTimeMillis() / 1000L - issuedAt) <= MAX_MESSAGE_AGE_SECONDS
+
+	private fun isValidLink(link: String): Boolean =
+		link.startsWith("https://") && link.length <= 2048
 
     private fun showRecoveryNotification(destinationId: String, generation: Int) {
 		val manager = getSystemService(NotificationManager::class.java) ?: return
@@ -107,6 +140,8 @@ class RecoveryNotificationListener : NotificationListenerService() {
         private const val CHANNEL_ID = "wlb_recovery"
         private const val NOTIFICATION_ID = 9412
         private const val MAX_MESSAGE_AGE_SECONDS = 24L * 60L * 60L
-        private val TOKEN = Regex("WLB1\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+")
+		private val COMPACT_TOKEN = Regex("WLB2\\.([A-Za-z0-9_-]{1,128})\\.([0-9]{1,10})\\.([0-9]{10})\\.([A-Za-z0-9_-]{43})")
+		private val LEGACY_TOKEN = Regex("WLB1\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+")
+		private val LINK = Regex("https://[^\\s]+")
     }
 }

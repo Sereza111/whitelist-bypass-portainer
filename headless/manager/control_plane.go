@@ -81,12 +81,13 @@ type controlPlaneSnapshot struct {
 }
 
 type controlPlane struct {
-	mu          sync.Mutex
-	dataDir     string
-	stateFile   string
-	maxSessions int
-	profiles    map[string]clientProfile
-	sessions    map[string]*managedSession
+	mu                sync.Mutex
+	dataDir           string
+	stateFile         string
+	managedSecretsDir string
+	maxSessions       int
+	profiles          map[string]clientProfile
+	sessions          map[string]*managedSession
 }
 
 func newControlPlane(dataDir string, maxSessions int) (*controlPlane, error) {
@@ -94,11 +95,12 @@ func newControlPlane(dataDir string, maxSessions int) (*controlPlane, error) {
 		maxSessions = 4
 	}
 	cp := &controlPlane{
-		dataDir:     dataDir,
-		stateFile:   filepath.Join(dataDir, "control-plane.json"),
-		maxSessions: maxSessions,
-		profiles:    make(map[string]clientProfile),
-		sessions:    make(map[string]*managedSession),
+		dataDir:           dataDir,
+		stateFile:         filepath.Join(dataDir, "control-plane.json"),
+		managedSecretsDir: filepath.Join(dataDir, "managed-secrets"),
+		maxSessions:       maxSessions,
+		profiles:          make(map[string]clientProfile),
+		sessions:          make(map[string]*managedSession),
 	}
 	if err := os.MkdirAll(filepath.Join(dataDir, "sessions"), 0o700); err != nil {
 		return nil, err
@@ -327,6 +329,7 @@ func (cp *controlPlane) startSession(input sessionInput) (sessionView, error) {
 	id := randomID("session")
 	sessionDir := filepath.Join(cp.dataDir, "sessions", id)
 	mgr := newManagerAt(sessionDir)
+	mgr.managedSecretsDir = cp.managedSecretsDir
 	created := time.Now().UTC()
 	session := &managedSession{
 		ID: id, ClientID: input.ClientID, ClientName: profile.Name, CreatedAt: created,

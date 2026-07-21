@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -378,18 +379,30 @@ func sendRecoveryMessage(token, peerID, link string, cfg VKConfig, recovery reco
 }
 
 func buildRecoveryMessage(link string, recovery recoveryNotice, now time.Time) (string, error) {
-	payload, err := json.Marshal(recoveryPayload{
-		Version: 1, Profile: recovery.Profile, Name: recovery.Name, Provider: "vk",
-		Generation: recovery.Generation, IssuedAt: now.Unix(), Link: link,
-	})
-	if err != nil {
-		return "", err
+	if strings.TrimSpace(recovery.Profile) == "" || recovery.Generation < 1 || !strings.HasPrefix(link, "https://") {
+		return "", errors.New("incomplete recovery update")
 	}
-	encoded := base64.RawURLEncoding.EncodeToString(payload)
+	issuedAt := now.Unix()
+	signed := strings.Join([]string{
+		recovery.Profile,
+		strconv.Itoa(recovery.Generation),
+		strconv.FormatInt(issuedAt, 10),
+		link,
+	}, "\n")
 	mac := hmac.New(sha256.New, []byte(recovery.Key))
-	_, _ = mac.Write([]byte(encoded))
+	_, _ = mac.Write([]byte(signed))
 	signature := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
-	return "WLB1." + encoded + "." + signature, nil
+	name := strings.NewReplacer("\r", " ", "\n", " ").Replace(strings.TrimSpace(recovery.Name))
+	if name == "" {
+		name = "VK"
+	}
+	if len([]rune(name)) > 32 {
+		name = string([]rune(name)[:32])
+	}
+	return fmt.Sprintf(
+		"WhitelistBypass · %s\n%s\nWLB2.%s.%d.%d.%s",
+		name, link, recovery.Profile, recovery.Generation, issuedAt, signature,
+	), nil
 }
 
 func (b *Bridge) vkSend(command string, extra map[string]interface{}) {
