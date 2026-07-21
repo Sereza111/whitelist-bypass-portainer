@@ -60,7 +60,8 @@
 
       <div class="workspace">
         <aside class="card forge">
-          <div class="section-title"><span>01</span><div><h2>Client Forge</h2><p>Создай отдельный профиль доступа</p></div></div>
+          <div class="section-title"><span>01</span><div><h2>Client Forge</h2><p>Создай отдельный профиль доступа</p></div><button id="forgeToggle" class="collapse-btn" type="button" aria-label="Свернуть форму" aria-expanded="true">−</button></div>
+          <div class="forge-body" id="forgeBody">
           <form id="profileForm">
             <input id="editingId" type="hidden">
             <label>Название клиента
@@ -109,6 +110,7 @@
             </div>
           </form>
           <p id="error" class="error" hidden></p>
+          </div>
         </aside>
 
         <section class="card clients">

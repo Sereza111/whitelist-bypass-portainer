@@ -13,3 +13,13 @@ whitelist-experiments/
 !.env.direct.example
 *.local
 benchmark-results/
+
+# Field logs — contain destination IPs and session-adjacent runtime data
+*.log
+relay*.log
+logpanel*.txt
+
+# Local reference screenshots / photos shared during work
+photo_*.jpg
+photo_*.jpeg
+photo_*.png

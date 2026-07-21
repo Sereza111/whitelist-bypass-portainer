@@ -172,6 +172,14 @@ main { width: min(1480px,calc(100% - 36px)); margin: 28px auto 80px; }
 .section-title h2 { margin: 0; font-size: 27px; }
 .section-title p { margin: 4px 0 0; color: var(--muted); font-size: 11px; }
 
+/* collapsible forge form */
+.section-title { position: relative; }
+.collapse-btn { margin-left: auto; width: 34px; min-height: 34px; padding: 0; flex: 0 0 auto; display: grid; place-items: center; font-size: 18px; line-height: 1; color: var(--gold); background: var(--slab-hi); border: 1px solid var(--line); }
+.collapse-btn:hover { border-color: var(--gold); color: var(--gold-hi); }
+.forge-body { overflow: hidden; }
+.forge.collapsed .forge-body { display: none; }
+.forge.collapsed .section-title { padding-bottom: 0; margin-bottom: 0; border-bottom: 0; }
+
 /* ---- Forms ------------------------------------------------- */
 label { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; color: var(--text-soft); font-size: 11px; letter-spacing: .035em; }
 label > span, .optional { color: var(--muted); font: 9px Consolas,monospace; }

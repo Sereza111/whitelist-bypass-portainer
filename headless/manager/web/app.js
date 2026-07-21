@@ -5,10 +5,21 @@ const app = {
 };
 
 async function api(path, options = {}) {
-  const response = await fetch(path, {
-    ...options,
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), options.timeout || 9000);
+  let response;
+  try {
+    response = await fetch(path, {
+      ...options,
+      signal: controller.signal,
+      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    });
+  } catch (error) {
+    if (error.name === 'AbortError') throw new Error('Сервер не ответил вовремя — попробуй ещё раз.');
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
   if (response.status === 204) return null;
   const body = await response.json();
   if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
@@ -282,6 +293,7 @@ function bindDynamicActions() {
   document.querySelectorAll('.delete-client').forEach((button) => button.onclick = () => run(() => deleteProfile(button.dataset.id)));
   document.querySelectorAll('.session-open').forEach((button) => button.onclick = () => {
     app.selected = button.dataset.id; renderSessions(); run(renderDetail);
+    document.querySelector('.diagnostics')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
   document.querySelectorAll('.stop-session').forEach((button) => button.onclick = () => run(() => stopSession(button.dataset.id)));
   document.querySelectorAll('.delete-session').forEach((button) => button.onclick = () => run(() => deleteSession(button.dataset.id)));
@@ -296,26 +308,37 @@ async function refresh() {
   if (app.refreshing) return;
   app.refreshing = true;
   try {
-    const [overview, profiles, sessions] = await Promise.all([
-      api('/api/overview'), api('/api/profiles'), api('/api/sessions'),
-    ]);
-    app.profiles = profiles;
-    app.sessions = sessions;
-    if (app.selected && !sessions.some((session) => session.id === app.selected)) {
-      app.selected = null;
-      app.sessionSignature = '';
-    }
-    byId('build').textContent = `${overview.buildVersion} / ${(overview.buildCommit || '').slice(0, 7)}`;
-    byId('activeCount').textContent = overview.activeSessions;
-    byId('sessionLimit').textContent = `из ${overview.maxSessions}`;
-    byId('clientCount').textContent = overview.clientCount;
-    const vk = overview.providers.find((provider) => provider.id === 'vk');
-	byId('vkProvider').textContent = !vk?.configured ? 'missing' : (overview.recoveryDelivery ? 'ready + recovery' : 'set VK_PEER_ID');
-	byId('vkProvider').className = vk?.configured && overview.recoveryDelivery ? 'good' : 'bad';
-    renderProfiles();
-    renderSessions();
-    bindDynamicActions();
-    await renderDetail();
+    // Each section renders independently: a slow /api/sessions must never
+    // hide profiles that are already available, and one hung request must
+    // not wedge the whole panel.
+    const overviewP = api('/api/overview').then((overview) => {
+      byId('build').textContent = `${overview.buildVersion} / ${(overview.buildCommit || '').slice(0, 7)}`;
+      byId('activeCount').textContent = overview.activeSessions;
+      byId('sessionLimit').textContent = `из ${overview.maxSessions}`;
+      byId('clientCount').textContent = overview.clientCount;
+      const vk = overview.providers.find((provider) => provider.id === 'vk');
+      byId('vkProvider').textContent = !vk?.configured ? 'missing' : (overview.recoveryDelivery ? 'ready + recovery' : 'set VK_PEER_ID');
+      byId('vkProvider').className = vk?.configured && overview.recoveryDelivery ? 'good' : 'bad';
+    }).catch(() => {});
+
+    const profilesP = api('/api/profiles').then((profiles) => {
+      app.profiles = profiles;
+      renderProfiles();
+      bindDynamicActions();
+    }).catch(() => {});
+
+    const sessionsP = api('/api/sessions').then(async (sessions) => {
+      app.sessions = sessions;
+      if (app.selected && !sessions.some((session) => session.id === app.selected)) {
+        app.selected = null;
+        app.sessionSignature = '';
+      }
+      renderSessions();
+      bindDynamicActions();
+      await renderDetail();
+    }).catch(() => {});
+
+    await Promise.allSettled([overviewP, profilesP, sessionsP]);
   } finally {
     app.refreshing = false;
   }
@@ -435,6 +458,25 @@ function applyTheme(theme) {
 	byId('themeToggle')?.addEventListener('click', () => {
 		const current = document.documentElement.getAttribute('data-theme');
 		applyTheme(current === 'dark' ? 'light' : 'dark');
+	});
+})();
+
+(function initForgeToggle() {
+	const forge = document.querySelector('.forge');
+	const toggle = byId('forgeToggle');
+	if (!forge || !toggle) return;
+	let collapsed = false;
+	try { collapsed = localStorage.getItem('wlb-forge') === 'collapsed'; } catch (_) {}
+	const apply = () => {
+		forge.classList.toggle('collapsed', collapsed);
+		toggle.textContent = collapsed ? '+' : '−';
+		toggle.setAttribute('aria-expanded', String(!collapsed));
+	};
+	apply();
+	toggle.addEventListener('click', () => {
+		collapsed = !collapsed;
+		try { localStorage.setItem('wlb-forge', collapsed ? 'collapsed' : 'open'); } catch (_) {}
+		apply();
 	});
 })();
 
