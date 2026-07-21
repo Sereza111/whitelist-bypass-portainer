@@ -1,15 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="accent_emerald">#FFC24760</color>
-    <color name="accent_emerald_soft">#35C24760</color>
-    <color name="warn_amber">#FFD0A05A</color>
-    <color name="error_red">#FFEF765F</color>
-    <color name="ink">#FFF1E9DB</color>
-    <color name="ink_2">#FFB5A8A5</color>
-    <color name="ink_3">#FF786B70</color>
-    <color name="hair">#244A343D</color>
-    <color name="hair_strong">#664A343D</color>
-    <color name="panel_bg">#FF151016</color>
-    <color name="panel_2">#FF1C151B</color>
-    <color name="surface_bg">#FF070609</color>
+    <!-- Sable · black marble (night). Gold accent replaces the old crimson,
+         matching the Argent/Sable panel design language. -->
+    <color name="accent_emerald">#FFB98F3F</color>
+    <color name="accent_emerald_soft">#33B98F3F</color>
+    <color name="warn_amber">#FFC9A05E</color>
+    <color name="warn_amber_soft">#1FC9A05E</color>
+    <color name="error_red">#FFCF5D71</color>
+    <color name="error_red_soft">#1FCF5D71</color>
+    <color name="ink">#FFECE3D2</color>
+    <color name="ink_2">#FFA89C8A</color>
+    <color name="ink_3">#FF877C70</color>
+    <color name="hair">#24C4B496</color>
+    <color name="hair_strong">#55C4B496</color>
+    <color name="panel_bg">#FF1A171E</color>
+    <color name="panel_2">#FF201C26</color>
+    <color name="surface_bg">#FF0A090C</color>
 </resources>

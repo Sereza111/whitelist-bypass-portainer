@@ -13,8 +13,8 @@
         <item name="colorTertiaryContainer">@color/accent_emerald_soft</item>
         <item name="colorOnTertiaryContainer">@color/accent_emerald</item>
         <item name="android:colorBackground">@color/surface_bg</item>
-        <item name="android:windowLightStatusBar">false</item>
-        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:windowLightStatusBar">@bool/light_system_bars</item>
+        <item name="android:windowLightNavigationBar">@bool/light_system_bars</item>
         <item name="android:statusBarColor">@color/surface_bg</item>
         <item name="android:navigationBarColor">@color/surface_bg</item>
         <item name="colorSurface">@color/panel_bg</item>
