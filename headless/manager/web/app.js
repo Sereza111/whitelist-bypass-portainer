@@ -421,6 +421,23 @@ document.addEventListener('keydown', (event) => {
 	if (event.key === 'Escape' && !byId('vkLoginModal').hidden) closeVKLogin();
 });
 
+function applyTheme(theme) {
+	const next = theme === 'dark' ? 'dark' : 'light';
+	document.documentElement.setAttribute('data-theme', next);
+	try { localStorage.setItem('wlb-theme', next); } catch (_) {}
+	const label = byId('themeLabel');
+	if (label) label.textContent = next === 'dark' ? 'Sable' : 'Argent';
+}
+(function initTheme() {
+	let stored = 'light';
+	try { stored = localStorage.getItem('wlb-theme') || 'light'; } catch (_) {}
+	applyTheme(stored);
+	byId('themeToggle')?.addEventListener('click', () => {
+		const current = document.documentElement.getAttribute('data-theme');
+		applyTheme(current === 'dark' ? 'light' : 'dark');
+	});
+})();
+
 run(refresh);
 setInterval(() => run(refresh), 2000);
 setInterval(() => {
