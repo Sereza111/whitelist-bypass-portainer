@@ -14,6 +14,23 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
+## Active handoff (2026-07-21)
+
+- Read `docs/PROJECT_REPORT_2026-07-21.md` for the complete implementation,
+  deployment, incident, security and next-work summary.
+- Current release is `v0.5.0-alpha.7`, commit `96b0735`.
+- Android, Windows and Docker tag CI passed. GHCR contains `amd64`, `arm64` and
+  `386`; tagged GitHub Release contains APK/EXE plus SHA256 files.
+- Recommended deployment is `portainer-stack.yml` with image
+  `ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.7`.
+- Alpha.6 installed Chromium before creating `wlb`, shifting its runtime UID
+  from 999 to 997 and causing existing `/data/control-plane.json` volumes to
+  fail with permission denied. Alpha.7 creates `wlb` first and hard-pins both
+  UID and GID to `999:999`. Never remove the persistent volume for this error.
+- The immediate field gate is redeploying alpha.7 against the existing volume,
+  then checking panel QR login, new Creator session, WLB2 delivery, Android
+  notification recovery and Windows Phone Gateway.
+
 ## Non-negotiable rules
 
 - Never commit cookies, access tokens, call links, server credentials, IPs, or
@@ -152,8 +169,12 @@ contains destination addresses and session-adjacent runtime data.
 
 ## Next implementation order
 
-1. Ship and field-test ACK-progress recovery, profile negotiation and the
-   separate CONNECT lane together as `0.5.0-alpha.3`.
-2. Add per-flow queues, flow control and DRR with control/DNS priority.
-3. Capture repeatable directional Android and SOCKS-only benchmarks.
-4. Only then tune windows/pacing or prototype multi-track/QUIC alternatives.
+1. Field-verify `0.5.0-alpha.7` with the existing persistent volume and matching
+   Android/Windows clients; record redacted directional metrics.
+2. Add reliable DNS control messages, bounded per-flow queues, flow control and
+   DRR with control/DNS/interactive priority.
+3. Capture repeatable directional Android, Windows Phone Gateway and SOCKS-only
+   benchmarks before changing pacing or KCP windows.
+4. Harden the panel with SQLite history, structured events/SSE, encrypted vault,
+   session auth/CSRF/audit and a TLS deployment profile.
+5. Only then tune pacing or prototype multi-track/QUIC alternatives.
