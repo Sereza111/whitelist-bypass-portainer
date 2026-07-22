@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-const controlPlaneSchema = 2
+const controlPlaneSchema = 3
 
 type clientProfile struct {
 	ID                 string         `json:"id"`
@@ -29,15 +29,43 @@ type clientProfile struct {
 	AutoRestart        bool           `json:"autoRestart"`
 	RecoveryKey        string         `json:"recoveryKey"`
 	RecoveryGeneration int            `json:"recoveryGeneration"`
+	RecoveryRecipient  *string        `json:"recoveryRecipient,omitempty"`
+	RecoveryVerifiedAt *time.Time     `json:"recoveryVerifiedAt,omitempty"`
+}
+
+type panelSettings struct {
+	RecoveryRecipient  string     `json:"recoveryRecipient,omitempty"`
+	RecoveryVerifiedAt *time.Time `json:"recoveryVerifiedAt,omitempty"`
+	UpdatedAt          *time.Time `json:"updatedAt,omitempty"`
 }
 
 type profileInput struct {
-	Name        string         `json:"name"`
-	Enabled     *bool          `json:"enabled,omitempty"`
-	MaxSessions int            `json:"maxSessions"`
-	ExpiresAt   *time.Time     `json:"expiresAt,omitempty"`
-	Config      sessionRequest `json:"config"`
-	AutoRestart *bool          `json:"autoRestart,omitempty"`
+	Name              string         `json:"name"`
+	Enabled           *bool          `json:"enabled,omitempty"`
+	MaxSessions       int            `json:"maxSessions"`
+	ExpiresAt         *time.Time     `json:"expiresAt,omitempty"`
+	Config            sessionRequest `json:"config"`
+	AutoRestart       *bool          `json:"autoRestart,omitempty"`
+	RecoveryRecipient optionalString `json:"recoveryRecipient,omitempty"`
+}
+
+type optionalString struct {
+	Present bool
+	Value   *string
+}
+
+func (o *optionalString) UnmarshalJSON(data []byte) error {
+	o.Present = true
+	if string(data) == "null" {
+		o.Value = nil
+		return nil
+	}
+	var value string
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	o.Value = &value
+	return nil
 }
 
 type sessionInput struct {
@@ -77,6 +105,7 @@ type sessionView struct {
 
 type controlPlaneSnapshot struct {
 	Schema   int             `json:"schema"`
+	Settings panelSettings   `json:"settings,omitempty"`
 	Profiles []clientProfile `json:"profiles"`
 }
 
@@ -86,8 +115,10 @@ type controlPlane struct {
 	stateFile         string
 	managedSecretsDir string
 	maxSessions       int
+	settings          panelSettings
 	profiles          map[string]clientProfile
 	sessions          map[string]*managedSession
+	events            *eventLog
 }
 
 func newControlPlane(dataDir string, maxSessions int) (*controlPlane, error) {
@@ -99,8 +130,10 @@ func newControlPlane(dataDir string, maxSessions int) (*controlPlane, error) {
 		stateFile:         filepath.Join(dataDir, "control-plane.json"),
 		managedSecretsDir: filepath.Join(dataDir, "managed-secrets"),
 		maxSessions:       maxSessions,
+		settings:          panelSettings{},
 		profiles:          make(map[string]clientProfile),
 		sessions:          make(map[string]*managedSession),
+		events:            newEventLog(200),
 	}
 	if err := os.MkdirAll(filepath.Join(dataDir, "sessions"), 0o700); err != nil {
 		return nil, err
@@ -124,6 +157,10 @@ func (cp *controlPlane) load() error {
 		return fmt.Errorf("decode control-plane state: %w", err)
 	}
 	migrated := snapshot.Schema < controlPlaneSchema
+	if snapshot.Schema < 3 {
+		migrated = true
+	}
+	cp.settings = snapshot.Settings
 	for _, profile := range snapshot.Profiles {
 		if profile.RecoveryKey == "" {
 			profile.RecoveryKey = randomSecret()
@@ -144,7 +181,7 @@ func (cp *controlPlane) saveLocked() error {
 		profiles = append(profiles, profile)
 	}
 	sort.Slice(profiles, func(i, j int) bool { return profiles[i].CreatedAt.Before(profiles[j].CreatedAt) })
-	body, err := json.MarshalIndent(controlPlaneSnapshot{Schema: controlPlaneSchema, Profiles: profiles}, "", "  ")
+	body, err := json.MarshalIndent(controlPlaneSnapshot{Schema: controlPlaneSchema, Settings: cp.settings, Profiles: profiles}, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -164,6 +201,13 @@ func (cp *controlPlane) listProfiles() []clientProfile {
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].CreatedAt.Before(result[j].CreatedAt) })
 	return result
+}
+
+func (cp *controlPlane) profile(id string) (clientProfile, bool) {
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+	profile, ok := cp.profiles[id]
+	return profile, ok
 }
 
 func (cp *controlPlane) normalizeProfile(input profileInput, previous *clientProfile) (clientProfile, error) {
@@ -217,10 +261,26 @@ func (cp *controlPlane) normalizeProfile(input profileInput, previous *clientPro
 		profile.AutoRestart = previous.AutoRestart
 		profile.RecoveryKey = previous.RecoveryKey
 		profile.RecoveryGeneration = previous.RecoveryGeneration
+		profile.RecoveryRecipient = previous.RecoveryRecipient
+		profile.RecoveryVerifiedAt = previous.RecoveryVerifiedAt
+	}
+	if input.RecoveryRecipient.Present {
+		if input.RecoveryRecipient.Value == nil || strings.TrimSpace(*input.RecoveryRecipient.Value) == "" {
+			profile.RecoveryRecipient = nil
+			profile.RecoveryVerifiedAt = nil
+		} else {
+			normalized, err := normalizeVKRecipient(*input.RecoveryRecipient.Value)
+			if err != nil {
+				return clientProfile{}, err
+			}
+			profile.RecoveryRecipient = &normalized
+			profile.RecoveryVerifiedAt = nil
+		}
 	}
 	if input.AutoRestart != nil {
 		profile.AutoRestart = *input.AutoRestart
 	}
+	profile.UpdatedAt = now
 	return profile, nil
 }
 
@@ -236,6 +296,7 @@ func (cp *controlPlane) createProfile(input profileInput) (clientProfile, error)
 		delete(cp.profiles, profile.ID)
 		return clientProfile{}, err
 	}
+	cp.events.add("info", "profile", fmt.Sprintf("Created client profile %q", profile.Name), profile.ID)
 	return profile, nil
 }
 
@@ -255,6 +316,36 @@ func (cp *controlPlane) updateProfile(id string, input profileInput) (clientProf
 		cp.profiles[id] = previous
 		return clientProfile{}, err
 	}
+	cp.events.add("info", "profile", fmt.Sprintf("Updated client profile %q", profile.Name), profile.ID)
+	return profile, nil
+}
+
+func (cp *controlPlane) duplicateProfile(id string) (clientProfile, error) {
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+	source, ok := cp.profiles[id]
+	if !ok {
+		return clientProfile{}, os.ErrNotExist
+	}
+	now := time.Now().UTC()
+	copyName := strings.TrimSpace(source.Name) + " (copy)"
+	if len([]rune(copyName)) > 80 {
+		copyName = string([]rune(copyName)[:80])
+	}
+	profile := source
+	profile.ID = randomID("client")
+	profile.Name = copyName
+	profile.RecoveryKey = randomSecret()
+	profile.RecoveryGeneration = 0
+	profile.RecoveryVerifiedAt = nil
+	profile.CreatedAt = now
+	profile.UpdatedAt = now
+	cp.profiles[profile.ID] = profile
+	if err := cp.saveLocked(); err != nil {
+		delete(cp.profiles, profile.ID)
+		return clientProfile{}, err
+	}
+	cp.events.add("info", "profile", fmt.Sprintf("Duplicated client profile %q", source.Name), profile.ID)
 	return profile, nil
 }
 
@@ -276,6 +367,7 @@ func (cp *controlPlane) deleteProfile(id string) error {
 		cp.profiles[id] = previous
 		return err
 	}
+	cp.events.add("warn", "profile", fmt.Sprintf("Deleted client profile %q", previous.Name), id)
 	return nil
 }
 
@@ -330,6 +422,7 @@ func (cp *controlPlane) startSession(input sessionInput) (sessionView, error) {
 	sessionDir := filepath.Join(cp.dataDir, "sessions", id)
 	mgr := newManagerAt(sessionDir)
 	mgr.managedSecretsDir = cp.managedSecretsDir
+	mgr.peerID = cp.effectiveRecoveryRecipientLocked(profile.ID)
 	created := time.Now().UTC()
 	session := &managedSession{
 		ID: id, ClientID: input.ClientID, ClientName: profile.Name, CreatedAt: created,
@@ -347,6 +440,7 @@ func (cp *controlPlane) startSession(input sessionInput) (sessionView, error) {
 	if session.AutoRestart {
 		go cp.superviseSession(session)
 	}
+	cp.events.add("info", "session", fmt.Sprintf("Started session for %q", profile.Name), id)
 	return cp.view(session), nil
 }
 
@@ -403,6 +497,7 @@ func (cp *controlPlane) superviseSession(session *managedSession) {
 			config.RecoveryGeneration = session.Generation
 			session.NextRetryAt = nil
 			session.StateMu.Unlock()
+			session.Manager.peerID, _ = cp.effectiveRecoveryRecipient(session.ClientID)
 			if err := session.Manager.start(config); err != nil {
 				continue
 			}
@@ -477,6 +572,7 @@ func (cp *controlPlane) stopSession(id string) (sessionView, error) {
 	if err := session.Manager.stop(); err != nil {
 		return sessionView{}, err
 	}
+	cp.events.add("info", "session", fmt.Sprintf("Stopped session for %q", session.ClientName), id)
 	return cp.view(session), nil
 }
 
@@ -495,7 +591,86 @@ func (cp *controlPlane) deleteSession(id string) error {
 	session.StopOnce.Do(func() { close(session.StopCh) })
 	delete(cp.sessions, id)
 	cp.mu.Unlock()
+	cp.events.add("info", "session", "Removed stopped session", id)
 	return os.RemoveAll(filepath.Join(cp.dataDir, "sessions", id))
+}
+
+func (cp *controlPlane) effectiveRecoveryRecipient(profileID string) (string, string) {
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+	return cp.effectiveRecoverySourceLocked(profileID)
+}
+
+func (cp *controlPlane) effectiveRecoveryRecipientLocked(profileID string) string {
+	id, _ := cp.effectiveRecoverySourceLocked(profileID)
+	return id
+}
+
+func (cp *controlPlane) effectiveRecoverySourceLocked(profileID string) (string, string) {
+	if profileID != "" {
+		if profile, ok := cp.profiles[profileID]; ok && profile.RecoveryRecipient != nil {
+			if value := strings.TrimSpace(*profile.RecoveryRecipient); value != "" {
+				return value, "profile"
+			}
+		}
+	}
+	if value := strings.TrimSpace(cp.settings.RecoveryRecipient); value != "" {
+		return value, "panel"
+	}
+	if value := strings.TrimSpace(os.Getenv("VK_PEER_ID")); value != "" {
+		return value, "env"
+	}
+	return "", ""
+}
+
+func (cp *controlPlane) setGlobalRecoveryRecipient(raw string) error {
+	normalized := ""
+	if strings.TrimSpace(raw) != "" {
+		var err error
+		normalized, err = normalizeVKRecipient(raw)
+		if err != nil {
+			return err
+		}
+	}
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+	cp.settings.RecoveryRecipient = normalized
+	cp.settings.RecoveryVerifiedAt = nil
+	now := time.Now().UTC()
+	cp.settings.UpdatedAt = &now
+	if err := cp.saveLocked(); err != nil {
+		return err
+	}
+	cp.events.add("info", "recovery", "Updated global recovery recipient", "")
+	return nil
+}
+
+func (cp *controlPlane) markGlobalRecoveryVerified() error {
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+	now := time.Now().UTC()
+	cp.settings.RecoveryVerifiedAt = &now
+	cp.settings.UpdatedAt = &now
+	return cp.saveLocked()
+}
+
+func (cp *controlPlane) markProfileRecoveryVerified(id string) error {
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+	profile, ok := cp.profiles[id]
+	if !ok {
+		return os.ErrNotExist
+	}
+	now := time.Now().UTC()
+	profile.RecoveryVerifiedAt = &now
+	profile.UpdatedAt = now
+	cp.profiles[id] = profile
+	return cp.saveLocked()
+}
+
+func (cp *controlPlane) recoveryConfigured() bool {
+	id, _ := cp.effectiveRecoveryRecipient("")
+	return id != ""
 }
 
 func (cp *controlPlane) stopAll() {

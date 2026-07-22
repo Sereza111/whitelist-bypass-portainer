@@ -2,7 +2,10 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -67,7 +70,7 @@ func TestControlAPIProfileLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()
-	registerControlAPIRoutes(mux, cp, "admin", testPanelPassword, t.TempDir())
+	registerControlAPIRoutes(mux, cp, nil, "admin", testPanelPassword, t.TempDir())
 
 	created := clientProfile{}
 	response := controlAPIRequest(t, mux, http.MethodPost, "/api/profiles", `{
@@ -100,9 +103,156 @@ func TestControlAPIProfileLifecycle(t *testing.T) {
 		t.Fatalf("patch status=%d body=%s", response.Code, response.Body.String())
 	}
 
+	response = controlAPIRequest(t, mux, http.MethodPost, "/api/profiles/"+created.ID+"/duplicate", "")
+	if response.Code != http.StatusCreated {
+		t.Fatalf("duplicate status=%d body=%s", response.Code, response.Body.String())
+	}
+	var duplicate clientProfile
+	if err := json.Unmarshal(response.Body.Bytes(), &duplicate); err != nil {
+		t.Fatal(err)
+	}
+	if duplicate.ID == created.ID || duplicate.RecoveryKey == created.RecoveryKey || !strings.Contains(duplicate.Name, "copy") {
+		t.Fatalf("duplicate did not receive an independent identity: %#v", duplicate)
+	}
+
 	response = controlAPIRequest(t, mux, http.MethodDelete, "/api/profiles/"+created.ID, "")
 	if response.Code != http.StatusNoContent {
 		t.Fatalf("delete status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestNormalizeVKRecipient(t *testing.T) {
+	for input, want := range map[string]string{
+		"123":                    "123",
+		" https://vk.com/id42/ ": "42",
+		"VK.com/id9001":          "9001",
+	} {
+		got, err := normalizeVKRecipient(input)
+		if err != nil || got != want {
+			t.Fatalf("normalize %q = %q, %v; want %q", input, got, err, want)
+		}
+	}
+	for _, input := range []string{"", "id123", "vk.com/durov", "-123", "0", "123abc"} {
+		if got, err := normalizeVKRecipient(input); err == nil {
+			t.Fatalf("invalid recipient %q accepted as %q", input, got)
+		}
+	}
+}
+
+func TestRecoveryRecipientPrecedence(t *testing.T) {
+	t.Setenv("VK_PEER_ID", "101")
+	cp, err := newControlPlane(t.TempDir(), 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, source := cp.effectiveRecoveryRecipient(""); got != "101" || source != "env" {
+		t.Fatalf("env fallback = %q/%q", got, source)
+	}
+	if err := cp.setGlobalRecoveryRecipient("vk.com/id202"); err != nil {
+		t.Fatal(err)
+	}
+	if got, source := cp.effectiveRecoveryRecipient(""); got != "202" || source != "panel" {
+		t.Fatalf("panel override = %q/%q", got, source)
+	}
+	override := "https://vk.com/id303"
+	enabled := true
+	profile, err := cp.createProfile(profileInput{
+		Name: "Phone", Enabled: &enabled, MaxSessions: 1, Config: sessionRequest{Mode: "vk"},
+		RecoveryRecipient: optionalString{Present: true, Value: &override},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, source := cp.effectiveRecoveryRecipient(profile.ID); got != "303" || source != "profile" {
+		t.Fatalf("profile override = %q/%q", got, source)
+	}
+	if err := cp.setGlobalRecoveryRecipient(""); err != nil {
+		t.Fatal(err)
+	}
+	if got, source := cp.effectiveRecoveryRecipient(""); got != "101" || source != "env" {
+		t.Fatalf("cleared panel should reveal env fallback, got %q/%q", got, source)
+	}
+}
+
+func TestRecoverySettingsAndTestDeliveryAPI(t *testing.T) {
+	cp, err := newControlPlane(t.TempDir(), 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(cp.managedSecretsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cp.managedSecretsDir, "cookies-vk.json"), []byte(`[{"name":"sid","value":"cookie-secret"}]`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	login := &vkLoginManager{state: "ready", accountID: "456"}
+	mux := http.NewServeMux()
+	registerControlAPIRoutes(mux, cp, login, "admin", testPanelPassword, t.TempDir())
+
+	response := controlAPIRequest(t, mux, http.MethodPatch, "/api/settings/recovery", `{"recipient":"https://vk.com/id456"}`)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"source":"panel"`) || !strings.Contains(response.Body.String(), `"sameAccount":true`) {
+		t.Fatalf("recovery patch status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	oldSender := recoveryMessageSender
+	defer func() { recoveryMessageSender = oldSender }()
+	var deliveredRecipient, deliveredMessage string
+	recoveryMessageSender = func(_ context.Context, cookiePath, recipient, message string) error {
+		deliveredRecipient, deliveredMessage = recipient, message
+		if !strings.HasSuffix(cookiePath, "cookies-vk.json") {
+			t.Fatalf("unexpected cookie path %q", cookiePath)
+		}
+		return nil
+	}
+	response = controlAPIRequest(t, mux, http.MethodPost, "/api/settings/recovery/test", "")
+	if response.Code != http.StatusOK || deliveredRecipient != "456" {
+		t.Fatalf("test delivery status=%d recipient=%q body=%s", response.Code, deliveredRecipient, response.Body.String())
+	}
+	if strings.Contains(deliveredMessage, "cookie-secret") || strings.Contains(deliveredMessage, "recoveryKey") || strings.Contains(deliveredMessage, "http") {
+		t.Fatalf("test message contains sensitive material: %q", deliveredMessage)
+	}
+	response = controlAPIRequest(t, mux, http.MethodPost, "/api/settings/recovery/test", "")
+	if response.Code != http.StatusTooManyRequests {
+		t.Fatalf("test delivery rate limit status=%d body=%s", response.Code, response.Body.String())
+	}
+	response = controlAPIRequest(t, mux, http.MethodGet, "/api/settings/recovery", "")
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"verifiedAt"`) {
+		t.Fatalf("verified recovery settings missing: status=%d body=%s", response.Code, response.Body.String())
+	}
+	response = controlAPIRequest(t, mux, http.MethodGet, "/api/events", "")
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "VK test message delivered") || strings.Contains(response.Body.String(), "cookie-secret") {
+		t.Fatalf("unsafe or missing event response: status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestRecoveryTestFailureDoesNotLeakSenderError(t *testing.T) {
+	cp, err := newControlPlane(t.TempDir(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cp.setGlobalRecoveryRecipient("777"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(cp.managedSecretsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cp.managedSecretsDir, "cookies-vk.json"), []byte(`[]`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	registerControlAPIRoutes(mux, cp, nil, "admin", testPanelPassword, t.TempDir())
+	oldSender := recoveryMessageSender
+	defer func() { recoveryMessageSender = oldSender }()
+	recoveryMessageSender = func(context.Context, string, string, string) error {
+		return errors.New("token-super-secret call-link-super-secret")
+	}
+	response := controlAPIRequest(t, mux, http.MethodPost, "/api/settings/recovery/test", "")
+	if response.Code != http.StatusBadGateway || strings.Contains(response.Body.String(), "super-secret") {
+		t.Fatalf("sender error leaked: status=%d body=%s", response.Code, response.Body.String())
+	}
+	response = controlAPIRequest(t, mux, http.MethodGet, "/api/events", "")
+	if strings.Contains(response.Body.String(), "super-secret") {
+		t.Fatalf("sender error leaked through events: %s", response.Body.String())
 	}
 }
 
@@ -112,7 +262,7 @@ func TestControlAPIRejectsCrossOriginMutation(t *testing.T) {
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()
-	registerControlAPIRoutes(mux, cp, "admin", testPanelPassword, t.TempDir())
+	registerControlAPIRoutes(mux, cp, nil, "admin", testPanelPassword, t.TempDir())
 	request := httptest.NewRequest(http.MethodPost, "/api/profiles", strings.NewReader(`{"name":"Phone"}`))
 	request.SetBasicAuth("admin", testPanelPassword)
 	request.Header.Set("Origin", "https://attacker.example")
@@ -194,8 +344,29 @@ func TestControlPlaneMigratesRecoveryDefaults(t *testing.T) {
 		t.Fatalf("legacy recovery migration failed: %#v", profiles)
 	}
 	persisted, err := os.ReadFile(filepath.Join(dataDir, "control-plane.json"))
-	if err != nil || !strings.Contains(string(persisted), `"schema": 2`) {
+	if err != nil || !strings.Contains(string(persisted), `"schema": 3`) {
 		t.Fatalf("migrated schema was not persisted: err=%v body=%s", err, persisted)
+	}
+}
+
+func TestControlPlaneMigratesSchemaTwoToThree(t *testing.T) {
+	dataDir := t.TempDir()
+	now := time.Now().UTC()
+	body := fmt.Sprintf(`{"schema":2,"profiles":[{"id":"client-v2","name":"V2","enabled":true,"maxSessions":1,"config":{"mode":"vk","resources":"default","displayName":"V2","videoReliability":"auto","kcpProfile":"balanced"},"createdAt":%q,"updatedAt":%q,"autoRestart":true,"recoveryKey":"existing-key","recoveryGeneration":2}]}`, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
+	if err := os.WriteFile(filepath.Join(dataDir, "control-plane.json"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cp, err := newControlPlane(dataDir, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profiles := cp.listProfiles()
+	if len(profiles) != 1 || profiles[0].RecoveryKey != "existing-key" {
+		t.Fatalf("schema two profile changed unexpectedly: %#v", profiles)
+	}
+	persisted, err := os.ReadFile(filepath.Join(dataDir, "control-plane.json"))
+	if err != nil || !strings.Contains(string(persisted), `"schema": 3`) || !strings.Contains(string(persisted), `"settings"`) {
+		t.Fatalf("schema two migration not persisted: err=%v body=%s", err, persisted)
 	}
 }
 

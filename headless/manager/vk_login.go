@@ -4,10 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -329,35 +327,8 @@ func cookieValue(cookies []*network.Cookie, name string) string {
 }
 
 func validateVKCookies(parent context.Context, cookieHeader string) error {
-	ctx, cancel := context.WithTimeout(parent, 12*time.Second)
-	defer cancel()
-	form := url.Values{"version": {"1"}, "app_id": {vkCallsAppID}}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, vkWebTokenURL, strings.NewReader(form.Encode()))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("User-Agent", vkLoginUserAgent)
-	req.Header.Set("Origin", "https://vk.com")
-	req.Header.Set("Referer", "https://vk.com/")
-	req.Header.Set("Cookie", cookieHeader)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	var result struct {
-		Data struct {
-			AccessToken string `json:"access_token"`
-		} `json:"data"`
-	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&result); err != nil {
-		return err
-	}
-	if result.Data.AccessToken == "" {
-		return errors.New("VK did not accept the browser session")
-	}
-	return nil
+	_, err := fetchVKAccessToken(parent, cookieHeader)
+	return err
 }
 
 func (login *vkLoginManager) saveCookies(cookies []*network.Cookie) error {
@@ -415,9 +386,6 @@ func (login *vkLoginManager) succeed(generation uint64, accountID string) {
 		login.expiresAt = nil
 		login.screenshot = nil
 		login.cancel = nil
-		if accountID != "" && accountID == strings.TrimSpace(os.Getenv("VK_PEER_ID")) {
-			login.warning = "Это тот же аккаунт, что VK_PEER_ID: уведомления самому себе могут не прийти"
-		}
 	})
 }
 

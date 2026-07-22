@@ -2,7 +2,41 @@ const byId = (id) => document.getElementById(id);
 const app = {
   profiles: [], sessions: [], selected: null, refreshing: false,
   profileSignature: '', sessionSignature: '', vkLoginStatus: null,
+  overview: null, recoverySettings: null, events: [], eventFilter: 'all', section: 'dashboard',
 };
+
+const pageMeta = {
+  dashboard: ['Обзор', 'Состояние сервера и быстрые действия'],
+  clients: ['Клиенты', 'Профили доступа, ограничения и восстановление'],
+  sessions: ['Сессии', 'Активные звонки и живая диагностика транспорта'],
+  providers: ['Провайдеры', 'Серверный VK и доставка новых ссылок'],
+  events: ['События', 'Безопасный аудит действий панели'],
+  settings: ['Настройки', 'Состояние и рекомендации по эксплуатации'],
+};
+
+function setSection(section, updateHash = true) {
+  if (!pageMeta[section]) section = 'dashboard';
+  app.section = section;
+  document.querySelectorAll('[data-page]').forEach((page) => page.classList.toggle('active', page.dataset.page === section));
+  document.querySelectorAll('[data-nav]').forEach((item) => item.classList.toggle('active', item.dataset.nav === section));
+  byId('pageTitle').textContent = pageMeta[section][0];
+  byId('pageSubtitle').textContent = pageMeta[section][1];
+  if (updateHash) history.replaceState(null, '', `#${section}`);
+  closeContextMenu();
+  if (section === 'events') run(refreshEvents);
+  if (section === 'providers') run(refreshRecoverySettings);
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function openClientEditor() {
+  setSection('clients');
+  byId('clientEditor').classList.add('open');
+  setTimeout(() => byId('profileName').focus(), 0);
+}
+
+function closeClientEditor() {
+  byId('clientEditor').classList.remove('open');
+}
 
 async function api(path, options = {}) {
   const controller = new AbortController();
@@ -58,12 +92,14 @@ function activeState(state) {
 
 function profilePayload() {
   const expiresAt = byId('expiresAt').value;
+  const recoveryRecipient = byId('profileRecoveryRecipient').value.trim();
   return {
     name: byId('profileName').value.trim(),
     enabled: byId('enabled').checked,
 	autoRestart: byId('autoRestart').checked,
     maxSessions: Number(byId('maxSessions').value),
     expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null,
+    recoveryRecipient: recoveryRecipient || null,
     config: {
       mode: byId('mode').value,
       resources: byId('resources').value,
@@ -83,8 +119,10 @@ function resetForm() {
   byId('enabled').checked = true;
 	byId('autoRestart').checked = true;
   byId('expiresAt').value = '';
+  byId('profileRecoveryRecipient').value = '';
   byId('cancelEdit').hidden = true;
   byId('saveProfile').textContent = 'Сохранить профиль';
+  byId('editorTitle').textContent = 'Новый клиент';
 }
 
 function editProfile(id) {
@@ -99,10 +137,12 @@ function editProfile(id) {
   byId('maxSessions').value = String(profile.maxSessions);
   byId('enabled').checked = profile.enabled;
 	byId('autoRestart').checked = profile.autoRestart !== false;
+  byId('profileRecoveryRecipient').value = profile.recoveryRecipient || '';
   byId('expiresAt').value = profile.expiresAt ? toLocalDateTime(profile.expiresAt) : '';
   byId('cancelEdit').hidden = false;
   byId('saveProfile').textContent = 'Обновить профиль';
-  byId('profileName').focus();
+  byId('editorTitle').textContent = `Изменить · ${profile.name}`;
+  openClientEditor();
 }
 
 function toLocalDateTime(value) {
@@ -123,6 +163,7 @@ async function toggleProfile(id) {
 	  autoRestart: profile.autoRestart,
       maxSessions: profile.maxSessions,
       expiresAt: profile.expiresAt || null,
+      recoveryRecipient: profile.recoveryRecipient || null,
       config: profile.config,
     }),
   });
@@ -144,6 +185,19 @@ async function deleteProfile(id) {
   await refresh();
 }
 
+async function duplicateProfile(id) {
+  await api(`/api/profiles/${encodeURIComponent(id)}/duplicate`, { method: 'POST', body: '{}' });
+  showError('Создана независимая копия профиля с новым ключом восстановления.');
+  await refresh();
+}
+
+async function testProfileRecovery(id) {
+  await api(`/api/profiles/${encodeURIComponent(id)}/recovery/test`, { method: 'POST', body: '{}' });
+  showError('Тестовое сообщение для клиента отправлено в VK.');
+  await refreshRecoverySettings();
+  await refreshEvents();
+}
+
 async function stopSession(id) {
   await api(`/api/sessions/${encodeURIComponent(id)}/stop`, { method: 'POST', body: '{}' });
   await refresh();
@@ -157,6 +211,7 @@ async function deleteSession(id) {
 
 function selectSession(id, scroll = true) {
   app.selected = id;
+  setSection('sessions');
   renderSessions();
   run(renderDetail);
   if (scroll) document.querySelector('.diagnostics')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -174,6 +229,8 @@ function contextActions(kind, id) {
     return [
       { action: 'start', label: 'Запустить сессию', disabled: !profile.enabled },
       { action: 'mobile', label: 'Скопировать в телефон' },
+      { action: 'duplicate', label: 'Создать независимую копию' },
+      { action: 'test-recovery', label: 'Проверить доставку VK' },
       { action: 'edit', label: 'Изменить профиль' },
       { action: 'toggle', label: profile.enabled ? 'Отключить профиль' : 'Включить профиль' },
       { action: 'delete-profile', label: 'Удалить профиль', danger: true },
@@ -208,6 +265,8 @@ async function runContextAction(action, kind, id) {
   if (kind === 'profile') {
     if (action === 'start') return startProfile(id);
     if (action === 'mobile') return copyMobileProfile(id);
+    if (action === 'duplicate') return duplicateProfile(id);
+    if (action === 'test-recovery') return testProfileRecovery(id);
     if (action === 'edit') return editProfile(id);
     if (action === 'toggle') return toggleProfile(id);
     if (action === 'delete-profile') return deleteProfile(id);
@@ -225,27 +284,42 @@ async function runContextAction(action, kind, id) {
 
 function renderProfiles() {
   const root = byId('profiles');
-  const signature = JSON.stringify(app.profiles);
+  const query = (byId('profileSearch')?.value || '').trim().toLowerCase();
+  const visible = app.profiles.filter((profile) => `${profile.name} ${profile.config.mode}`.toLowerCase().includes(query));
+  const signature = JSON.stringify([visible, query]);
   if (signature === app.profileSignature) return;
   app.profileSignature = signature;
-  if (!app.profiles.length) {
-    root.innerHTML = '<p class="empty">Создай первый профиль слева — например, для телефона или ноутбука.</p>';
+  byId('profileResultCount').textContent = visible.length;
+  if (!visible.length) {
+    root.innerHTML = `<p class="empty">${query ? 'По этому запросу клиентов нет.' : 'Создай первый профиль — например, для телефона или ноутбука.'}</p>`;
     return;
   }
-  root.innerHTML = app.profiles.map((profile) => {
+  root.innerHTML = visible.map((profile) => {
     const state = profile.enabled ? 'enabled' : 'disabled';
     return `<article class="profile-card ${state}" data-menu-kind="profile" data-menu-id="${profile.id}">
-      <div class="profile-glyph">${escapeHTML(profile.name.slice(0, 1).toUpperCase())}</div>
-      <div class="profile-copy">
-        <div class="profile-heading"><h3>${escapeHTML(profile.name)}</h3><span>${profile.enabled ? 'ACTIVE' : 'LOCKED'}</span></div>
-		<p>${escapeHTML(profile.config.mode.toUpperCase())} · ${profile.autoRestart ? 'AUTO RECOVERY' : 'MANUAL'} · limit ${profile.maxSessions}</p>
-      </div>
+      <div class="profile-identity"><div class="profile-glyph">${escapeHTML(profile.name.slice(0, 1).toUpperCase())}</div><span><strong>${escapeHTML(profile.name)}</strong><small>${escapeHTML(profile.id)}</small></span></div>
+      <div class="profile-provider">${escapeHTML(profile.config.mode.toUpperCase())}<small>${escapeHTML(profile.config.kcpProfile || 'balanced')}</small></div>
+      <div class="profile-meta">${profile.autoRestart ? 'Автовосстановление' : 'Ручной запуск'}<small>лимит ${profile.maxSessions} · ${profile.recoveryRecipient ? 'свой VK' : 'общий VK'}</small></div>
+      <span class="state-label">${profile.enabled ? 'Активен' : 'Отключён'}</span>
       <div class="profile-actions">
         <button class="small start-client" data-id="${profile.id}" ${profile.enabled ? '' : 'disabled'}>Запустить</button>
-        <button class="icon menu-trigger" type="button" data-kind="profile" data-id="${profile.id}" title="Все действия" aria-label="Действия профиля">⋮</button>
+        <button class="icon-button menu-trigger" type="button" data-kind="profile" data-id="${profile.id}" title="Все действия" aria-label="Действия профиля">⋮</button>
       </div>
     </article>`;
   }).join('');
+}
+
+function renderDashboard() {
+  const sessions = app.sessions.slice(0, 5);
+  byId('dashboardSessions').innerHTML = sessions.length ? sessions.map((session) => {
+    const status = session.status || {};
+    const dot = ['connected', 'link-ready', 'waiting-for-client'].includes(status.state) ? 'good-dot' : (['failed', 'degraded'].includes(status.state) ? 'bad-dot' : '');
+    return `<div class="compact-row"><i class="${dot}"></i><span><strong>${escapeHTML(session.clientName)}</strong><small>${escapeHTML(friendlyState(status))}</small></span><span>↓ ${escapeHTML(status.metrics?.rx_kbps || '0')} kbps</span><span>↑ ${escapeHTML(status.metrics?.tx_kbps || '0')} kbps</span><button class="text-button dashboard-session" data-id="${session.id}">Открыть</button></div>`;
+  }).join('') : '<p class="empty">Активных каналов пока нет.</p>';
+  const profiles = app.profiles.slice(0, 5);
+  byId('dashboardClients').innerHTML = profiles.length ? profiles.map((profile) => `<div class="compact-row"><i class="${profile.enabled ? 'good-dot' : 'bad-dot'}"></i><span><strong>${escapeHTML(profile.name)}</strong><small>${escapeHTML(profile.config.mode.toUpperCase())} · ${escapeHTML(profile.config.kcpProfile || 'balanced')}</small></span><span>${profile.autoRestart ? 'Auto recovery' : 'Manual'}</span><span>лимит ${profile.maxSessions}</span><button class="text-button dashboard-profile" data-id="${profile.id}">Изменить</button></div>`).join('') : '<p class="empty">Создай первый клиентский профиль.</p>';
+  document.querySelectorAll('.dashboard-session').forEach((button) => button.onclick = () => selectSession(button.dataset.id));
+  document.querySelectorAll('.dashboard-profile').forEach((button) => button.onclick = () => editProfile(button.dataset.id));
 }
 
 async function copyMobileProfile(id) {
@@ -278,6 +352,7 @@ function friendlyState(status) {
 
 function renderSessions() {
   const root = byId('sessions');
+  byId('sessionResultCount').textContent = app.sessions.length;
   const signature = JSON.stringify(app.sessions.map((session) => ({
     id: session.id,
     name: session.clientName,
@@ -312,7 +387,7 @@ function renderSessions() {
       <div class="session-rate"><span class="session-tx">TX ${escapeHTML(tx)}</span><span class="session-rx">RX ${escapeHTML(rx)} kbps</span></div>
       <div class="session-actions">
         ${activeState(status.state) ? `<button class="small stop-session" data-id="${session.id}">Стоп</button>` : `<button class="small delete-session" data-id="${session.id}">Убрать</button>`}
-        <button class="icon menu-trigger" type="button" data-kind="session" data-id="${session.id}" title="Все действия" aria-label="Действия сессии">⋮</button>
+        <button class="icon-button menu-trigger" type="button" data-kind="session" data-id="${session.id}" title="Все действия" aria-label="Действия сессии">⋮</button>
       </div>
     </article>`;
   }).join('');
@@ -378,26 +453,92 @@ async function run(action) {
   try { await action(); } catch (error) { showError(error.message); }
 }
 
+function formatDate(value) {
+  if (!value) return 'Никогда';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 'Никогда' : date.toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' });
+}
+
+function renderRecoverySettings(settings) {
+  if (!settings) return;
+  app.recoverySettings = settings;
+  if (document.activeElement !== byId('recoveryRecipient')) byId('recoveryRecipient').value = settings.recipient || '';
+  const sources = { panel: 'Панель', profile: 'Профиль', env: 'Legacy env' };
+  byId('recoverySource').textContent = settings.configured ? (sources[settings.source] || settings.source) : 'Не настроено';
+  byId('recoverySource').classList.toggle('good-badge', settings.configured);
+  byId('recoveryVerified').textContent = formatDate(settings.verifiedAt);
+  byId('recoveryAccountWarning').hidden = !settings.sameAccount;
+  byId('dashRecoveryState').textContent = settings.configured ? `готово · ${sources[settings.source] || settings.source}` : 'нужно указать получателя';
+}
+
+async function refreshRecoverySettings() {
+  renderRecoverySettings(await api('/api/settings/recovery'));
+}
+
+async function saveRecoverySettings() {
+  const recipient = byId('recoveryRecipient').value.trim();
+  const settings = await api('/api/settings/recovery', { method: 'PATCH', body: JSON.stringify({ recipient }) });
+  renderRecoverySettings(settings);
+  showError(recipient ? 'Получатель сохранён. Теперь отправь тестовое сообщение.' : 'Настройка панели очищена; при наличии будет использован legacy env.');
+  await refreshEvents();
+}
+
+async function sendRecoveryTest() {
+  byId('testRecovery').disabled = true;
+  try {
+    await api('/api/settings/recovery/test', { method: 'POST', body: '{}' });
+    showError('Тестовое сообщение отправлено. Проверь диалог VK.');
+    await Promise.all([refreshRecoverySettings(), refreshEvents()]);
+  } finally {
+    byId('testRecovery').disabled = false;
+  }
+}
+
+function renderEvents() {
+  const root = byId('eventsList');
+  const visible = app.eventFilter === 'all' ? app.events : app.events.filter((event) => event.kind === app.eventFilter);
+  root.innerHTML = visible.length ? visible.map((event) => `<article class="event-row" data-level="${escapeHTML(event.level)}"><time>${escapeHTML(formatDate(event.timestamp))}</time><span class="event-kind">${escapeHTML(event.kind)}</span><p>${escapeHTML(event.message)}</p><small>${escapeHTML(event.reference || '')}</small></article>`).join('') : '<p class="empty">Для этого фильтра событий пока нет.</p>';
+}
+
+async function refreshEvents() {
+  app.events = await api('/api/events?limit=100');
+  renderEvents();
+}
+
+function renderVKSummary(status) {
+  app.vkLoginStatus = status;
+  const ready = status.managed || status.mounted;
+  byId('providerAccountBadge').textContent = ready ? 'Подключён' : 'Не подключён';
+  byId('providerAccountBadge').classList.toggle('good-badge', ready);
+  byId('providerAccountID').textContent = status.accountId ? `ID ${status.accountId}` : (status.managed ? 'Подключён через панель' : (status.mounted ? 'Файл cookies' : 'Не подключён'));
+  byId('dashVKState').textContent = ready ? (status.accountId ? `подключён · ID ${status.accountId}` : 'учётные данные готовы') : 'нужно подключить аккаунт';
+}
+
 async function refresh() {
   if (app.refreshing) return;
   app.refreshing = true;
   try {
-    // Each section renders independently: a slow /api/sessions must never
-    // hide profiles that are already available, and one hung request must
-    // not wedge the whole panel.
     const overviewP = api('/api/overview').then((overview) => {
+      app.overview = overview;
       byId('build').textContent = `${overview.buildVersion} / ${(overview.buildCommit || '').slice(0, 7)}`;
+      byId('settingsBuild').textContent = `${overview.buildVersion} · ${(overview.buildCommit || '').slice(0, 7)}`;
+      byId('settingsLimit').textContent = `${overview.maxSessions} сессий`;
       byId('activeCount').textContent = overview.activeSessions;
       byId('sessionLimit').textContent = `из ${overview.maxSessions}`;
       byId('clientCount').textContent = overview.clientCount;
+      byId('clientNavCount').textContent = overview.clientCount;
+      byId('sessionNavCount').textContent = overview.activeSessions;
       const vk = overview.providers.find((provider) => provider.id === 'vk');
-      byId('vkProvider').textContent = !vk?.configured ? 'missing' : (overview.recoveryDelivery ? 'ready + recovery' : 'set VK_PEER_ID');
+      byId('vkProvider').textContent = !vk?.configured ? 'Не готов' : (overview.recoveryDelivery ? 'Готово' : 'Без recovery');
       byId('vkProvider').className = vk?.configured && overview.recoveryDelivery ? 'good' : 'bad';
+      byId('vkProviderHint').textContent = !vk?.configured ? 'подключи серверный аккаунт' : (overview.recoveryDelivery ? 'аккаунт и доставка настроены' : 'укажи получателя сообщений');
+      byId('vkStatMark').className = `stat-mark ${vk?.configured && overview.recoveryDelivery ? 'good-bg' : ''}`;
     }).catch(() => {});
 
     const profilesP = api('/api/profiles').then((profiles) => {
       app.profiles = profiles;
       renderProfiles();
+      renderDashboard();
       bindDynamicActions();
     }).catch(() => {});
 
@@ -408,11 +549,14 @@ async function refresh() {
         app.sessionSignature = '';
       }
       renderSessions();
+      renderDashboard();
       bindDynamicActions();
       await renderDetail();
     }).catch(() => {});
-
-    await Promise.allSettled([overviewP, profilesP, sessionsP]);
+    const recoveryP = api('/api/settings/recovery').then(renderRecoverySettings).catch(() => {});
+    const vkP = api('/api/vk-login').then(renderVKSummary).catch(() => {});
+    const eventsP = app.section === 'events' ? refreshEvents().catch(() => {}) : Promise.resolve();
+    await Promise.allSettled([overviewP, profilesP, sessionsP, recoveryP, vkP, eventsP]);
   } finally {
     app.refreshing = false;
   }
@@ -424,6 +568,7 @@ async function saveProfile() {
     method: id ? 'PATCH' : 'POST', body: JSON.stringify(profilePayload()),
   });
   resetForm();
+  closeClientEditor();
   await refresh();
 }
 
@@ -440,7 +585,7 @@ function vkLoginStateLabel(state) {
 
 async function refreshVKLogin() {
 	const status = await api('/api/vk-login');
-	app.vkLoginStatus = status;
+	renderVKSummary(status);
 	byId('vkLoginState').textContent = `${vkLoginStateLabel(status.state)}${status.accountId ? ` · ID ${status.accountId}` : ''}`;
 	byId('vkLoginMessage').textContent = status.message;
 	byId('vkLoginRune').dataset.state = status.state;
@@ -497,7 +642,23 @@ byId('saveProfile').addEventListener('click', (event) => {
   event.preventDefault();
   if (byId('profileForm').reportValidity()) run(saveProfile);
 });
-byId('cancelEdit').addEventListener('click', resetForm);
+byId('cancelEdit').addEventListener('click', () => { resetForm(); closeClientEditor(); });
+byId('openClientEditor').addEventListener('click', () => { resetForm(); openClientEditor(); });
+byId('closeClientEditor').addEventListener('click', closeClientEditor);
+byId('quickNewClient').addEventListener('click', () => { resetForm(); openClientEditor(); });
+byId('profileSearch').addEventListener('input', () => { app.profileSignature = ''; renderProfiles(); bindDynamicActions(); });
+byId('saveRecovery').addEventListener('click', () => run(saveRecoverySettings));
+byId('testRecovery').addEventListener('click', () => run(sendRecoveryTest));
+byId('refreshEvents').addEventListener('click', () => run(refreshEvents));
+document.querySelectorAll('[data-nav]').forEach((item) => item.addEventListener('click', (event) => {
+  event.preventDefault();
+  setSection(item.dataset.nav);
+}));
+document.querySelectorAll('[data-event-filter]').forEach((button) => button.addEventListener('click', () => {
+  app.eventFilter = button.dataset.eventFilter;
+  document.querySelectorAll('[data-event-filter]').forEach((item) => item.classList.toggle('active', item === button));
+  renderEvents();
+}));
 byId('reveal').addEventListener('click', () => {
   const field = byId('sessionLink');
   field.type = field.type === 'password' ? 'text' : 'password';
@@ -543,34 +704,15 @@ function applyTheme(theme) {
 	if (label) label.textContent = next === 'dark' ? 'Sable' : 'Argent';
 }
 (function initTheme() {
-	let stored = 'light';
-	try { stored = localStorage.getItem('wlb-theme') || 'light'; } catch (_) {}
+	let stored = 'dark';
+	try { stored = localStorage.getItem('wlb-theme') || 'dark'; } catch (_) {}
 	applyTheme(stored);
 	byId('themeToggle')?.addEventListener('click', () => {
 		const current = document.documentElement.getAttribute('data-theme');
 		applyTheme(current === 'dark' ? 'light' : 'dark');
 	});
 })();
-
-(function initForgeToggle() {
-	const forge = document.querySelector('.forge');
-	const toggle = byId('forgeToggle');
-	if (!forge || !toggle) return;
-	let collapsed = false;
-	try { collapsed = localStorage.getItem('wlb-forge') === 'collapsed'; } catch (_) {}
-	const apply = () => {
-		forge.classList.toggle('collapsed', collapsed);
-		toggle.textContent = collapsed ? '+' : '−';
-		toggle.setAttribute('aria-expanded', String(!collapsed));
-	};
-	apply();
-	toggle.addEventListener('click', () => {
-		collapsed = !collapsed;
-		try { localStorage.setItem('wlb-forge', collapsed ? 'collapsed' : 'open'); } catch (_) {}
-		apply();
-	});
-})();
-
+setSection(location.hash.slice(1) || 'dashboard', false);
 run(refresh);
 setInterval(() => run(refresh), 2000);
 setInterval(() => {

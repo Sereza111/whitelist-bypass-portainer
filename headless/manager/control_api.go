@@ -1,13 +1,17 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 )
 
 type providerStatus struct {
@@ -27,12 +31,98 @@ type overviewResponse struct {
 	RecoveryDelivery bool             `json:"recoveryDelivery"`
 }
 
-func registerControlAPIRoutes(mux *http.ServeMux, cp *controlPlane, username, password, secretsDir string) {
+type recoverySettingsResponse struct {
+	Recipient          string     `json:"recipient"`
+	EffectiveRecipient string     `json:"effectiveRecipient"`
+	Source             string     `json:"source"`
+	Configured         bool       `json:"configured"`
+	VerifiedAt         *time.Time `json:"verifiedAt,omitempty"`
+	ServerAccountID    string     `json:"serverAccountId,omitempty"`
+	SameAccount        bool       `json:"sameAccount"`
+}
+
+type recoverySettingsInput struct {
+	Recipient string `json:"recipient"`
+}
+
+var recoveryMessageSender = sendVKTestMessage
+
+func registerControlAPIRoutes(mux *http.ServeMux, cp *controlPlane, vkLogin *vkLoginManager, username, password, secretsDir string) {
 	protect := func(handler http.HandlerFunc) http.Handler {
 		return requireAuth(username, password, handler)
 	}
 	mutate := func(handler http.HandlerFunc) http.Handler {
 		return requireAuth(username, password, sameOrigin(handler))
+	}
+	var recoveryTestMu sync.Mutex
+	recoveryTests := make(map[string]time.Time)
+	recoveryView := func(profileID string) recoverySettingsResponse {
+		recipient, source := cp.effectiveRecoveryRecipient(profileID)
+		cp.mu.Lock()
+		configured := cp.settings.RecoveryRecipient
+		verified := cp.settings.RecoveryVerifiedAt
+		if profileID != "" {
+			if profile, ok := cp.profiles[profileID]; ok {
+				if profile.RecoveryRecipient != nil {
+					configured = *profile.RecoveryRecipient
+				}
+				verified = profile.RecoveryVerifiedAt
+			}
+		}
+		cp.mu.Unlock()
+		accountID := ""
+		if vkLogin != nil {
+			accountID = vkLogin.status().AccountID
+		}
+		return recoverySettingsResponse{
+			Recipient: configured, EffectiveRecipient: recipient, Source: source,
+			Configured: recipient != "", VerifiedAt: verified, ServerAccountID: accountID,
+			SameAccount: accountID != "" && accountID == recipient,
+		}
+	}
+	testRecovery := func(w http.ResponseWriter, profileID string) {
+		recipient, source := cp.effectiveRecoveryRecipient(profileID)
+		if recipient == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "recovery recipient is not configured"})
+			return
+		}
+		cookiePath := filepath.Join(cp.managedSecretsDir, "cookies-vk.json")
+		if !fileReady(cookiePath) {
+			cookiePath = filepath.Join(secretsDir, "cookies-vk.json")
+		}
+		if !fileReady(cookiePath) {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "server VK is not configured"})
+			return
+		}
+		key := profileID
+		if key == "" {
+			key = "global"
+		}
+		recoveryTestMu.Lock()
+		if elapsed := time.Since(recoveryTests[key]); elapsed < 15*time.Second {
+			recoveryTestMu.Unlock()
+			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "wait before sending another test"})
+			return
+		}
+		recoveryTests[key] = time.Now()
+		recoveryTestMu.Unlock()
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		message := fmt.Sprintf("Whitelist Bypass · test delivery\nProfile: %s\nTime: %s", key, time.Now().UTC().Format(time.RFC3339))
+		if err := recoveryMessageSender(ctx, cookiePath, recipient, message); err != nil {
+			cp.events.add("error", "recovery", "VK test message failed", profileID)
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "VK did not deliver the test message"})
+			return
+		}
+		if profileID == "" {
+			_ = cp.markGlobalRecoveryVerified()
+		} else {
+			_ = cp.markProfileRecoveryVerified(profileID)
+		}
+		cp.events.add("info", "recovery", "VK test message delivered", profileID)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"delivered": true, "recipient": recipient, "source": source, "timestamp": time.Now().UTC(),
+		})
 	}
 
 	mux.Handle("GET /api/overview", protect(func(w http.ResponseWriter, _ *http.Request) {
@@ -47,7 +137,7 @@ func registerControlAPIRoutes(mux *http.ServeMux, cp *controlPlane, username, pa
 			BuildVersion: Version, BuildCommit: BuildCommit, BuildTime: BuildTime,
 			MaxSessions: cp.maxSessions, ActiveSessions: active,
 			ClientCount: len(cp.listProfiles()), Providers: inspectProviders(secretsDir, cp.managedSecretsDir),
-			RecoveryDelivery: strings.TrimSpace(os.Getenv("VK_PEER_ID")) != "",
+			RecoveryDelivery: cp.recoveryConfigured(),
 		})
 	}))
 
@@ -56,6 +146,25 @@ func registerControlAPIRoutes(mux *http.ServeMux, cp *controlPlane, username, pa
 	}))
 	mux.Handle("GET /api/profiles", protect(func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, cp.listProfiles())
+	}))
+	mux.Handle("POST /api/profiles/{id}/duplicate", mutate(func(w http.ResponseWriter, r *http.Request) {
+		profile, err := cp.duplicateProfile(r.PathValue("id"))
+		if errors.Is(err, os.ErrNotExist) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "client profile not found"})
+			return
+		}
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusCreated, profile)
+	}))
+	mux.Handle("POST /api/profiles/{id}/recovery/test", mutate(func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := cp.profile(r.PathValue("id")); !ok {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "client profile not found"})
+			return
+		}
+		testRecovery(w, r.PathValue("id"))
 	}))
 	mux.Handle("POST /api/profiles", mutate(func(w http.ResponseWriter, r *http.Request) {
 		var input profileInput
@@ -144,6 +253,31 @@ func registerControlAPIRoutes(mux *http.ServeMux, cp *controlPlane, username, pa
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	mux.Handle("GET /api/settings/recovery", protect(func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, recoveryView(""))
+	}))
+	mux.Handle("PATCH /api/settings/recovery", mutate(func(w http.ResponseWriter, r *http.Request) {
+		var input recoverySettingsInput
+		if !decodeRequest(w, r, &input) {
+			return
+		}
+		if err := cp.setGlobalRecoveryRecipient(input.Recipient); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, recoveryView(""))
+	}))
+	mux.Handle("POST /api/settings/recovery/test", mutate(func(w http.ResponseWriter, _ *http.Request) {
+		testRecovery(w, "")
+	}))
+	mux.Handle("GET /api/events", protect(func(w http.ResponseWriter, r *http.Request) {
+		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+		if limit < 1 || limit > 200 {
+			limit = 100
+		}
+		writeJSON(w, http.StatusOK, cp.events.list(limit))
 	}))
 }
 

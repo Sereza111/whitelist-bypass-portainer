@@ -71,6 +71,7 @@ type manager struct {
 	binsDir           string
 	secretsDir        string
 	managedSecretsDir string
+	peerID            string
 	dataDir           string
 	linkFile          string
 
@@ -219,6 +220,8 @@ func (m *manager) commandFor(req sessionRequest) (*exec.Cmd, error) {
 	case "vk":
 		if req.ExistingLink != "" {
 			args = append(args, "--vk-link", req.ExistingLink)
+		} else if peerID := strings.TrimSpace(m.peerID); peerID != "" {
+			args = append(args, "--peer-id", peerID)
 		} else if peerID := strings.TrimSpace(os.Getenv("VK_PEER_ID")); peerID != "" {
 			args = append(args, "--peer-id", peerID)
 		}
@@ -464,8 +467,8 @@ func main() {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte("ok\n"))
 	})
-	registerControlAPIRoutes(mux, cp, username, password, envOr("SECRETS_DIR", "/run/secrets/wlb"))
 	vkLogin := newVKLoginManager(cp.managedSecretsDir, envOr("SECRETS_DIR", "/run/secrets/wlb"))
+	registerControlAPIRoutes(mux, cp, vkLogin, username, password, envOr("SECRETS_DIR", "/run/secrets/wlb"))
 	registerVKLoginRoutes(mux, vkLogin, username, password)
 	mux.Handle("/", requireAuth(username, password, http.FileServer(http.FS(webRoot))))
 
