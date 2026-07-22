@@ -211,10 +211,12 @@ func TestAdaptiveKCPPriorityControlBypassesBulkBacklog(t *testing.T) {
 	})
 	left.SendData(EncodeFrame(7, MsgData, []byte("bulk")))
 	left.SendData(EncodeFrame(8, MsgConnect, []byte("example.test:443")))
+	left.SendData(EncodeFrame(9, MsgDNSQuery, []byte("dns-query")))
+	right.SendData(EncodeFrame(9, MsgDNSReply, []byte("dns-reply")))
 
 	seen := map[byte]bool{}
 	deadline := time.After(2 * time.Second)
-	for len(seen) < 2 {
+	for len(seen) < 3 {
 		select {
 		case msgType := <-received:
 			seen[msgType] = true
@@ -224,7 +226,10 @@ func TestAdaptiveKCPPriorityControlBypassesBulkBacklog(t *testing.T) {
 	}
 	metrics := left.TunnelMetrics()
 	if metrics.KCPControlSentFrames == 0 {
-		t.Fatalf("priority CONNECT did not use control KCP: %#v", metrics)
+		t.Fatalf("priority CONNECT/DNS did not use control KCP: %#v", metrics)
+	}
+	if right.TunnelMetrics().KCPControlSentFrames == 0 {
+		t.Fatal("priority DNS reply did not use control KCP")
 	}
 }
 

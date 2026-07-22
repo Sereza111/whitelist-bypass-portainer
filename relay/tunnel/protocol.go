@@ -15,6 +15,8 @@ const (
 	MsgHello      byte = 0x0A
 	MsgHelloAck   byte = 0x0B
 	MsgKCPProfile byte = 0x0C
+	MsgDNSQuery   byte = 0x0D
+	MsgDNSReply   byte = 0x0E
 )
 
 const ControlConnID uint32 = 0

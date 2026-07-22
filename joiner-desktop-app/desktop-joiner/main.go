@@ -324,16 +324,19 @@ func main() {
 						log.Printf("[transport] peer lacks profile/control capability; compatibility profile=%s", effective)
 					}
 					adaptive.EnableKCP()
+					if result.Supports(tunnel.CapabilityPriorityControl) {
+						bridge.SendKCPProfile(*kcpProfile)
+					}
 				} else {
 					adaptive.EnableRawCompatibility()
 				}
 			})
 			bridge.SetOnPeerKCPProfile(func(profile string) {
 				effective := adaptive.SetKCPProfile(tunnel.PreferSaferKCPProfile(*kcpProfile, profile))
-				log.Printf("[transport] negotiated KCP profile=%s", effective)
+				log.Printf("[transport] negotiated bidirectional KCP profile=%s", effective)
 			})
 			bridge.ConfigureHandshake(
-				tunnel.CapabilityMetricsV1|tunnel.CapabilityVideoKCP1|tunnel.CapabilityPriorityControl,
+				tunnel.CapabilityMetricsV1|tunnel.CapabilityVideoKCP1|tunnel.CapabilityPriorityControl|tunnel.CapabilityReliableDNS,
 				common.VP8BufSize,
 				tunnel.ReliabilityRawVP8,
 				trackCount,

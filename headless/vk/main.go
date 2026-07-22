@@ -867,11 +867,15 @@ func main() {
 				})
 				dataTunnel = adaptive
 				bridgeReadBuf = tunnel.AdaptiveKCPRelayReadBuf
-				capabilities |= tunnel.CapabilityVideoKCP1 | tunnel.CapabilityPriorityControl
+				capabilities |= tunnel.CapabilityVideoKCP1 | tunnel.CapabilityPriorityControl | tunnel.CapabilityReliableDNS
 			}
 			rb := tunnel.NewRelayBridge(dataTunnel, "creator", bridgeReadBuf, log.Printf)
 			rb.SetUpstreamSocks(*upstreamSocks, *upstreamUser, *upstreamPass)
 			if adaptive != nil {
+				rb.SetOnPeerKCPProfile(func(profile string) {
+					effective := adaptive.SetKCPProfile(tunnel.PreferSaferKCPProfile(*kcpProfile, profile))
+					log.Printf("[transport] negotiated bidirectional KCP profile=%s", effective)
+				})
 				rb.SetOnHandshake(func(result tunnel.HandshakeResult) {
 					if result.Supports(tunnel.CapabilityVideoKCP1) {
 						if result.Supports(tunnel.CapabilityPriorityControl) {

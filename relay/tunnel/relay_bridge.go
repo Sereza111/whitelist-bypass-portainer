@@ -20,6 +20,12 @@ const verboseUDPLogging = false
 type creatorUDP struct {
 	direct *net.UDPConn
 	socks  *common.Socks5UDPSession
+	reply  byte
+}
+
+type dnsQueryKey struct {
+	connID uint32
+	txID   uint16
 }
 
 func (c *creatorUDP) writePacket(data []byte, dst string) error {
@@ -96,19 +102,24 @@ type RelayBridge struct {
 	onHandshake         func(HandshakeResult)
 	handshakeGeneration atomic.Uint64
 
-	startedAt         time.Time
-	metricsStop       chan struct{}
-	metricsStopOnce   sync.Once
-	sentBytes         atomic.Uint64
-	receivedBytes     atomic.Uint64
-	sentFrames        atomic.Uint64
-	receivedFrames    atomic.Uint64
-	sentControlFrames atomic.Uint64
-	recvControlFrames atomic.Uint64
-	sendWaitNanos     atomic.Uint64
-	maxSendWaitNanos  atomic.Uint64
-	dnsQueries        atomic.Uint64
-	dnsRetryFrames    atomic.Uint64
+	startedAt          time.Time
+	metricsStop        chan struct{}
+	metricsStopOnce    sync.Once
+	sentBytes          atomic.Uint64
+	receivedBytes      atomic.Uint64
+	sentFrames         atomic.Uint64
+	receivedFrames     atomic.Uint64
+	sentControlFrames  atomic.Uint64
+	recvControlFrames  atomic.Uint64
+	sendWaitNanos      atomic.Uint64
+	maxSendWaitNanos   atomic.Uint64
+	dnsQueries         atomic.Uint64
+	dnsRetryFrames     atomic.Uint64
+	reliableDNSQueries atomic.Uint64
+	reliableDNSReplies atomic.Uint64
+	dnsLatencyNanos    atomic.Uint64
+	maxDNSLatencyNanos atomic.Uint64
+	dnsPending         sync.Map
 }
 
 func (rb *RelayBridge) SetOnPeerConfig(fn func(fps, batch, trackCount int)) {
@@ -278,6 +289,10 @@ func (rb *RelayBridge) closeAll() {
 	})
 	rb.nackedConns.Range(func(key, _ any) bool {
 		rb.nackedConns.Delete(key)
+		return true
+	})
+	rb.dnsPending.Range(func(key, _ any) bool {
+		rb.dnsPending.Delete(key)
 		return true
 	})
 	rb.logFn("relay: closeAll mode=%s tcp=%d udp=%d ids=%v nextID=%d", rb.mode, len(ids), udpCount, ids, rb.nextID.Load())
@@ -540,7 +555,10 @@ func (rb *RelayBridge) handleTunnelData(data []byte) {
 }
 
 func (rb *RelayBridge) handleJoinerMessage(connID uint32, msgType byte, payload []byte) {
-	if msgType == MsgUDPReply {
+	if msgType == MsgUDPReply || msgType == MsgDNSReply {
+		if msgType == MsgDNSReply {
+			rb.recordDNSReply(connID, payload)
+		}
 		uval, ok := rb.udpClients.Load(connID)
 		if !ok {
 			if _, alreadyNacked := rb.nackedConns.LoadOrStore(connID, struct{}{}); !alreadyNacked {
@@ -602,10 +620,14 @@ func (rb *RelayBridge) handleCreatorMessage(connID uint32, msgType byte, payload
 	switch msgType {
 	case MsgConnect:
 		go rb.connectTCP(connID, string(payload))
-	case MsgUDP:
+	case MsgUDP, MsgDNSQuery:
 		payloadCopy := make([]byte, len(payload))
 		copy(payloadCopy, payload)
-		go rb.handleUDP(connID, payloadCopy)
+		replyType := byte(MsgUDPReply)
+		if msgType == MsgDNSQuery {
+			replyType = MsgDNSReply
+		}
+		go rb.handleUDP(connID, payloadCopy, replyType)
 	case MsgData:
 		val, ok := rb.conns.Load(connID)
 		if !ok {
@@ -642,7 +664,7 @@ func (rb *RelayBridge) handleCreatorMessage(connID uint32, msgType byte, payload
 	}
 }
 
-func (rb *RelayBridge) handleUDP(connID uint32, payload []byte) {
+func (rb *RelayBridge) handleUDP(connID uint32, payload []byte, replyType byte) {
 	if len(payload) < 2 {
 		return
 	}
@@ -669,6 +691,7 @@ func (rb *RelayBridge) handleUDP(connID uint32, payload []byte) {
 			rb.logFn("relay[creator]: UDP %d open %s failed: %v", connID, common.MaskAddr(addr), err)
 			return
 		}
+		created.reply = replyType
 		if actual, loaded := rb.udpClients.LoadOrStore(connID, created); loaded {
 			created.close()
 			existing, ok := actual.(*creatorUDP)
@@ -702,7 +725,7 @@ func (rb *RelayBridge) handleUDP(connID uint32, payload []byte) {
 					if verboseUDPLogging && replies == 1 {
 						rb.logFn("relay[creator]: UDP %d first reply %dB from %s", id, n, target)
 					}
-					rb.send(id, MsgUDPReply, buf[:n])
+					rb.send(id, e.reply, buf[:n])
 				}
 			}(egress, connID, addr)
 		}
@@ -1040,11 +1063,19 @@ func (rb *RelayBridge) handleUDPAssociate(tcpConn net.Conn) {
 			payload[0] = byte(len(dstAddr))
 			copy(payload[1:], dstAddr)
 			copy(payload[1+len(dstAddr):], buf[headerLen:n])
-			rb.send(id, MsgUDP, payload)
 			if isDNSDestination(dstAddr) {
 				rb.dnsQueries.Add(1)
-				retryPayload := bytes.Clone(payload)
-				go rb.retryDNSQuery(id, retryPayload)
+				if rb.supportsReliableDNS() {
+					rb.trackDNSQuery(id, payload[1+len(dstAddr):])
+					rb.reliableDNSQueries.Add(1)
+					rb.send(id, MsgDNSQuery, payload)
+				} else {
+					rb.send(id, MsgUDP, payload)
+					retryPayload := bytes.Clone(payload)
+					go rb.retryDNSQuery(id, retryPayload)
+				}
+			} else {
+				rb.send(id, MsgUDP, payload)
 			}
 		}
 	}()
@@ -1067,6 +1098,34 @@ func (rb *RelayBridge) retryDNSQuery(connID uint32, payload []byte) {
 func isDNSDestination(addr string) bool {
 	_, port, err := net.SplitHostPort(addr)
 	return err == nil && port == "53"
+}
+
+func (rb *RelayBridge) supportsReliableDNS() bool {
+	result, ok := rb.NegotiatedHandshake()
+	return ok && result.Supports(CapabilityPriorityControl) && result.Supports(CapabilityReliableDNS)
+}
+
+func (rb *RelayBridge) trackDNSQuery(connID uint32, packet []byte) {
+	if len(packet) < 2 {
+		return
+	}
+	key := dnsQueryKey{connID: connID, txID: binary.BigEndian.Uint16(packet[:2])}
+	rb.dnsPending.Store(key, time.Now())
+}
+
+func (rb *RelayBridge) recordDNSReply(connID uint32, packet []byte) {
+	if len(packet) < 2 {
+		return
+	}
+	key := dnsQueryKey{connID: connID, txID: binary.BigEndian.Uint16(packet[:2])}
+	started, ok := rb.dnsPending.LoadAndDelete(key)
+	if !ok {
+		return
+	}
+	elapsed := uint64(time.Since(started.(time.Time)))
+	rb.reliableDNSReplies.Add(1)
+	rb.dnsLatencyNanos.Add(elapsed)
+	updateAtomicMax(&rb.maxDNSLatencyNanos, elapsed)
 }
 
 func ipAddrList(ips []net.IPAddr) string {

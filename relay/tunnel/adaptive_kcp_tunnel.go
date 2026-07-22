@@ -357,7 +357,7 @@ func isPriorityMuxFrame(data []byte) bool {
 		return false
 	}
 	switch data[8] {
-	case MsgConnect, MsgConnectOK, MsgConnectErr:
+	case MsgConnect, MsgConnectOK, MsgConnectErr, MsgDNSQuery, MsgDNSReply:
 		return true
 	default:
 		return false

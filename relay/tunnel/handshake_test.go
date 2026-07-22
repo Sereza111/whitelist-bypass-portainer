@@ -93,7 +93,7 @@ func TestRelayBridgeNegotiatesCapability(t *testing.T) {
 	defer left.Close()
 	defer right.Close()
 
-	left.ConfigureHandshake(CapabilityMetricsV1|CapabilityVideoKCP1|CapabilityPriorityControl, 1126, ReliabilityRawVP8, 1)
+	left.ConfigureHandshake(CapabilityMetricsV1|CapabilityVideoKCP1|CapabilityPriorityControl|CapabilityReliableDNS, 1126, ReliabilityRawVP8, 1)
 	right.ConfigureHandshake(CapabilityMetricsV1, 1126, ReliabilityRawVP8, 1)
 	left.sendHello()
 	right.sendHello()
@@ -111,6 +111,9 @@ func TestRelayBridgeNegotiatesCapability(t *testing.T) {
 			if leftResult.Supports(CapabilityPriorityControl) || rightResult.Supports(CapabilityPriorityControl) {
 				t.Fatal("priority control activated without support from both peers")
 			}
+			if leftResult.Supports(CapabilityReliableDNS) || rightResult.Supports(CapabilityReliableDNS) {
+				t.Fatal("reliable DNS activated without support from both peers")
+			}
 			leftMetrics := left.MetricsSnapshot()
 			rightMetrics := right.MetricsSnapshot()
 			if leftMetrics.SentFrames == 0 || leftMetrics.ReceivedFrames == 0 ||
@@ -124,6 +127,42 @@ func TestRelayBridgeNegotiatesCapability(t *testing.T) {
 	leftResult, _ := left.NegotiatedHandshake()
 	rightResult, _ := right.NegotiatedHandshake()
 	t.Fatalf("capability was not negotiated: left=%#v right=%#v", leftResult, rightResult)
+}
+
+func TestReliableDNSRequiresNegotiatedPriorityLane(t *testing.T) {
+	rb := &RelayBridge{}
+	rb.recordHandshakeResult(HandshakeResult{
+		Status: HandshakeOK, SelectedWireVersion: WireVersion,
+		Capabilities: CapabilityReliableDNS,
+	})
+	if rb.supportsReliableDNS() {
+		t.Fatal("reliable DNS activated without priority control")
+	}
+	rb.recordHandshakeResult(HandshakeResult{
+		Status: HandshakeOK, SelectedWireVersion: WireVersion,
+		Capabilities: CapabilityReliableDNS | CapabilityPriorityControl,
+	})
+	if !rb.supportsReliableDNS() {
+		t.Fatal("reliable DNS did not activate after full negotiation")
+	}
+}
+
+func TestReliableDNSLatencyMetrics(t *testing.T) {
+	rb := &RelayBridge{}
+	packet := []byte{0x12, 0x34, 0x01, 0x00}
+	rb.trackDNSQuery(7, packet)
+	time.Sleep(time.Millisecond)
+	rb.recordDNSReply(7, packet)
+	if got := rb.reliableDNSReplies.Load(); got != 1 {
+		t.Fatalf("reliable DNS replies=%d, want 1", got)
+	}
+	if rb.dnsLatencyNanos.Load() == 0 || rb.maxDNSLatencyNanos.Load() == 0 {
+		t.Fatal("DNS latency metrics were not recorded")
+	}
+	rb.recordDNSReply(7, packet)
+	if got := rb.reliableDNSReplies.Load(); got != 1 {
+		t.Fatalf("duplicate DNS reply changed metrics: %d", got)
+	}
 }
 
 type memoryTunnel struct {
