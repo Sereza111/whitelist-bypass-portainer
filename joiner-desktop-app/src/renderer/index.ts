@@ -22,6 +22,7 @@ function platformLabel(p: JoinerPlatform | null): string {
 interface Bridge {
   start(settings: any): Promise<{ ok: boolean; error?: string }>;
   stop(): Promise<{ ok: boolean }>;
+  copyText(value: string): Promise<{ ok: boolean }>;
   onLog(cb: (text: string) => void): void;
   onStatus(cb: (status: string) => void): void;
   onRunning(cb: (running: boolean) => void): void;
@@ -45,9 +46,19 @@ const summaryPlatform = $('summaryPlatform');
 const summaryRoute = $('summaryRoute');
 const summaryProfile = $('summaryProfile');
 const kcpSafety = $('kcpSafety');
+const routingModePanel = $('routingModePanel');
+const routeTun = input('routeTun');
+const routeProxy = input('routeProxy');
+const routeTunChoice = $('routeTunChoice');
+const routeProxyChoice = $('routeProxyChoice');
+const proxyModeDetails = $('proxyModeDetails');
+const proxyEndpoint = $('proxyEndpoint');
+const proxyAuthSummary = $('proxyAuthSummary');
+const copyProxyConfig = $('copyProxyConfig') as HTMLButtonElement;
+const proxyCopyStatus = $('proxyCopyStatus');
 const callOnlyInputIds = [
 	'link', 'name', 'socksPort', 'socksUser', 'socksPass', 'tunnelMode',
-	'videoReliability', 'kcpProfile', 'vp8Fps', 'vp8Batch', 'noTun', 'dualTrack',
+	'videoReliability', 'kcpProfile', 'vp8Fps', 'vp8Batch', 'dualTrack',
 ];
 
 stopBtn.disabled = true;
@@ -76,9 +87,62 @@ function refreshPlatformHint() {
 linkInput.addEventListener('input', refreshPlatformHint);
 refreshPlatformHint();
 
+function proxyConfigText(): string {
+	const port = parseInt(input('socksPort').value, 10) || 1080;
+	const user = input('socksUser').value.trim();
+	const pass = input('socksPass').value;
+	const lines = [
+		'WhitelistBypass local SOCKS5',
+		'Host: 127.0.0.1',
+		`Port: ${port}`,
+	];
+	if (user) lines.push(`User: ${user}`);
+	if (pass) lines.push(`Password: ${pass}`);
+	return lines.join('\n');
+}
+
+function refreshRoutingMode(): void {
+	const proxy = routeProxy.checked;
+	routeTunChoice.dataset.active = String(!proxy);
+	routeProxyChoice.dataset.active = String(proxy);
+	proxyModeDetails.hidden = !proxy || phoneGateway.checked;
+	try { localStorage.setItem('wlb-route-mode', proxy ? 'proxy' : 'tun'); } catch (_) { /* ignore */ }
+	refreshProxyDetails();
+	refreshConnectionSummary();
+}
+
+function refreshProxyDetails(): void {
+	const port = parseInt(input('socksPort').value, 10) || 1080;
+	const user = input('socksUser').value.trim();
+	proxyEndpoint.textContent = `127.0.0.1:${port}`;
+	proxyAuthSummary.textContent = user
+		? `Localhost only · authentication: ${user}`
+		: 'Localhost only · no system routes';
+}
+
+routeTun.addEventListener('change', refreshRoutingMode);
+routeProxy.addEventListener('change', refreshRoutingMode);
+for (const id of ['socksPort', 'socksUser', 'socksPass']) {
+	document.getElementById(id)?.addEventListener('input', refreshProxyDetails);
+}
+copyProxyConfig.addEventListener('click', async () => {
+	try {
+		const result = await bridge.copyText(proxyConfigText());
+		proxyCopyStatus.textContent = result.ok ? 'Copied' : 'Clipboard unavailable';
+	} catch (_) {
+		proxyCopyStatus.textContent = 'Clipboard unavailable';
+	}
+	window.setTimeout(() => { proxyCopyStatus.textContent = ''; }, 2200);
+});
+
+try {
+	if (localStorage.getItem('wlb-route-mode') === 'proxy') routeProxy.checked = true;
+} catch (_) { /* ignore */ }
+
 function refreshConnectionMode() {
 	const usePhone = phoneGateway.checked;
 	phoneGatewayFields.hidden = !usePhone;
+	routingModePanel.hidden = usePhone;
 	for (const id of callOnlyInputIds) {
 		input(id).closest('label')?.toggleAttribute('hidden', usePhone);
 	}
@@ -86,6 +150,7 @@ function refreshConnectionMode() {
 		const children = Array.from(row.children) as HTMLElement[];
 		row.hidden = children.length > 0 && children.every((child) => child.hidden);
 	});
+	proxyModeDetails.hidden = usePhone || !routeProxy.checked;
 	refreshPlatformHint();
 }
 
@@ -93,11 +158,11 @@ function refreshConnectionSummary(): void {
 	const usePhone = phoneGateway.checked;
 	const detected = usePhone ? null : detectPlatform(linkInput.value.trim());
 	summaryPlatform.textContent = usePhone ? 'Android' : platformLabel(detected);
-	summaryRoute.textContent = usePhone ? 'Phone gateway' : (input('noTun').checked ? 'SOCKS only' : 'System TUN');
+	summaryRoute.textContent = usePhone ? 'Phone gateway' : (routeProxy.checked ? 'Local SOCKS5' : 'System TUN');
 	const reliability = select('videoReliability').value;
 	const profile = select('kcpProfile').value;
 	summaryProfile.textContent = usePhone ? 'Phone managed' : (reliability === 'raw' ? 'Legacy raw' : profile[0].toUpperCase() + profile.slice(1));
-	const unsafeFast = !usePhone && reliability !== 'raw' && profile === 'fast' && !input('noTun').checked;
+	const unsafeFast = !usePhone && reliability !== 'raw' && profile === 'fast' && !routeProxy.checked;
 	kcpSafety.hidden = !unsafeFast;
 	kcpSafety.textContent = unsafeFast
 		? 'Fast is unsafe for full TUN and will be clamped to Balanced. Use Fast only for a controlled SOCKS-only test.'
@@ -106,8 +171,9 @@ function refreshConnectionSummary(): void {
 
 phoneGateway.addEventListener('change', refreshConnectionMode);
 refreshConnectionMode();
+refreshRoutingMode();
 
-for (const id of ['tunnelMode', 'videoReliability', 'kcpProfile', 'noTun']) {
+for (const id of ['tunnelMode', 'videoReliability', 'kcpProfile', 'routeTun', 'routeProxy']) {
 	document.getElementById(id)?.addEventListener('change', refreshConnectionSummary);
 }
 
@@ -137,6 +203,10 @@ bridge.onStatus((s) => {
 bridge.onRunning((running) => {
   startBtn.disabled = running;
   stopBtn.disabled = !running;
+  routeTun.disabled = running;
+  routeProxy.disabled = running;
+  routeTunChoice.dataset.locked = String(running);
+  routeProxyChoice.dataset.locked = String(running);
 });
 
 startBtn.addEventListener('click', async () => {
@@ -179,7 +249,7 @@ startBtn.addEventListener('click', async () => {
     vp8Batch: parseInt(input('vp8Batch').value, 10) || 30,
     resources: select('resources').value,
     dns: input('dns').value.trim() || '1.1.1.1,8.8.8.8',
-    noTun: input('noTun').checked,
+    noTun: routeProxy.checked,
     dualTrack: input('dualTrack').checked,
 	phoneHost,
 	phonePort,

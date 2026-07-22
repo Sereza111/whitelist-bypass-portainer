@@ -14,6 +14,40 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
+## Active handoff (2026-07-22, alpha.11 candidate)
+
+- Windows and Android now expose first-class `VPN / Proxy` routing selectors.
+  Proxy mode uses the existing authenticated local SOCKS5 listener and skips
+  Wintun/Android VpnService. Windows shows/copies `127.0.0.1:<port>`; Android
+  shows the same endpoint and can open its detailed proxy settings. Split-TUN
+  scope is visible on the Android selector.
+- Field `relay.log` reported `caps=0x1b`, balanced KCP, zero KCP drops,
+  `fair_max_wait_ms <= 2.3` and only 618 kbps maximum relay RX. A 51 Mbps
+  Speedtest screenshot therefore measured direct traffic, consistent with the
+  user's observation that blocking bypass was inactive. A normal Speedtest app
+  does not use SOCKS5 without explicit support/configuration.
+- Repeating `wait_snd=2` is not an error code. The server log showed an old KCP
+  instance surviving a Pion peer replacement while the replacement offer never
+  reached connected state. `TunnelRelay.Close` now closes the RelayBridge,
+  adaptive data/control KCP loops and flow state exactly once.
+- VK Creator now arms a 30-second offer watchdog, gives disconnected peers a
+  15-second grace period, and escalates failed/closed peers immediately. Three
+  failed peer recovery cycles terminate Creator so manager auto-restart creates
+  a new call and signed recovery generation. A successful connection resets
+  the counter. Manager derives peer recovery logs as degraded.
+- Android filters private, link-local, CGNAT and IPv6 carrier DNS addresses in
+  automatic mode. If no server-reachable IPv4 resolver remains it falls back
+  to the configured public defaults. The field log had 34 reliable DNS queries
+  and zero replies, plus attempts to a carrier-private address on TCP/853.
+- One VK Creator call currently supports one active Joiner. A second registered
+  peer replaces the first. Scale by creating one panel profile/session per
+  client; joining the public call link is guest/anonym-token based and does not
+  require the client to log into the server VK account. Android signed recovery
+  still needs the recipient's VK peer id if automatic DM delivery is desired.
+- Advance all runtime/CI defaults together to `0.5.0-alpha.11`, run branch CI,
+  tag only the verified commit, then verify APK/EXE digests, persistent Android
+  signer and GHCR `amd64`/`arm64`/`386` manifests.
+
 ## Active handoff (2026-07-22, alpha.10 completion)
 
 - `v0.5.0-alpha.10` is published at commit `18fcb28`. Branch and tagged

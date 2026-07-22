@@ -25,7 +25,7 @@ import (
 )
 
 var (
-	Version     = "0.5.0-alpha.10"
+	Version     = "0.5.0-alpha.11"
 	BuildCommit = "unknown"
 	BuildTime   = "unknown"
 )
@@ -431,7 +431,8 @@ func deriveRuntimeState(fallback string, lines []string) string {
 	for i := len(lines) - 1; i >= 0; i-- {
 		line := lines[i]
 		switch {
-		case strings.Contains(line, "stalled") || strings.Contains(line, "Rejoining"):
+		case strings.Contains(line, "stalled") || strings.Contains(line, "Rejoining") ||
+			strings.Contains(line, "peer connection unhealthy") || strings.Contains(line, "peer recovery attempt"):
 			return "degraded"
 		case strings.Contains(line, "=== TUNNEL CONNECTED ===") || strings.Contains(line, "handshake status=ok"):
 			return "connected"

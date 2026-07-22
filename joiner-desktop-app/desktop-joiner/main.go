@@ -227,6 +227,8 @@ func main() {
 	bringUpTun := func() {
 		tunOnce.Do(func() {
 			if tun == nil {
+				fmt.Printf("\n  PROXY ACTIVE on socks5://%s:%d\n  system routes are unchanged; configure individual apps to use this endpoint\n\n",
+					*socksHost, *socksPort)
 				close(tunReady)
 				return
 			}

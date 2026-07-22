@@ -77,6 +77,21 @@
     <string name="status_headline_connecting">Connecting</string>
     <string name="status_headline_connected">Connected</string>
 
+    <string name="routing_mode_title">Traffic routing</string>
+    <string name="routing_mode_tun">VPN</string>
+    <string name="routing_mode_tun_sub">All apps</string>
+    <string name="routing_mode_tun_bypass_sub">All except bypass list</string>
+    <string name="routing_mode_tun_only_sub">Only selected apps</string>
+    <string name="routing_mode_proxy">Proxy</string>
+    <string name="routing_mode_proxy_sub">Selected apps</string>
+    <string name="routing_proxy_endpoint_label">Local SOCKS5 endpoint</string>
+    <string name="routing_proxy_endpoint">127.0.0.1:%1$d</string>
+    <string name="routing_proxy_hint">The VPN interface stays off. Enter this SOCKS5 address in apps that support a proxy.</string>
+    <string name="routing_proxy_configure">Configure</string>
+    <string name="routing_proxy_copy">Copy</string>
+    <string name="routing_proxy_copied">Local SOCKS5 configuration copied</string>
+    <string name="routing_proxy_locked">Disconnect before changing routing mode</string>
+
     <string name="stat_uptime">Uptime</string>
     <string name="stat_mode">Mode</string>
 

@@ -1,9 +1,13 @@
 package bypass.whitelist.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.View
+import android.widget.Toast
 import androidx.fragment.app.Fragment
 import bypass.whitelist.R
 import bypass.whitelist.tunnel.CallConfig
@@ -11,6 +15,7 @@ import bypass.whitelist.tunnel.CallPlatform
 import bypass.whitelist.tunnel.TunnelMode
 import bypass.whitelist.tunnel.VpnStatus
 import bypass.whitelist.util.Prefs
+import bypass.whitelist.util.SocksAuth
 
 class MainFragment : Fragment(R.layout.fragment_main_screen) {
 
@@ -39,6 +44,7 @@ class MainFragment : Fragment(R.layout.fragment_main_screen) {
 
         container.bindCalls(Prefs.savedDestinations, Prefs.activeDestinationId)
         container.bindHero(connected = isHostConnected(), status = hostStatus())
+        container.bindRoutingMode(Prefs.proxyOnly, isHostConnected() || isHostConnecting())
         if (!isResumed) container.pauseAnimations()
 
         container.onAddCallClicked = {
@@ -60,6 +66,31 @@ class MainFragment : Fragment(R.layout.fragment_main_screen) {
                 container.showPingResult(success, rttMs)
             }
         }
+        container.onRoutingModeChanged = { proxyOnly ->
+            if (isHostConnected() || isHostConnecting()) {
+                Toast.makeText(requireContext(), R.string.routing_proxy_locked, Toast.LENGTH_SHORT).show()
+            } else {
+                Prefs.proxyOnly = proxyOnly
+                container.bindRoutingMode(Prefs.proxyOnly, false)
+            }
+        }
+        container.onProxyConfigurePressed = {
+            ProxyActionSheet.show(parentFragmentManager) {
+                container.bindRoutingMode(Prefs.proxyOnly, isHostConnected() || isHostConnecting())
+            }
+        }
+        container.onProxyCopyPressed = {
+            val text = buildString {
+                appendLine("WhitelistBypass local SOCKS5")
+                appendLine("Host: 127.0.0.1")
+                appendLine("Port: ${Prefs.socksPort}")
+                appendLine("User: ${SocksAuth.user}")
+                append("Password: ${SocksAuth.pass}")
+            }
+            val clipboard = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            clipboard.setPrimaryClip(ClipData.newPlainText("WhitelistBypass SOCKS5", text))
+            Toast.makeText(requireContext(), R.string.routing_proxy_copied, Toast.LENGTH_SHORT).show()
+        }
         container.onCallSelected = { config ->
             Prefs.activeDestinationId = config.id
             container.bindCalls(Prefs.savedDestinations, Prefs.activeDestinationId)
@@ -74,6 +105,7 @@ class MainFragment : Fragment(R.layout.fragment_main_screen) {
         super.onResume()
         content?.bindCalls(Prefs.savedDestinations, Prefs.activeDestinationId)
         content?.bindHero(connected = isHostConnected(), status = hostStatus())
+        content?.bindRoutingMode(Prefs.proxyOnly, isHostConnected() || isHostConnecting())
         content?.resumeAnimations()
         if (isHostConnected()) {
             tickHandler.removeCallbacks(tickRunnable)
@@ -102,6 +134,7 @@ class MainFragment : Fragment(R.layout.fragment_main_screen) {
             pendingStatus = status
         }
         if (isHostConnected()) refreshStats()
+        container?.bindRoutingMode(Prefs.proxyOnly, isHostConnected() || isHostConnecting())
     }
 
     fun onStatusTextChanged(text: String) {
@@ -116,6 +149,7 @@ class MainFragment : Fragment(R.layout.fragment_main_screen) {
         }
         if (!isResumed) return
         content?.bindHero(connected = connected, status = hostStatus())
+        content?.bindRoutingMode(Prefs.proxyOnly, connected || isHostConnecting())
         if (connected) {
             refreshStats()
             tickHandler.removeCallbacks(tickRunnable)
@@ -216,7 +250,10 @@ class MainFragment : Fragment(R.layout.fragment_main_screen) {
         val uptimeMs = if (connectedSinceMs > 0L) System.currentTimeMillis() - connectedSinceMs else 0L
         val active = Prefs.activeDestination
         val mode = if (active != null) Prefs.activeTunnelMode.forPlatform(active.platform) else Prefs.tunnelMode
-        view.setStats(uptimeText = formatUptime(uptimeMs), mode = mode.label)
+        view.setStats(
+            uptimeText = formatUptime(uptimeMs),
+            mode = if (Prefs.proxyOnly) getString(R.string.routing_mode_proxy) else mode.label,
+        )
     }
 
     private fun formatUptime(ms: Long): String {

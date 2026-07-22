@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, clipboard, ipcMain } from 'electron';
 import { spawn, spawnSync, ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -197,6 +197,7 @@ function spawnJoiner(settings: JoinerSettings): { ok: boolean; error?: string } 
 	const safeText = sanitizeLogText(text);
 	send(IPC.LOG, safeText);
     if (text.includes('TUNNEL ACTIVE')) send(IPC.STATUS, 'active');
+    if (text.includes('PROXY ACTIVE')) send(IPC.STATUS, 'active');
     if (text.includes('TUNNEL CONNECTED')) {
       send(IPC.STATUS, 'connected');
       retryCount = 0;
@@ -261,6 +262,14 @@ ipcMain.handle(IPC.STOP, async () => {
   userRequestedStop = true;
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   stopJoiner();
+  return { ok: true };
+});
+
+ipcMain.handle(IPC.COPY_TEXT, async (_e, value: unknown) => {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 4096) {
+    return { ok: false };
+  }
+  clipboard.writeText(value);
   return { ok: true };
 });
 

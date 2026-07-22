@@ -44,6 +44,13 @@ Joiner. До установки split-default routes Windows проверяет 
 username/password. Адрес телефона остаётся на исходном физическом маршруте,
 чтобы соединение tun2socks с собственным upstream не зациклилось через Wintun.
 
+Начиная с `0.5.0-alpha.11`, SOCKS-only является пользовательским режимом, а не
+скрытым диагностическим флагом. Windows и Android показывают переключатель
+`VPN / Proxy` на основном экране. В Proxy режиме локальный SOCKS5 продолжает
+работать, но Wintun / Android VpnService и системные маршруты не создаются.
+Поэтому трафик пойдёт через звонок только у приложений, которым явно задан
+SOCKS5 endpoint. Обычный Speedtest без настройки proxy измеряет прямую сеть.
+
 ### 2. Встроенный multiplexing
 
 Проект уже мультиплексирует множество TCP/UDP-соединений внутри одного звонка.
@@ -128,7 +135,29 @@ Creator после demux самостоятельно открывает TCP/UDP
    retransmits и effective Mbps не видны одновременно.
 6. Windows TUN маршрутизирует только IPv4; DNS/IPv6/HTTP3 могут давать задержки
    или утечки вне туннеля.
-7. Server и клиенты не имеют обязательного version/capability negotiation.
+7. Legacy fallback всё ещё разрешает peer без новых capabilities; для KCP,
+   reliable DNS, priority control и recovery нужны matching server/client.
+
+## VK Direct session lifecycle
+
+Один Creator в topology `DIRECT` обслуживает один активный Joiner. Новый
+registered peer заменяет старый PeerConnection. Для нескольких пользователей
+manager создаёт отдельный профиль и отдельную Creator session/link на клиента.
+Joiner входит по guest/anonym token из ссылки и не получает cookies серверного
+VK аккаунта.
+
+С `0.5.0-alpha.11` сервер контролирует не только жизнь процесса, но и жизнь
+PeerConnection: offer должен перейти в connected за 30 секунд, disconnected
+имеет 15 секунд grace period, failed/closed запускают recovery немедленно.
+После трёх неудачных внутренних циклов Creator завершается, manager создаёт
+новый звонок и увеличивает signed recovery generation. При reset старый
+RelayBridge, data/control KCP loops и его flow state закрываются полностью.
+
+Начальную ссылку администратор выдаёт из panel. Для автоматических последующих
+обновлений у профиля задаётся VK recipient конкретного пользователя; он имеет
+приоритет над общим recipient. Доставка VK может зависеть от privacy/диалога,
+поэтому pairing key и recovery envelope остаются подписанными и не должны
+появляться в логах.
 
 Дополнение после matching Android-теста `0.5.0-alpha.2`: двунаправленный
 WebRTC carrier может деградировать только в одну сторону. При живом

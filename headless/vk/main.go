@@ -115,7 +115,13 @@ type Bridge struct {
 	serverBounces       int
 	suppressScreenshare bool
 	bouncing            bool
+
+	peerHealthMu      sync.Mutex
+	peerFailures      int
+	peerFailureReason string
 }
+
+const maxPeerRecoveryFailures = 3
 
 func httpPost(endpoint string, form url.Values, extraHeaders map[string]string) ([]byte, error) {
 	body := form.Encode()
@@ -593,6 +599,9 @@ func (b *Bridge) connectVKWs(wtURL string) error {
 }
 
 func (b *Bridge) initRelay() {
+	if b.p2p != nil {
+		b.p2p.cancelPeerWatchdog()
+	}
 	if b.relay != nil {
 		b.relay.Close()
 	}
@@ -600,7 +609,38 @@ func (b *Bridge) initRelay() {
 	b.peers = make(map[int64]struct{})
 	b.relay = b.newRelay()
 	b.p2p = NewP2PHandler(b)
+	b.p2p.SetHealthCallbacks(b.notePeerConnected, b.notePeerFailure)
 	b.p2p.Init()
+}
+
+func (b *Bridge) notePeerConnected() {
+	b.peerHealthMu.Lock()
+	previous := b.peerFailures
+	b.peerFailures = 0
+	b.peerFailureReason = ""
+	b.peerHealthMu.Unlock()
+	if previous > 0 {
+		log.Printf("[health] peer connection recovered after %d failed attempt(s)", previous)
+	}
+}
+
+func (b *Bridge) notePeerFailure(reason string) {
+	b.peerHealthMu.Lock()
+	b.peerFailures++
+	attempt := b.peerFailures
+	b.peerFailureReason = reason
+	b.peerHealthMu.Unlock()
+	log.Printf("[health] peer recovery attempt %d/%d: %s", attempt, maxPeerRecoveryFailures, reason)
+	b.requestReconnect(reason)
+}
+
+func (b *Bridge) peerRecoveryError() error {
+	b.peerHealthMu.Lock()
+	defer b.peerHealthMu.Unlock()
+	if b.peerFailures < maxPeerRecoveryFailures {
+		return nil
+	}
+	return fmt.Errorf("peer connection recovery exhausted after %d failures: %s", b.peerFailures, b.peerFailureReason)
 }
 
 func (b *Bridge) bounceForServerTopology(reason string) {
@@ -703,6 +743,9 @@ func (b *Bridge) run(callInfo *CallInfo, cookieStr string, cfg VKConfig) error {
 
 		err := b.readLoop()
 		log.Printf("[vk-ws] Closed: %s", common.MaskError(err))
+		if b.p2p != nil {
+			b.p2p.cancelPeerWatchdog()
+		}
 
 		b.mu.Lock()
 		if b.sfu != nil {
@@ -710,6 +753,9 @@ func (b *Bridge) run(callInfo *CallInfo, cookieStr string, cfg VKConfig) error {
 		}
 		b.sfu = nil
 		b.mu.Unlock()
+		if peerErr := b.peerRecoveryError(); peerErr != nil {
+			return peerErr
+		}
 
 		log.Println("[vk-ws] Rejoining in 3s...")
 		time.Sleep(3 * time.Second)
@@ -870,6 +916,12 @@ func main() {
 				capabilities |= tunnel.CapabilityVideoKCP1 | tunnel.CapabilityPriorityControl | tunnel.CapabilityReliableDNS
 			}
 			rb := tunnel.NewRelayBridge(dataTunnel, "creator", bridgeReadBuf, log.Printf)
+			ur.SetSessionClose(func() {
+				rb.Close()
+				if adaptive != nil {
+					adaptive.Stop()
+				}
+			})
 			rb.SetUpstreamSocks(*upstreamSocks, *upstreamUser, *upstreamPass)
 			if adaptive != nil {
 				rb.SetOnPeerKCPProfile(func(profile string) {

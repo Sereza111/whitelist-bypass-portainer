@@ -447,6 +447,14 @@ func TestLatestMetricsAndRuntimeState(t *testing.T) {
 	if state := deriveRuntimeState("running", lines); state != "degraded" {
 		t.Fatalf("stalled state=%q", state)
 	}
+	peerLines := []string{
+		"headless: === TUNNEL CONNECTED ===",
+		"[health] peer recovery attempt 1/3: offer timeout",
+		"kcptunnel: sent=10 wait_snd=2",
+	}
+	if state := deriveRuntimeState("running", peerLines); state != "degraded" {
+		t.Fatalf("peer recovery state=%q", state)
+	}
 }
 
 func TestRecoveryDelayIsBounded(t *testing.T) {

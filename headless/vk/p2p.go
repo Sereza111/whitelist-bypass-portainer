@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sync"
+	"time"
 
 	"github.com/pion/webrtc/v4"
 )
@@ -14,10 +16,88 @@ type P2PHandler struct {
 	pendingOffer      *webrtc.SessionDescription
 	pendingCandidates []webrtc.ICECandidateInit
 	connected         bool
+
+	watchMu         sync.Mutex
+	watchGeneration uint64
+	failureReported bool
+	connectionTimer *time.Timer
+	connectTimeout  time.Duration
+	disconnectGrace time.Duration
+	onPeerConnected func()
+	onPeerFailure   func(string)
 }
 
 func NewP2PHandler(bridge *Bridge) *P2PHandler {
-	return &P2PHandler{bridge: bridge}
+	return &P2PHandler{
+		bridge: bridge, connectTimeout: 30 * time.Second, disconnectGrace: 15 * time.Second,
+	}
+}
+
+func (p *P2PHandler) SetHealthCallbacks(onConnected func(), onFailure func(string)) {
+	p.watchMu.Lock()
+	p.onPeerConnected = onConnected
+	p.onPeerFailure = onFailure
+	p.watchMu.Unlock()
+}
+
+func (p *P2PHandler) armPeerWatchdog(reason string, delay time.Duration) {
+	p.watchMu.Lock()
+	if p.connectionTimer != nil {
+		p.connectionTimer.Stop()
+	}
+	p.watchGeneration++
+	generation := p.watchGeneration
+	p.failureReported = false
+	p.connectionTimer = time.AfterFunc(delay, func() {
+		p.firePeerFailure(generation, reason)
+	})
+	p.watchMu.Unlock()
+}
+
+func (p *P2PHandler) cancelPeerWatchdog() {
+	p.watchMu.Lock()
+	if p.connectionTimer != nil {
+		p.connectionTimer.Stop()
+		p.connectionTimer = nil
+	}
+	p.watchGeneration++
+	p.failureReported = false
+	p.watchMu.Unlock()
+}
+
+func (p *P2PHandler) firePeerFailure(generation uint64, reason string) {
+	p.watchMu.Lock()
+	if generation != p.watchGeneration || p.failureReported {
+		p.watchMu.Unlock()
+		return
+	}
+	p.failureReported = true
+	p.connectionTimer = nil
+	callback := p.onPeerFailure
+	p.watchMu.Unlock()
+	log.Printf("[health] peer connection unhealthy: %s", reason)
+	if callback != nil {
+		callback(reason)
+	}
+}
+
+func (p *P2PHandler) reportPeerFailure(reason string) {
+	p.watchMu.Lock()
+	if p.failureReported {
+		p.watchMu.Unlock()
+		return
+	}
+	p.failureReported = true
+	if p.connectionTimer != nil {
+		p.connectionTimer.Stop()
+		p.connectionTimer = nil
+	}
+	callback := p.onPeerFailure
+	p.watchMu.Unlock()
+	log.Printf("[health] peer connection unhealthy: %s", reason)
+	if callback != nil {
+		callback(reason)
+	}
 }
 
 func (p *P2PHandler) setupCallbacks() {
@@ -53,8 +133,9 @@ func (p *P2PHandler) Init() {
 }
 
 // Reset tears down the current Pion PC and creates a fresh one with a new offer.
-func (p *P2PHandler) Reset() {
+func (p *P2PHandler) Reset() error {
 	log.Println("[p2p] Resetting Pion PC...")
+	p.cancelPeerWatchdog()
 	p.connected = false
 
 	p.bridge.relay.Close()
@@ -62,19 +143,18 @@ func (p *P2PHandler) Reset() {
 
 	relay := p.bridge.relay
 	if err := relay.Init(p.bridge.iceServers); err != nil {
-		log.Printf("[p2p] Reset init failed: %v", err)
-		return
+		return fmt.Errorf("reset relay: %w", err)
 	}
 	p.setupCallbacks()
 
 	offer, err := relay.CreateOffer()
 	if err != nil {
-		log.Printf("[p2p] Reset create-offer failed: %v", err)
-		return
+		return fmt.Errorf("reset offer: %w", err)
 	}
 	p.pendingOffer = &offer
 	p.pendingCandidates = nil
 	log.Printf("[p2p] New offer ready after reset, SDP length: %d", len(offer.SDP))
+	return nil
 }
 
 // OnRegisteredPeer handles the registered-peer notification.
@@ -90,10 +170,16 @@ func (p *P2PHandler) OnRegisteredPeer(participantId int64) {
 		} else {
 			log.Printf("[p2p] Same peer %d re-registered, no pending offer, resetting", participantId)
 		}
-		p.Reset()
+		if err := p.Reset(); err != nil {
+			log.Printf("[p2p] Reset failed: %v", err)
+			p.reportPeerFailure("peer connection reset failed")
+			return
+		}
 	}
 
-	p.sendOfferToPeer(participantId)
+	if p.sendOfferToPeer(participantId) {
+		p.armPeerWatchdog("offer was not connected before deadline", p.connectTimeout)
+	}
 }
 
 // OnTransmittedData handles SDP and ICE candidates from the remote peer.
@@ -155,24 +241,34 @@ func (p *P2PHandler) kickRemotePeer() {
 func (p *P2PHandler) OnConnectionState(state string) {
 	switch state {
 	case "connected":
+		p.cancelPeerWatchdog()
 		p.connected = true
 		log.Print("\n  TUNNEL CONNECTED\n")
+		p.watchMu.Lock()
+		callback := p.onPeerConnected
+		p.watchMu.Unlock()
+		if callback != nil {
+			callback()
+		}
 	case "disconnected":
 		p.connected = false
 		log.Println("[p2p] Connection disconnected, kicking peer")
 		p.kickRemotePeer()
+		p.armPeerWatchdog("peer remained disconnected", p.disconnectGrace)
 	case "failed":
 		p.connected = false
 		log.Println("[p2p] Connection failed, removing stale peer")
 		p.kickRemotePeer()
+		p.reportPeerFailure("peer connection failed")
 	case "closed":
 		p.connected = false
 		log.Println("[p2p] Connection closed, kicking peer")
 		p.kickRemotePeer()
+		p.reportPeerFailure("peer connection closed")
 	}
 }
 
-func (p *P2PHandler) sendOfferToPeer(participantId int64) {
+func (p *P2PHandler) sendOfferToPeer(participantId int64) bool {
 	offer := p.pendingOffer
 	candidates := p.pendingCandidates
 	p.pendingOffer = nil
@@ -205,4 +301,5 @@ func (p *P2PHandler) sendOfferToPeer(participantId int64) {
 	if len(candidates) > 0 {
 		log.Printf("[p2p] Flushed %d ICE candidates", len(candidates))
 	}
+	return offer != nil
 }

@@ -45,6 +45,10 @@ type TunnelRelay struct {
 
 	mode     string
 	modeOnce sync.Once
+
+	lifecycleMu  sync.Mutex
+	closed       bool
+	sessionClose func()
 }
 
 func (u *TunnelRelay) SetObfuscator(o *tunnel.TunnelObfuscator) { u.obf = o }
@@ -224,7 +228,30 @@ func (u *TunnelRelay) OnConnectionStateChange(fn func(webrtc.PeerConnectionState
 	u.externalCSC = fn
 }
 
+func (u *TunnelRelay) SetSessionClose(fn func()) {
+	u.lifecycleMu.Lock()
+	if u.closed {
+		u.lifecycleMu.Unlock()
+		if fn != nil {
+			fn()
+		}
+		return
+	}
+	u.sessionClose = fn
+	u.lifecycleMu.Unlock()
+}
+
 func (u *TunnelRelay) Close() {
+	u.lifecycleMu.Lock()
+	if u.closed {
+		u.lifecycleMu.Unlock()
+		return
+	}
+	u.closed = true
+	closeSession := u.sessionClose
+	u.sessionClose = nil
+	u.lifecycleMu.Unlock()
+
 	u.closeAllConns()
 	if u.sym != nil {
 		u.sym.Stop()
@@ -248,6 +275,9 @@ func (u *TunnelRelay) Close() {
 	u.remoteSet = false
 	u.pending = nil
 	u.sampleTrack = nil
+	if closeSession != nil {
+		closeSession()
+	}
 }
 
 func (u *TunnelRelay) handleDCMessage(data []byte) {

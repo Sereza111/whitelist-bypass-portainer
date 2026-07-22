@@ -46,6 +46,33 @@
 		  <article><span>route</span><strong id="summaryRoute">System TUN</strong></article>
 		  <article><span>reliability</span><strong id="summaryProfile">Balanced</strong></article>
 		</div>
+		<section id="routingModePanel" class="routing-mode" aria-labelledby="routingModeTitle">
+		  <div class="routing-mode-heading">
+			<div><span>TRAFFIC ROUTING</span><h3 id="routingModeTitle">Choose how apps use the tunnel</h3></div>
+			<small>Saved automatically</small>
+		  </div>
+		  <div class="routing-mode-grid">
+			<label class="route-choice" id="routeTunChoice" data-active="true">
+			  <input id="routeTun" type="radio" name="routeMode" value="tun" checked />
+			  <span class="route-glyph" aria-hidden="true">TUN</span>
+			  <span><strong>System VPN</strong><small>Route all PC traffic automatically</small></span>
+			</label>
+			<label class="route-choice" id="routeProxyChoice" data-active="false">
+			  <input id="routeProxy" type="radio" name="routeMode" value="proxy" />
+			  <span class="route-glyph" aria-hidden="true">S5</span>
+			  <span><strong>Local SOCKS5</strong><small>Only apps configured to use the proxy</small></span>
+			</label>
+		  </div>
+		  <div id="proxyModeDetails" class="proxy-mode-details" hidden>
+			<div>
+			  <span>LOCAL PROXY ENDPOINT</span>
+			  <strong id="proxyEndpoint">127.0.0.1:1080</strong>
+			  <small id="proxyAuthSummary">Localhost only · no system routes</small>
+			</div>
+			<button id="copyProxyConfig" class="proxy-copy-btn" type="button">Copy settings</button>
+			<p id="proxyCopyStatus" class="proxy-copy-status" aria-live="polite"></p>
+		  </div>
+		</section>
 		<label class="check mode-toggle">
 		  <input id="phoneGateway" type="checkbox" />
 		  <span><strong>Android Phone Gateway</strong><small>Use the tunnel already running on your phone</small></span>
@@ -139,10 +166,6 @@
             <input id="vp8Batch" type="number" value="30" min="1" max="200" />
           </label>
         </div>
-        <label class="check">
-          <input id="noTun" type="checkbox" />
-          SOCKS5 only (no system-wide routing)
-        </label>
         <label class="check">
           <input id="dualTrack" type="checkbox" />
           Dual-track

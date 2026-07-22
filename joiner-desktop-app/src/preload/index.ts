@@ -4,6 +4,7 @@ import { IPC, JoinerSettings } from '../constants';
 contextBridge.exposeInMainWorld('bridge', {
   start: (settings: JoinerSettings) => ipcRenderer.invoke(IPC.START, settings),
   stop: () => ipcRenderer.invoke(IPC.STOP),
+  copyText: (value: string) => ipcRenderer.invoke(IPC.COPY_TEXT, value),
   onLog(cb: (text: string) => void) {
     ipcRenderer.on(IPC.LOG, (_e, text) => cb(text));
   },
@@ -14,4 +15,3 @@ contextBridge.exposeInMainWorld('bridge', {
     ipcRenderer.on(IPC.RUNNING, (_e, v) => cb(v));
   },
 });
-
