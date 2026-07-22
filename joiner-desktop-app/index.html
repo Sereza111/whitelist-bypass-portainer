@@ -41,9 +41,14 @@
     <main>
       <section class="form panel">
         <div class="section-heading"><span>01</span><h2>Connection rite</h2></div>
+		<div class="connection-rail" aria-label="Connection summary">
+		  <article><span>provider</span><strong id="summaryPlatform">-</strong></article>
+		  <article><span>route</span><strong id="summaryRoute">System TUN</strong></article>
+		  <article><span>reliability</span><strong id="summaryProfile">Balanced</strong></article>
+		</div>
 		<label class="check mode-toggle">
 		  <input id="phoneGateway" type="checkbox" />
-		  Route this PC through the Android phone
+		  <span><strong>Android Phone Gateway</strong><small>Use the tunnel already running on your phone</small></span>
 		</label>
 		<div id="phoneGatewayFields" class="phone-gateway" hidden>
 		  <label>
@@ -69,6 +74,9 @@
           Display name
           <input id="name" type="text" value="Joiner" />
         </label>
+		<details id="advancedPanel" class="advanced-panel">
+		  <summary><span>Advanced transport</span><small>SOCKS, DNS, KCP and carrier pacing</small></summary>
+		  <div class="advanced-body">
         <div class="row">
           <label>
             SOCKS5 port
@@ -139,9 +147,12 @@
           <input id="dualTrack" type="checkbox" />
           Dual-track
         </label>
+		  <p id="kcpSafety" class="safety-note" hidden></p>
+		  </div>
+		</details>
         <div class="actions">
-          <button id="start">Start</button>
-          <button id="stop">Stop</button>
+		  <button id="start">Connect</button>
+		  <button id="stop">Disconnect</button>
         </div>
       </section>
       <section class="log-wrap panel">

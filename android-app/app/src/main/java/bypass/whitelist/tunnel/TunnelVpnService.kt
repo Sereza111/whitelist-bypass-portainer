@@ -309,7 +309,7 @@ class TunnelVpnService : VpnService() {
         return builder
             .setContentTitle(getString(R.string.notification_vpn_title))
             .setContentText(text)
-            .setSmallIcon(android.R.drawable.ic_lock_lock)
+            .setSmallIcon(R.drawable.ic_power)
             .setOngoing(true)
             .setContentIntent(openPending)
             .addAction(Notification.Action.Builder(null, getString(R.string.notification_disconnect), stopPending).build())

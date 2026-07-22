@@ -41,6 +41,10 @@ const platformHint = $('platformHint');
 const linkInput = input('link');
 const phoneGateway = input('phoneGateway');
 const phoneGatewayFields = $('phoneGatewayFields');
+const summaryPlatform = $('summaryPlatform');
+const summaryRoute = $('summaryRoute');
+const summaryProfile = $('summaryProfile');
+const kcpSafety = $('kcpSafety');
 const callOnlyInputIds = [
 	'link', 'name', 'socksPort', 'socksUser', 'socksPass', 'tunnelMode',
 	'videoReliability', 'kcpProfile', 'vp8Fps', 'vp8Batch', 'noTun', 'dualTrack',
@@ -61,11 +65,13 @@ function refreshPlatformHint() {
 	if (phoneGateway.checked) {
 		platformHint.textContent = 'Phone SOCKS gateway mode';
 		platformHint.dataset.detected = '';
+		refreshConnectionSummary();
 		return;
 	}
   const p = detectPlatform(linkInput.value.trim());
   platformHint.textContent = `Detected platform: ${platformLabel(p)}`;
   platformHint.dataset.detected = p ?? '';
+	refreshConnectionSummary();
 }
 linkInput.addEventListener('input', refreshPlatformHint);
 refreshPlatformHint();
@@ -83,8 +89,27 @@ function refreshConnectionMode() {
 	refreshPlatformHint();
 }
 
+function refreshConnectionSummary(): void {
+	const usePhone = phoneGateway.checked;
+	const detected = usePhone ? null : detectPlatform(linkInput.value.trim());
+	summaryPlatform.textContent = usePhone ? 'Android' : platformLabel(detected);
+	summaryRoute.textContent = usePhone ? 'Phone gateway' : (input('noTun').checked ? 'SOCKS only' : 'System TUN');
+	const reliability = select('videoReliability').value;
+	const profile = select('kcpProfile').value;
+	summaryProfile.textContent = usePhone ? 'Phone managed' : (reliability === 'raw' ? 'Legacy raw' : profile[0].toUpperCase() + profile.slice(1));
+	const unsafeFast = !usePhone && reliability !== 'raw' && profile === 'fast' && !input('noTun').checked;
+	kcpSafety.hidden = !unsafeFast;
+	kcpSafety.textContent = unsafeFast
+		? 'Fast is unsafe for full TUN and will be clamped to Balanced. Use Fast only for a controlled SOCKS-only test.'
+		: '';
+}
+
 phoneGateway.addEventListener('change', refreshConnectionMode);
 refreshConnectionMode();
+
+for (const id of ['tunnelMode', 'videoReliability', 'kcpProfile', 'noTun']) {
+	document.getElementById(id)?.addEventListener('change', refreshConnectionSummary);
+}
 
 input('phoneConfig').addEventListener('input', () => {
 	const config = input('phoneConfig').value;

@@ -155,6 +155,74 @@ async function deleteSession(id) {
   await refresh();
 }
 
+function selectSession(id, scroll = true) {
+  app.selected = id;
+  renderSessions();
+  run(renderDetail);
+  if (scroll) document.querySelector('.diagnostics')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function closeContextMenu() {
+  byId('contextMenu').hidden = true;
+  byId('contextMenu').innerHTML = '';
+}
+
+function contextActions(kind, id) {
+  if (kind === 'profile') {
+    const profile = app.profiles.find((item) => item.id === id);
+    if (!profile) return [];
+    return [
+      { action: 'start', label: 'Запустить сессию', disabled: !profile.enabled },
+      { action: 'mobile', label: 'Скопировать в телефон' },
+      { action: 'edit', label: 'Изменить профиль' },
+      { action: 'toggle', label: profile.enabled ? 'Отключить профиль' : 'Включить профиль' },
+      { action: 'delete-profile', label: 'Удалить профиль', danger: true },
+    ];
+  }
+  const session = app.sessions.find((item) => item.id === id);
+  if (!session) return [];
+  return [
+    { action: 'open-session', label: 'Открыть диагностику' },
+    { action: 'copy-session', label: 'Копировать ссылку', disabled: !session.status?.sessionLink },
+    activeState(session.status?.state)
+      ? { action: 'stop-session', label: 'Остановить сессию', danger: true }
+      : { action: 'delete-session', label: 'Убрать сессию', danger: true },
+  ];
+}
+
+function openContextMenu(kind, id, x, y) {
+  const menu = byId('contextMenu');
+  const actions = contextActions(kind, id);
+  if (!actions.length) return;
+  menu.dataset.kind = kind;
+  menu.dataset.id = id;
+  menu.innerHTML = actions.map((item) => `<button type="button" role="menuitem" data-menu-action="${item.action}" class="${item.danger ? 'danger' : ''}" ${item.disabled ? 'disabled' : ''}>${escapeHTML(item.label)}</button>`).join('');
+  menu.hidden = false;
+  const bounds = menu.getBoundingClientRect();
+  menu.style.left = `${Math.max(8, Math.min(x, window.innerWidth - bounds.width - 8))}px`;
+  menu.style.top = `${Math.max(8, Math.min(y, window.innerHeight - bounds.height - 8))}px`;
+  menu.querySelector('button:not(:disabled)')?.focus();
+}
+
+async function runContextAction(action, kind, id) {
+  if (kind === 'profile') {
+    if (action === 'start') return startProfile(id);
+    if (action === 'mobile') return copyMobileProfile(id);
+    if (action === 'edit') return editProfile(id);
+    if (action === 'toggle') return toggleProfile(id);
+    if (action === 'delete-profile') return deleteProfile(id);
+  }
+  const session = app.sessions.find((item) => item.id === id);
+  if (action === 'open-session') return selectSession(id);
+  if (action === 'copy-session' && session?.status?.sessionLink) {
+    await copyText(session.status.sessionLink);
+    showError('Ссылка подключения скопирована.');
+    return;
+  }
+  if (action === 'stop-session') return stopSession(id);
+  if (action === 'delete-session') return deleteSession(id);
+}
+
 function renderProfiles() {
   const root = byId('profiles');
   const signature = JSON.stringify(app.profiles);
@@ -166,7 +234,7 @@ function renderProfiles() {
   }
   root.innerHTML = app.profiles.map((profile) => {
     const state = profile.enabled ? 'enabled' : 'disabled';
-    return `<article class="profile-card ${state}">
+    return `<article class="profile-card ${state}" data-menu-kind="profile" data-menu-id="${profile.id}">
       <div class="profile-glyph">${escapeHTML(profile.name.slice(0, 1).toUpperCase())}</div>
       <div class="profile-copy">
         <div class="profile-heading"><h3>${escapeHTML(profile.name)}</h3><span>${profile.enabled ? 'ACTIVE' : 'LOCKED'}</span></div>
@@ -174,10 +242,7 @@ function renderProfiles() {
       </div>
       <div class="profile-actions">
         <button class="small start-client" data-id="${profile.id}" ${profile.enabled ? '' : 'disabled'}>Запустить</button>
-		<button class="small mobile-client" data-id="${profile.id}">В телефон</button>
-        <button class="small toggle-client" data-id="${profile.id}">${profile.enabled ? 'Отключить' : 'Включить'}</button>
-        <button class="icon edit-client" data-id="${profile.id}" title="Изменить">✎</button>
-        <button class="icon danger delete-client" data-id="${profile.id}" title="Удалить">×</button>
+        <button class="icon menu-trigger" type="button" data-kind="profile" data-id="${profile.id}" title="Все действия" aria-label="Действия профиля">⋮</button>
       </div>
     </article>`;
   }).join('');
@@ -239,7 +304,7 @@ function renderSessions() {
     const tx = status.metrics?.tx_kbps || '0';
     const rx = status.metrics?.rx_kbps || '0';
     const selected = session.id === app.selected ? 'selected' : '';
-    return `<article class="session-card ${selected}" data-session-id="${session.id}" data-state="${escapeHTML(status.state)}">
+    return `<article class="session-card ${selected}" data-session-id="${session.id}" data-menu-kind="session" data-menu-id="${session.id}" data-state="${escapeHTML(status.state)}">
       <button class="session-open" data-id="${session.id}">
         <span class="status-rune"></span>
 		<span><strong>${escapeHTML(session.clientName)}</strong><small>${escapeHTML(friendlyState(status))}</small></span>
@@ -247,6 +312,7 @@ function renderSessions() {
       <div class="session-rate"><span class="session-tx">TX ${escapeHTML(tx)}</span><span class="session-rx">RX ${escapeHTML(rx)} kbps</span></div>
       <div class="session-actions">
         ${activeState(status.state) ? `<button class="small stop-session" data-id="${session.id}">Стоп</button>` : `<button class="small delete-session" data-id="${session.id}">Убрать</button>`}
+        <button class="icon menu-trigger" type="button" data-kind="session" data-id="${session.id}" title="Все действия" aria-label="Действия сессии">⋮</button>
       </div>
     </article>`;
   }).join('');
@@ -292,11 +358,19 @@ function bindDynamicActions() {
   document.querySelectorAll('.edit-client').forEach((button) => button.onclick = () => editProfile(button.dataset.id));
   document.querySelectorAll('.delete-client').forEach((button) => button.onclick = () => run(() => deleteProfile(button.dataset.id)));
   document.querySelectorAll('.session-open').forEach((button) => button.onclick = () => {
-    app.selected = button.dataset.id; renderSessions(); run(renderDetail);
-    document.querySelector('.diagnostics')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    selectSession(button.dataset.id);
   });
   document.querySelectorAll('.stop-session').forEach((button) => button.onclick = () => run(() => stopSession(button.dataset.id)));
   document.querySelectorAll('.delete-session').forEach((button) => button.onclick = () => run(() => deleteSession(button.dataset.id)));
+  document.querySelectorAll('.menu-trigger').forEach((button) => button.onclick = (event) => {
+    event.stopPropagation();
+    const bounds = button.getBoundingClientRect();
+    openContextMenu(button.dataset.kind, button.dataset.id, bounds.right - 180, bounds.bottom + 6);
+  });
+  document.querySelectorAll('[data-menu-kind]').forEach((card) => card.oncontextmenu = (event) => {
+    event.preventDefault();
+    openContextMenu(card.dataset.menuKind, card.dataset.menuId, event.clientX, event.clientY);
+  });
 }
 
 async function run(action) {
@@ -441,8 +515,25 @@ byId('vkLoginModal').addEventListener('click', (event) => {
 	if (event.target === byId('vkLoginModal')) closeVKLogin();
 });
 document.addEventListener('keydown', (event) => {
-	if (event.key === 'Escape' && !byId('vkLoginModal').hidden) closeVKLogin();
+	if (event.key !== 'Escape') return;
+	closeContextMenu();
+	if (!byId('vkLoginModal').hidden) closeVKLogin();
 });
+byId('contextMenu').addEventListener('click', (event) => {
+	const button = event.target.closest('[data-menu-action]');
+	if (!button || button.disabled) return;
+	const menu = byId('contextMenu');
+	const { kind, id } = menu.dataset;
+	const action = button.dataset.menuAction;
+	closeContextMenu();
+	run(() => runContextAction(action, kind, id));
+});
+document.addEventListener('click', (event) => {
+	if (!event.target.closest('#contextMenu') && !event.target.closest('.menu-trigger')) closeContextMenu();
+});
+window.addEventListener('blur', closeContextMenu);
+window.addEventListener('resize', closeContextMenu);
+window.addEventListener('scroll', closeContextMenu, true);
 
 function applyTheme(theme) {
 	const next = theme === 'dark' ? 'dark' : 'light';

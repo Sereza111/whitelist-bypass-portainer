@@ -3,7 +3,64 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:background="@color/surface_bg"
     android:orientation="vertical">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="18dp"
+        android:paddingTop="18dp"
+        android:paddingBottom="14dp">
+
+        <FrameLayout
+            android:layout_width="38dp"
+            android:layout_height="46dp"
+            android:layout_marginEnd="12dp"
+            android:background="@drawable/bg_brand_shield"
+            android:padding="6dp">
+
+            <ImageView
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:contentDescription="@string/brand_mark_description"
+                android:src="@drawable/ic_fleur" />
+        </FrameLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="serif"
+                android:text="@string/activity_brand_title"
+                android:textColor="@color/ink"
+                android:textSize="23sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:fontFamily="monospace"
+                android:letterSpacing="0.14"
+                android:text="@string/activity_brand_subtitle"
+                android:textAllCaps="true"
+                android:textColor="@color/ink_3"
+                android:textSize="9sp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/hair" />
 
     <FrameLayout
         android:layout_width="match_parent"
@@ -67,4 +124,3 @@
             app:iconTint="@color/ink" />
     </LinearLayout>
 </LinearLayout>
-

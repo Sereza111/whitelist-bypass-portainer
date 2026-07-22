@@ -4,6 +4,7 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:background="@color/surface_bg"
     android:fillViewport="true">
 
     <LinearLayout
@@ -19,6 +20,20 @@
             android:layout_height="wrap_content"
             android:gravity="center_vertical"
             android:orientation="horizontal">
+
+            <FrameLayout
+                android:layout_width="42dp"
+                android:layout_height="50dp"
+                android:layout_marginEnd="12dp"
+                android:background="@drawable/bg_brand_shield"
+                android:padding="6dp">
+
+                <ImageView
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:contentDescription="@string/brand_mark_description"
+                    android:src="@drawable/ic_fleur" />
+            </FrameLayout>
 
             <LinearLayout
                 android:layout_width="0dp"
