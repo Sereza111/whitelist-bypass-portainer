@@ -14,6 +14,37 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
+## Active handoff (2026-07-22, alpha.10 candidate)
+
+- `main` now contains the complete panel control-center redesign. Commit
+  `9d5dd6a` adds dashboard/clients/sessions/providers/events/settings sections,
+  desktop sidebar, mobile bottom navigation, dense profile registry, VK QR
+  identity, panel-managed global recovery recipient, per-profile override,
+  safe test messages, profile duplication and a bounded structured event log.
+- Recovery recipient precedence is profile -> panel -> legacy `VK_PEER_ID`.
+  Recipient changes affect new Creator processes and the next supervised
+  restart. Cookie/token/signed WLB2 content must never enter events or API
+  errors. `/api/profiles` still returns each recovery key because Android
+  pairing currently depends on it; do not copy that field into diagnostics.
+- The panel was checked in Argent and Sable, with navigation, client creation,
+  context menus, recovery settings/error states and a 390x844 responsive pass.
+  Go tests/vet and JS syntax checks pass.
+- Merge commit `3e9430e` integrates bounded per-flow queues and DRR from
+  `codex/transport-fair-queue`. `MsgData`, ordered `MsgClose`, `MsgUDP` and
+  `MsgUDPReply` use the per-conn scheduler; CONNECT/DNS/hello remain on the
+  negotiated priority path. This changes scheduling only, not the wire format.
+  Metrics now include fair flows, queued frames/bytes and average/max wait.
+- Version defaults and CI metadata are being advanced together to
+  `0.5.0-alpha.10`. Before calling it released, push `main`, wait for all three
+  branch workflows, tag only the verified commit, then verify APK/EXE checksums,
+  persistent APK signer and GHCR amd64/arm64/386 manifests.
+- Field gate: uninstall the old debug-signed alpha.8 once if it is still on the
+  phone, install signed alpha.10, redeploy the matching tagged Docker image and
+  confirm both logs report alpha.10. Compare `fair_queue`, `fair_avg_wait_ms`,
+  DNS latency, CONNECT latency and loaded latency during concurrent bulk +
+  short HTTPS probes; DRR is intended to improve fairness/latency, not raise the
+  VP8 carrier's physical throughput ceiling.
+
 ## Active handoff (2026-07-22, alpha.9 completion)
 
 - `v0.5.0-alpha.9` is published at commit `3534d9f`. Android, Windows and

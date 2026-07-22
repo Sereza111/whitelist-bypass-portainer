@@ -4,7 +4,7 @@ plugins {
 }
 
 val versionBuild = System.getenv("BUILD_NUMBER")?.toIntOrNull() ?: 0
-val buildVersion = System.getenv("BUILD_VERSION") ?: "0.5.0-alpha.9"
+val buildVersion = System.getenv("BUILD_VERSION") ?: "0.5.0-alpha.10"
 val signingStoreFile = System.getenv("ANDROID_SIGNING_STORE_FILE")
 val signingStorePassword = System.getenv("ANDROID_SIGNING_STORE_PASSWORD")
 val signingKeyAlias = System.getenv("ANDROID_SIGNING_KEY_ALIAS")
