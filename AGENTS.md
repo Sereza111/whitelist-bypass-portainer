@@ -14,8 +14,13 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
-## Active handoff (2026-07-22, alpha.11 candidate)
+## Active handoff (2026-07-22, alpha.11 completion)
 
+- `v0.5.0-alpha.11` is published at commit `04d278a`. Branch and tagged
+  Android, Windows and Docker workflows passed. Release APK/EXE plus checksum
+  assets exist, the persistent Android signer check passed, the APK checksum
+  matches GitHub's asset digest, and GHCR `amd64`/`arm64`/`386` manifests were
+  verified. Do not move or replace the published tag.
 - Windows and Android now expose first-class `VPN / Proxy` routing selectors.
   Proxy mode uses the existing authenticated local SOCKS5 listener and skips
   Wintun/Android VpnService. Windows shows/copies `127.0.0.1:<port>`; Android
@@ -44,9 +49,9 @@ Portainer and a headless Joiner in Video mode.
   client; joining the public call link is guest/anonym-token based and does not
   require the client to log into the server VK account. Android signed recovery
   still needs the recipient's VK peer id if automatic DM delivery is desired.
-- Advance all runtime/CI defaults together to `0.5.0-alpha.11`, run branch CI,
-  tag only the verified commit, then verify APK/EXE digests, persistent Android
-  signer and GHCR `amd64`/`arm64`/`386` manifests.
+- Runtime and CI defaults are aligned at `0.5.0-alpha.11`. Deploy
+  `ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.11` without
+  deleting persistent `/data`, and field-test matching alpha.11 clients.
 
 ## Active handoff (2026-07-22, alpha.10 completion)
 
