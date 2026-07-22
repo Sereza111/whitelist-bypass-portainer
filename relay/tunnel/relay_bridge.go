@@ -81,6 +81,7 @@ type RelayBridge struct {
 	socksUser   string
 	socksPass   string
 	upstream    *common.Socks5Upstream
+	fairSender  *fairSender
 
 	persistentListener atomic.Bool
 	listenerMu         sync.Mutex
@@ -209,6 +210,7 @@ func NewRelayBridge(tunnel DataTunnel, mode string, readBuf int, logFn func(stri
 		startedAt:   time.Now(),
 		metricsStop: make(chan struct{}),
 	}
+	rb.fairSender = newFairSender(func(frame []byte) { rb.sendFrame(frame, false) })
 	tunnel.SetOnData(rb.handleTunnelData)
 	tunnel.SetOnClose(rb.handleTunnelClose)
 	rb.localHello = newLocalHello(tunnel, readBuf)
@@ -226,6 +228,9 @@ func (rb *RelayBridge) SetUpstreamSocks(addr, user, pass string) {
 }
 
 func (rb *RelayBridge) SwapTunnel(newTunnel DataTunnel) {
+	if rb.fairSender != nil {
+		rb.fairSender.Reset()
+	}
 	rb.tunnelMu.Lock()
 	rb.tunnel = newTunnel
 	rb.tunnelMu.Unlock()
@@ -295,6 +300,9 @@ func (rb *RelayBridge) closeAll() {
 		rb.dnsPending.Delete(key)
 		return true
 	})
+	if rb.fairSender != nil {
+		rb.fairSender.Reset()
+	}
 	rb.logFn("relay: closeAll mode=%s tcp=%d udp=%d ids=%v nextID=%d", rb.mode, len(ids), udpCount, ids, rb.nextID.Load())
 }
 
@@ -314,6 +322,9 @@ func (rb *RelayBridge) Close() {
 	}
 	rb.handshakeGeneration.Add(1)
 	rb.metricsStopOnce.Do(func() { close(rb.metricsStop) })
+	if rb.fairSender != nil {
+		rb.fairSender.Stop()
+	}
 	rb.listenerMu.Lock()
 	ln := rb.listener
 	rb.listener = nil
@@ -337,7 +348,20 @@ func (rb *RelayBridge) MarkReady() {
 
 func (rb *RelayBridge) send(connID uint32, msgType byte, payload []byte) {
 	frame := EncodeFrame(connID, msgType, payload)
+	if rb.fairSender != nil && isFairScheduledMessage(msgType) {
+		rb.fairSender.Enqueue(connID, frame)
+		return
+	}
 	rb.sendFrame(frame, connID == ControlConnID)
+}
+
+func isFairScheduledMessage(msgType byte) bool {
+	switch msgType {
+	case MsgData, MsgClose, MsgUDP, MsgUDPReply:
+		return true
+	default:
+		return false
+	}
 }
 
 func (rb *RelayBridge) sendFrame(frame []byte, control bool) {
