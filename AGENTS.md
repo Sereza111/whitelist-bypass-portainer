@@ -14,8 +14,12 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
-## Active handoff (2026-07-22, alpha.10 candidate)
+## Active handoff (2026-07-22, alpha.10 completion)
 
+- `v0.5.0-alpha.10` is published at commit `18fcb28`. Branch and tagged
+  Android, Windows and Docker workflows passed. The APK/EXE release digests,
+  persistent Android signer check and GHCR `amd64`/`arm64`/`386` manifests
+  were verified. Do not move or replace the published tag.
 - `main` now contains the complete panel control-center redesign. Commit
   `9d5dd6a` adds dashboard/clients/sessions/providers/events/settings sections,
   desktop sidebar, mobile bottom navigation, dense profile registry, VK QR
@@ -34,10 +38,10 @@ Portainer and a headless Joiner in Video mode.
   `MsgUDPReply` use the per-conn scheduler; CONNECT/DNS/hello remain on the
   negotiated priority path. This changes scheduling only, not the wire format.
   Metrics now include fair flows, queued frames/bytes and average/max wait.
-- Version defaults and CI metadata are being advanced together to
-  `0.5.0-alpha.10`. Before calling it released, push `main`, wait for all three
-  branch workflows, tag only the verified commit, then verify APK/EXE checksums,
-  persistent APK signer and GHCR amd64/arm64/386 manifests.
+- Version defaults and CI metadata are aligned at `0.5.0-alpha.10`. The
+  published deployment image is
+  `ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.10`; preserve the
+  persistent `/data` volume while redeploying it.
 - Field gate: uninstall the old debug-signed alpha.8 once if it is still on the
   phone, install signed alpha.10, redeploy the matching tagged Docker image and
   confirm both logs report alpha.10. Compare `fair_queue`, `fair_avg_wait_ms`,
