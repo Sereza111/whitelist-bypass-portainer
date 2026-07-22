@@ -23,3 +23,9 @@ logpanel*.txt
 photo_*.jpg
 photo_*.jpeg
 photo_*.png
+
+# Release signing material must stay in GitHub Actions secrets / offline backup
+*.jks
+*.keystore
+*.p12
+signing/

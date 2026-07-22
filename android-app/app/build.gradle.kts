@@ -4,7 +4,14 @@ plugins {
 }
 
 val versionBuild = System.getenv("BUILD_NUMBER")?.toIntOrNull() ?: 0
-val buildVersion = System.getenv("BUILD_VERSION") ?: "0.5.0-alpha.7"
+val buildVersion = System.getenv("BUILD_VERSION") ?: "0.5.0-alpha.9"
+val signingStoreFile = System.getenv("ANDROID_SIGNING_STORE_FILE")
+val signingStorePassword = System.getenv("ANDROID_SIGNING_STORE_PASSWORD")
+val signingKeyAlias = System.getenv("ANDROID_SIGNING_KEY_ALIAS")
+val signingKeyPassword = System.getenv("ANDROID_SIGNING_KEY_PASSWORD")
+val hasReleaseSigning = listOf(
+    signingStoreFile, signingStorePassword, signingKeyAlias, signingKeyPassword,
+).all { !it.isNullOrBlank() }
 
 android {
     namespace = "bypass.whitelist"
@@ -22,9 +29,27 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("releaseKey") {
+                storeFile = file(signingStoreFile!!)
+                storePassword = signingStorePassword
+                keyAlias = signingKeyAlias
+                keyPassword = signingKeyPassword
+                storeType = System.getenv("ANDROID_SIGNING_STORE_TYPE") ?: "PKCS12"
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+                enableV4Signing = true
+            }
+        }
+    }
     buildTypes {
         release {
             isMinifyEnabled = false
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("releaseKey")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

@@ -6,10 +6,6 @@ on:
       - main
     tags:
       - 'v*'
-    paths:
-      - 'android-app/**'
-      - 'relay/**'
-      - '.github/workflows/android-joiner.yml'
   workflow_dispatch:
 
 permissions:
@@ -61,12 +57,42 @@ jobs:
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
             version="${GITHUB_REF_NAME#v}"
           else
-            version="0.5.0-alpha.4+${short_sha}"
+            version="0.5.0-alpha.9+${short_sha}"
           fi
           echo "BUILD_VERSION=${version}" >> "${GITHUB_ENV}"
           echo "BUILD_COMMIT=${GITHUB_SHA}" >> "${GITHUB_ENV}"
           echo "BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "${GITHUB_ENV}"
           echo "BUILD_NUMBER=${GITHUB_RUN_NUMBER}" >> "${GITHUB_ENV}"
+
+      - name: Prepare persistent Android signing
+        shell: bash
+        env:
+          WLB_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          WLB_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          WLB_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          WLB_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          WLB_CERT_SHA256: ${{ secrets.ANDROID_SIGNING_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${WLB_KEYSTORE_BASE64}" || -z "${WLB_STORE_PASSWORD}" || -z "${WLB_KEY_ALIAS}" || -z "${WLB_KEY_PASSWORD}" || -z "${WLB_CERT_SHA256}" ]]; then
+            if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+              echo "::error title=Android release signing::Tagged builds require the persistent Android signing secrets"
+              exit 1
+            fi
+            echo "ANDROID_APK_VARIANT=debug" >> "${GITHUB_ENV}"
+            echo "No release signing secret on branch build; producing a non-upgradeable debug artifact."
+            exit 0
+          fi
+          signing_file="${RUNNER_TEMP}/whitelist-bypass-release.p12"
+          printf '%s' "${WLB_KEYSTORE_BASE64}" | base64 --decode > "${signing_file}"
+          chmod 600 "${signing_file}"
+          echo "ANDROID_SIGNING_STORE_FILE=${signing_file}" >> "${GITHUB_ENV}"
+          echo "ANDROID_SIGNING_STORE_PASSWORD=${WLB_STORE_PASSWORD}" >> "${GITHUB_ENV}"
+          echo "ANDROID_SIGNING_KEY_ALIAS=${WLB_KEY_ALIAS}" >> "${GITHUB_ENV}"
+          echo "ANDROID_SIGNING_KEY_PASSWORD=${WLB_KEY_PASSWORD}" >> "${GITHUB_ENV}"
+          echo "ANDROID_SIGNING_STORE_TYPE=PKCS12" >> "${GITHUB_ENV}"
+          echo "ANDROID_EXPECTED_CERT_SHA256=${WLB_CERT_SHA256}" >> "${GITHUB_ENV}"
+          echo "ANDROID_APK_VARIANT=release" >> "${GITHUB_ENV}"
 
       - name: Test shared relay protocol
         working-directory: relay
@@ -124,13 +150,15 @@ jobs:
 
           file ../android-app/app/src/main/jniLibs/*/librelay.so
 
-      - name: Build installable debug APK
+      - name: Build installable APK
         working-directory: android-app
         shell: bash
         run: |
           set +e
           set -o pipefail
-          gradle --no-daemon clean assembleDebug 2>&1 | tee "${RUNNER_TEMP}/android-gradle-build.log"
+          task="assembleDebug"
+          if [[ "${ANDROID_APK_VARIANT}" == "release" ]]; then task="assembleRelease"; fi
+          gradle --no-daemon clean "${task}" 2>&1 | tee "${RUNNER_TEMP}/android-gradle-build.log"
           status=${PIPESTATUS[0]}
           set -e
           if [[ ${status} -ne 0 ]]; then
@@ -146,12 +174,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          apk="android-app/app/build/outputs/apk/debug/app-debug.apk"
+          apk="android-app/app/build/outputs/apk/${ANDROID_APK_VARIANT}/app-${ANDROID_APK_VARIANT}.apk"
           test -f "${apk}"
           test -f android-app/app/libs/mobile.aar
           unzip -l "${apk}" | grep -q 'lib/arm64-v8a/librelay.so'
           unzip -l "${apk}" | grep -q 'lib/armeabi-v7a/librelay.so'
-          "${ANDROID_SDK_ROOT}/build-tools/${ANDROID_BUILD_TOOLS}/apksigner" verify --verbose "${apk}"
+          cert_output="$("${ANDROID_SDK_ROOT}/build-tools/${ANDROID_BUILD_TOOLS}/apksigner" verify --verbose --print-certs "${apk}")"
+          printf '%s\n' "${cert_output}"
+          fingerprint="$(printf '%s\n' "${cert_output}" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr -d ':' | tr '[:lower:]' '[:upper:]')"
+          expected="$(printf '%s' "${ANDROID_EXPECTED_CERT_SHA256:-}" | tr -d ':' | tr '[:lower:]' '[:upper:]')"
+          if [[ "${ANDROID_APK_VARIANT}" == "release" && -n "${expected}" && "${fingerprint}" != "${expected}" ]]; then
+            echo "::error title=Android signer mismatch::Release certificate fingerprint does not match ANDROID_SIGNING_CERT_SHA256"
+            exit 1
+          fi
           mkdir -p prebuilts
           output="prebuilts/whitelist-bypass-android-${BUILD_VERSION}.apk"
           cp "${apk}" "${output}"
