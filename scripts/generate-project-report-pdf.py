@@ -301,7 +301,7 @@ def draw_body(canvas, doc) -> None:
     canvas.drawString(19 * mm, height - 11.8 * mm, "WHITELIST BYPASS · PROJECT HANDOFF")
     canvas.setFont("Body", 7.2)
     canvas.setFillColor(MUTED)
-    canvas.drawRightString(width - 19 * mm, height - 11.8 * mm, "v0.5.0-alpha.9 candidate · 22.07.2026")
+    canvas.drawRightString(width - 19 * mm, height - 11.8 * mm, "v0.5.0-alpha.9 · 22.07.2026")
     canvas.setStrokeColor(LINE)
     canvas.line(19 * mm, 14 * mm, width - 19 * mm, 14 * mm)
     canvas.setFont("Code", 7.2)
@@ -324,14 +324,14 @@ def build(source_path: Path = SOURCE, output_path: Path = OUTPUT) -> Path:
     )
     story = [
         Spacer(1, 48 * mm),
-        Paragraph("ENGINEERING HANDOFF · RELEASE ALPHA.9 CANDIDATE", style_map["cover_kicker"]),
+        Paragraph("ENGINEERING HANDOFF · RELEASE ALPHA.9", style_map["cover_kicker"]),
         Paragraph("Whitelist Bypass", style_map["cover_title"]),
         Paragraph(
             "Отчёт о проделанной работе, текущая архитектура, эксплуатация и контекст для следующего ИИ",
             style_map["cover_subtitle"],
         ),
         Spacer(1, 25 * mm),
-        Table([["RELEASE", "COMMIT", "DATE"], ["v0.5.0-alpha.9 candidate", "pending", "22.07.2026"]],
+        Table([["RELEASE", "COMMIT", "DATE"], ["v0.5.0-alpha.9", "3534d9f", "22.07.2026"]],
               colWidths=[48 * mm, 48 * mm, 48 * mm], hAlign="CENTER",
               style=TableStyle([
                   ("FONTNAME", (0, 0), (-1, 0), "BodyBold"),

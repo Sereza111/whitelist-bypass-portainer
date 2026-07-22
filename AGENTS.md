@@ -16,10 +16,10 @@ Portainer and a headless Joiner in Video mode.
 
 ## Active handoff (2026-07-22, alpha.9 completion)
 
-- Work on branch `release/v0.5.0-alpha.8`, but publish the completed work as
-  **`v0.5.0-alpha.9`**. The existing `v0.5.0-alpha.8` tag is incomplete (source
-  archives only) and must not be moved or deleted without explicit user
-  direction.
+- `v0.5.0-alpha.9` is published at commit `3534d9f`. Android, Windows and
+  Docker tag CI passed; APK/EXE release checksums, the persistent APK signer,
+  and GHCR `amd64`/`arm64`/`386` manifests were verified. The existing
+  `v0.5.0-alpha.8` tag remains historical and must not be moved or deleted.
 - UI: panel profile/session `⋮` and right-click context menus are implemented;
   Windows has a user-facing connection summary and collapsible advanced
   transport; Android has branded fleur headers, launcher artwork and
@@ -43,10 +43,10 @@ Portainer and a headless Joiner in Video mode.
   adaptive tunnel now permits the safe one-way state upgrade raw fallback ->
   KCP; receive-side frame markers already support this mixed transition. Never
   allow a late timeout to downgrade an already active KCP tunnel.
-- Before release: run all Go tests/vet, Electron build, Android XML/resource
-  checks, `git diff --check` and a secret scan. Then install GitHub signing
-  secrets only after explicit user confirmation, merge to `main`, run branch
-  CI, tag alpha.9, and verify APK/EXE/Docker release assets and GHCR platforms.
+- Next gate is a matching alpha.9 field test: redeploy the tagged Docker image,
+  install the alpha.9 APK after the one-time uninstall, recreate the session,
+  and confirm both logs report alpha.9, caps `0x1b`, balanced on both peers,
+  reliable DNS counters and recovery back to active KCP after reconnect.
 
 ## Historical handoff (2026-07-21, UI redesign session)
 
