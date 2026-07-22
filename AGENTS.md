@@ -14,7 +14,36 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
-## Active handoff (2026-07-21, UI redesign session)
+## Active handoff (2026-07-22, alpha.9 completion)
+
+- Work on branch `release/v0.5.0-alpha.8`, but publish the completed work as
+  **`v0.5.0-alpha.9`**. The existing `v0.5.0-alpha.8` tag is incomplete (source
+  archives only) and must not be moved or deleted without explicit user
+  direction.
+- UI: panel profile/session `⋮` and right-click context menus are implemented;
+  Windows has a user-facing connection summary and collapsible advanced
+  transport; Android has branded fleur headers, launcher artwork and
+  notification icons. Preserve all existing panel action classes/ids.
+- Android update conflict root cause was ephemeral GitHub debug signing. Tagged
+  builds now require a persistent PKCS12 release key and verify its public
+  SHA-256 certificate fingerprint. The key is outside the repository. Never
+  commit, print or log it. A one-time uninstall of the old debug-signed APK is
+  unavoidable; alpha.9 and later can update in place when signed by this key.
+- Network root cause from matched client/server logs: Creator stayed on `fast`
+  (`WaitSnd=2048/2048`, drops and TX collapse) after Joiner selected
+  `balanced`. KCP profile exchange is now bidirectional and both peers apply
+  `PreferSaferKCPProfile`, so `fast + balanced` converges to `balanced`.
+- Capability `reliable_dns` adds `MsgDNSQuery` / `MsgDNSReply`. When both peers
+  also negotiate `priority_control`, DNS uses the separate reliable control KCP
+  conversation instead of the congested bulk conversation and disables legacy
+  blind retry duplication. Legacy peers retain `MsgUDP` plus retries. Metrics
+  include reliable DNS request/reply counts and average/max latency.
+- Before release: run all Go tests/vet, Electron build, Android XML/resource
+  checks, `git diff --check` and a secret scan. Then install GitHub signing
+  secrets only after explicit user confirmation, merge to `main`, run branch
+  CI, tag alpha.9, and verify APK/EXE/Docker release assets and GHCR platforms.
+
+## Historical handoff (2026-07-21, UI redesign session)
 
 This session was UI/UX only plus one panel resilience fix. No transport,
 protocol, wire, or Go logic was touched. See `docs/UI_REDESIGN_2026-07-21.md`
@@ -69,7 +98,7 @@ for the full detail. Summary:
 
 
 
-## Active handoff (2026-07-21)
+## Historical handoff (2026-07-21)
 
 - Read `docs/PROJECT_REPORT_2026-07-21.md` for the complete implementation,
   deployment, incident, security and next-work summary.
@@ -212,22 +241,27 @@ contains destination addresses and session-adjacent runtime data.
 2. Creator sends its KCP profile after capability negotiation. Joiners select
    the safer local/remote profile and log the effective value.
 3. Capability `priority_control` enables a second reliable KCP conversation for
-   CONNECT and CONNECT_OK/ERR. CLOSE deliberately remains ordered with bulk
-   data until drain/sequence semantics exist, so it cannot truncate a stream.
-4. Next: add reliable DNS control messages, bounded per-flow queues and DRR;
-   prioritize control/DNS/interactive flows and cap UDP fan-out.
-5. Add directional metrics: ACK/UNA progress, KCP RTT/RTO/retransmits,
+   CONNECT, CONNECT_OK/ERR and negotiated reliable DNS. CLOSE deliberately
+   remains ordered with bulk data until drain/sequence semantics exist, so it
+   cannot truncate a stream.
+4. Capability `reliable_dns` adds explicit DNS request/reply frames and latency
+   metrics. It activates only with matching peer support and the priority lane;
+   legacy peers keep the old UDP/retry behavior.
+5. Next: add bounded per-flow queues and DRR; prioritize interactive flows and
+   cap UDP fan-out.
+6. Add directional metrics: ACK/UNA progress, KCP RTT/RTO/retransmits,
    per-direction carrier frames, per-class queued bytes, CONNECT p50/p95.
-6. Re-test Android with matching `balanced/balanced`, then controlled profiles
+7. Re-test Android with matching `balanced/balanced`, then controlled profiles
    and pacing. Do not use Speedtest as the only benchmark: also run one bulk
    download, one upload, and concurrent short HTTPS/DNS probes.
 
 ## Next implementation order
 
-1. Field-verify `0.5.0-alpha.7` with the existing persistent volume and matching
-   Android/Windows clients; record redacted directional metrics.
-2. Add reliable DNS control messages, bounded per-flow queues, flow control and
-   DRR with control/DNS/interactive priority.
+1. Release and field-verify `0.5.0-alpha.9` with matching Android/Windows and
+   server builds; record redacted directional metrics including
+   `dns_reliable_queries`, `dns_reliable_replies`, `dns_avg_ms`, KCP profile,
+   WaitSnd and drops.
+2. Add bounded per-flow queues, flow control and DRR with interactive priority.
 3. Capture repeatable directional Android, Windows Phone Gateway and SOCKS-only
    benchmarks before changing pacing or KCP windows.
 4. Harden the panel with SQLite history, structured events/SSE, encrypted vault,
