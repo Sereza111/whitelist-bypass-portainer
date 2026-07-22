@@ -107,6 +107,9 @@ Windows <- authenticated SOCKS5 по LAN <- Android (режим Phone Gateway)
 - Matching alpha.9 выносит DNS query/reply в эту же надёжную priority lane;
   legacy-клиенты сохраняют старый UDP-путь с повторами.
 - Метрики показывают reliable DNS queries/replies и average/max DNS latency.
+- Поздний handshake после reconnect теперь может безопасно повысить уже
+  включённый raw fallback до KCP. Раньше стороны расходились (`Joiner=raw`,
+  `Creator=KCP`) и все новые CONNECT завершались 20-секундным timeout.
 - `CLOSE` пока остаётся в основной ordered lane, чтобы не обгонять DATA.
 
 ### 3.4 Windows Joiner

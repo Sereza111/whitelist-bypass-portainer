@@ -35,6 +35,16 @@ func TestAdaptiveKCPTunnelMixedTransition(t *testing.T) {
 	raw := EncodeFrame(8, MsgData, []byte("legacy payload"))
 	right.SendData(raw)
 	expectTunnelPayload(t, leftData, raw)
+
+	if !right.EnableKCP() {
+		t.Fatal("late negotiated handshake did not upgrade raw fallback to KCP")
+	}
+	if !right.KCPEnabled() {
+		t.Fatal("late handshake upgrade did not activate KCP")
+	}
+	lateReliable := EncodeFrame(9, MsgData, []byte("late reliable payload"))
+	right.SendData(lateReliable)
+	expectTunnelPayload(t, leftData, lateReliable)
 }
 
 func TestAdaptiveKCPReadBufferFitsOneSegment(t *testing.T) {

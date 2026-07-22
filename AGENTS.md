@@ -38,6 +38,11 @@ Portainer and a headless Joiner in Video mode.
   conversation instead of the congested bulk conversation and disables legacy
   blind retry duplication. Legacy peers retain `MsgUDP` plus retries. Metrics
   include reliable DNS request/reply counts and average/max latency.
+- Field log `relay (6).log` exposed a reconnect race: the two-second handshake
+  fallback selected raw, then a valid capability handshake arrived late. The
+  adaptive tunnel now permits the safe one-way state upgrade raw fallback ->
+  KCP; receive-side frame markers already support this mixed transition. Never
+  allow a late timeout to downgrade an already active KCP tunnel.
 - Before release: run all Go tests/vet, Electron build, Android XML/resource
   checks, `git diff --check` and a secret scan. Then install GitHub signing
   secrets only after explicit user confirmation, merge to `main`, run branch

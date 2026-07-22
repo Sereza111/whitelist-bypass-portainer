@@ -78,12 +78,23 @@ func NewAdaptiveKCPTunnel(inner DataTunnel, logFn func(string, ...any)) *Adaptiv
 }
 
 func (t *AdaptiveKCPTunnel) EnableKCP() bool {
-	if !t.mode.CompareAndSwap(0, 2) {
-		return false
+	previous := uint32(0)
+	for {
+		previous = t.mode.Load()
+		if previous == 2 || (previous != 0 && previous != 1) {
+			return false
+		}
+		if t.mode.CompareAndSwap(previous, 2) {
+			break
+		}
 	}
 	t.once.Do(func() { close(t.ready) })
 	if t.logFn != nil {
-		t.logFn("adaptive-kcp: reliable data path enabled; raw control path retained")
+		if previous == 1 {
+			t.logFn("adaptive-kcp: late handshake upgraded legacy raw fallback to reliable data path")
+		} else {
+			t.logFn("adaptive-kcp: reliable data path enabled; raw control path retained")
+		}
 	}
 	return true
 }
