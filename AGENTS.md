@@ -14,7 +14,7 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
-## Active handoff (2026-07-23, alpha.12 candidate)
+## Active handoff (2026-07-23, alpha.12 completion)
 
 - New matching alpha.11 field data is in user-supplied logs only; never commit
   those logs or screenshots. Android reported `caps=0x1b`, balanced KCP, zero
@@ -25,7 +25,7 @@ Portainer and a headless Joiner in Video mode.
   `fair_queue_max≈1.05MiB`, `fair_max_wait_ms≈15.9s` and `WaitSnd=1024` for
   more than a minute. Creator history reached `fair_queue_max≈4.19MiB`,
   `fair_max_wait_ms≈38.6s` and about 52.8s cumulative KCP backpressure.
-- Alpha.12 candidate reduces balanced KCP from 1024 to 512 segments, DRR
+- Alpha.12 reduces balanced KCP from 1024 to 512 segments, DRR
   staging from 256KiB/flow + 8MiB total to 64KiB/flow + 512KiB total, exposes
   both limits in METRICS, cancels unsent flow backlog after remote CLOSE, and
   sends/logs only one NACK for repeated DATA on an unknown Creator flow.
@@ -36,9 +36,14 @@ Portainer and a headless Joiner in Video mode.
 - Portable Go 1.26.1 in the local temp directory ran `go test ./...`, `go vet
   ./...` and repeated tunnel tests successfully. Android still requires CI
   because the workstation has no Java/Android SDK or Gradle wrapper.
-- Next gate: push the alpha.12 candidate, require green branch Android,
-  Windows and Docker workflows, then tag `v0.5.0-alpha.12` and verify signed
-  APK/EXE plus multi-arch GHCR before calling the release complete.
+- `v0.5.0-alpha.12` is published at immutable commit `680966f`. Branch and tag
+  Android/Windows/Docker workflows passed. Release APK/EXE checksums match the
+  GitHub asset digests. GHCR contains `linux/amd64`, `linux/arm64` and
+  `linux/386`. Do not move or replace the tag.
+- Next field gate: matching alpha.12 APK + Docker, first verify that VPN/Proxy
+  cards are visible while disconnected, then compare VPN Speedtest and a
+  SOCKS-only benchmark. Record `fair_queue_limit`, `fair_flow_limit`,
+  `fair_max_wait_ms`, `kcp_wait_snd`, loaded ping and actual relay kbps.
 
 ## Active handoff (2026-07-22, alpha.11 completion)
 

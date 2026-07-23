@@ -21,7 +21,7 @@ Compose path: portainer-stack-panel.yml
 | `PANEL_PASSWORD` | уникальный пароль длиной от 12 символов |
 | `PANEL_USERNAME` | по умолчанию `admin` |
 | `WLB_SECRETS_DIR` | `/opt/whitelist-bypass/secrets` |
-| `WLB_IMAGE` | `ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.11` |
+| `WLB_IMAGE` | `ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.12` |
 | `MAX_SESSIONS` | общий предел Creator, по умолчанию `4` |
 | `VK_PEER_ID` | цифровой ID VK-получателя новых ссылок |
 
