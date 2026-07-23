@@ -635,6 +635,9 @@ func (rb *RelayBridge) handleJoinerMessage(connID uint32, msgType byte, payload 
 			rb.logFn("relay[joiner]: write to socks %d failed: %s", connID, common.MaskError(err))
 		}
 	case MsgClose:
+		if rb.fairSender != nil {
+			rb.fairSender.CancelFlow(connID)
+		}
 		sc.conn.Close()
 		rb.conns.Delete(connID)
 	}
@@ -655,8 +658,10 @@ func (rb *RelayBridge) handleCreatorMessage(connID uint32, msgType byte, payload
 	case MsgData:
 		val, ok := rb.conns.Load(connID)
 		if !ok {
-			rb.logFn("relay[creator]: drop MsgData for unknown conn %d (payload=%dB)", connID, len(payload))
-			rb.send(connID, MsgClose, nil)
+			if _, alreadyNacked := rb.nackedConns.LoadOrStore(connID, struct{}{}); !alreadyNacked {
+				rb.logFn("relay[creator]: drop MsgData for unknown conn %d (payload=%dB), NACK once", connID, len(payload))
+				rb.send(connID, MsgClose, nil)
+			}
 			return
 		}
 		if c, ok := val.(net.Conn); ok {
@@ -665,6 +670,10 @@ func (rb *RelayBridge) handleCreatorMessage(connID uint32, msgType byte, payload
 			}
 		}
 	case MsgClose:
+		if rb.fairSender != nil {
+			rb.fairSender.CancelFlow(connID)
+		}
+		_, wasNacked := rb.nackedConns.LoadAndDelete(connID)
 		found := false
 		if val, ok := rb.conns.LoadAndDelete(connID); ok {
 			found = true
@@ -682,7 +691,7 @@ func (rb *RelayBridge) handleCreatorMessage(connID uint32, msgType byte, payload
 				rb.udpSessions.Delete(v.mapKey)
 			}
 		}
-		if !found {
+		if !found && !wasNacked {
 			rb.logFn("relay[creator]: drop MsgClose for unknown conn %d", connID)
 		}
 	}

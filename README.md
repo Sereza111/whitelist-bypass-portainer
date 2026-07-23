@@ -48,11 +48,12 @@ ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.11
 - reliable DNS request/reply вместо слепых повторов на matching клиентах;
 - согласование более безопасного KCP-профиля с обеих сторон;
 - детектор ACK/UNA stall и ограниченное переподключение carrier;
-- bounded очередь `256 KiB` на logical flow и общий лимит `8 MiB`;
+- bounded очередь `64 KiB` на logical flow и общий staging-лимит `512 KiB`;
 - Deficit Round Robin, чтобы bulk download не занимал отправку навсегда;
 - отдельные метрики KCP, DNS, fairness, queue, drops и backpressure;
 - peer watchdog: зависший PeerConnection приводит к реальному restart Creator;
 - полное закрытие старых RelayBridge, data/control KCP и flow state при reset.
+- отмена неотправленного хвоста закрытого flow и единичный NACK для stale data;
 
 ### Клиенты
 

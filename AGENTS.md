@@ -14,6 +14,32 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
+## Active handoff (2026-07-23, alpha.12 candidate)
+
+- New matching alpha.11 field data is in user-supplied logs only; never commit
+  those logs or screenshots. Android reported `caps=0x1b`, balanced KCP, zero
+  KCP drops/stalls and live ACK progress. Actual relay peak was about 1.1Mbps,
+  while Speedtest loaded ping reached 7064ms. A transient UI estimate near
+  270Mbps was not supported by relay byte counters.
+- Root cause is bufferbloat, not a silent carrier failure: Joiner reached
+  `fair_queue_max≈1.05MiB`, `fair_max_wait_ms≈15.9s` and `WaitSnd=1024` for
+  more than a minute. Creator history reached `fair_queue_max≈4.19MiB`,
+  `fair_max_wait_ms≈38.6s` and about 52.8s cumulative KCP backpressure.
+- Alpha.12 candidate reduces balanced KCP from 1024 to 512 segments, DRR
+  staging from 256KiB/flow + 8MiB total to 64KiB/flow + 512KiB total, exposes
+  both limits in METRICS, cancels unsent flow backlog after remote CLOSE, and
+  sends/logs only one NACK for repeated DATA on an unknown Creator flow.
+- The Android VPN/Proxy selector did exist in alpha.11, but both option rows
+  used `match_parent` inside a `wrap_content` parent. Huawei rendered them as
+  clipped dashes. Both rows now use `wrap_content`, and Android CI parses the
+  XML to prevent regression.
+- Portable Go 1.26.1 in the local temp directory ran `go test ./...`, `go vet
+  ./...` and repeated tunnel tests successfully. Android still requires CI
+  because the workstation has no Java/Android SDK or Gradle wrapper.
+- Next gate: push the alpha.12 candidate, require green branch Android,
+  Windows and Docker workflows, then tag `v0.5.0-alpha.12` and verify signed
+  APK/EXE plus multi-arch GHCR before calling the release complete.
+
 ## Active handoff (2026-07-22, alpha.11 completion)
 
 - `v0.5.0-alpha.11` is published at commit `04d278a`. Branch and tagged

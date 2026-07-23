@@ -168,7 +168,7 @@ VLESS не исправляет loss, pacing или head-of-line blocking на V
 - переполнение output queue учитывается как loss вместо удержания KCP mutex;
 - `WaitSnd` ограничивает producer и создаёт измеримый backpressure;
 - balanced/stable включают congestion control;
-- окна отправки/приёма увеличены до 256/1024/2048 для
+- окна отправки/приёма настроены как 256/512/2048 для
   stable/balanced/fast после измеренного заполнения `WaitSnd=256`;
 - bounded output queue увеличена до 1024 segments;
 - 12-секундный silent-stall detector срабатывает только при полном `WaitSnd`
@@ -210,6 +210,29 @@ KCP. Во время Speedtest входящий поток продолжал п
 Следующий P2 — DNS control message, per-flow queues, DRR, лимит UDP fan-out и
 приоритет коротких интерактивных потоков. `CLOSE` нельзя просто переносить в
 priority lane: сначала нужны sequence/drain semantics, иначе он обгонит DATA.
+
+## Полевой результат alpha.11: bufferbloat без потери carrier
+
+Тест от 2026-07-23 подтвердил matching `alpha.11`, `caps=0x1b`, balanced KCP,
+нулевые `kcp_dropped`, `kcp_stalls` и `kcp_ack_stalls`. При этом четыре bulk
+потока заполнили Joiner KCP до `1024/1024`, а DRR staging queue выросла примерно
+до 1 MiB. На Creator исторический максимум staging queue достиг 4.19 MiB,
+максимальное ожидание — 38.6s. Loaded ping Speedtest составил 7064ms при
+фактическом relay throughput около 1.1Mbps.
+
+Для alpha.12 реализован bounded-latency pass:
+
+1. balanced KCP send/receive window уменьшено с 1024 до 512 segments;
+2. per-flow staging limit уменьшен с 256KiB до 64KiB;
+3. общий staging limit уменьшен с 8MiB до 512KiB;
+4. удалённый CLOSE отменяет ещё не переданные в KCP frames этого flow;
+5. Creator отправляет NACK неизвестному flow один раз и подавляет повторный
+   stale-data log storm;
+6. METRICS теперь явно показывает `fair_queue_limit` и `fair_flow_limit`.
+
+Цель изменения — снизить loaded latency и быстрее восстановить интерактивный
+трафик после bulk нагрузки. Оно не обещает увеличить физическую полосу SFU;
+это проверяется matching alpha.12 тестом VPN и SOCKS-only отдельно.
 
 ## Windows alpha.3: Fast и stale routes
 

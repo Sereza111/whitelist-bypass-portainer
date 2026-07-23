@@ -7,8 +7,13 @@ import (
 )
 
 const (
-	fairFlowQueueBytes   = 256 * 1024
-	fairTotalQueueBytes  = 8 * 1024 * 1024
+	// Keep only a short staging queue above KCP. Field alpha.11 traces at a
+	// 1 Mbps carrier accumulated 4.2 MiB here and made frames wait up to 38s,
+	// even though the carrier and ACK stream were still healthy. TCP already
+	// provides producer backpressure; buffering seconds of encrypted payload
+	// here only turns congestion into unusable loaded latency.
+	fairFlowQueueBytes   = 64 * 1024
+	fairTotalQueueBytes  = 512 * 1024
 	fairSchedulerQuantum = 4 * AdaptiveKCPRelayReadBuf
 )
 
@@ -44,6 +49,7 @@ type fairSender struct {
 	bytes      int
 	frames     int
 	stopped    bool
+	canceled   map[uint32]struct{}
 	send       func([]byte)
 	generation atomic.Uint64
 
@@ -54,7 +60,11 @@ type fairSender struct {
 }
 
 func newFairSender(send func([]byte)) *fairSender {
-	s := &fairSender{flows: make(map[uint32]*fairFlow), send: send}
+	s := &fairSender{
+		flows:    make(map[uint32]*fairFlow),
+		canceled: make(map[uint32]struct{}),
+		send:     send,
+	}
 	s.cond = sync.NewCond(&s.mu)
 	go s.run()
 	return s
@@ -66,30 +76,51 @@ func (s *fairSender) Enqueue(connID uint32, frame []byte) bool {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	flow := s.flows[connID]
-	if flow == nil {
-		flow = &fairFlow{}
-		s.flows[connID] = flow
-	}
-	for !s.stopped && (flow.bytes+len(frame) > fairFlowQueueBytes || s.bytes+len(frame) > fairTotalQueueBytes) {
+	for {
+		if s.stopped {
+			return false
+		}
+		if _, canceled := s.canceled[connID]; canceled {
+			return false
+		}
+		flow := s.flows[connID]
+		if flow == nil {
+			flow = &fairFlow{}
+			s.flows[connID] = flow
+		}
+		if flow.bytes+len(frame) <= fairFlowQueueBytes && s.bytes+len(frame) <= fairTotalQueueBytes {
+			if len(flow.frames) == 0 {
+				flow.deficit = fairSchedulerQuantum
+				s.active = append(s.active, connID)
+			}
+			flow.frames = append(flow.frames, queuedRelayFrame{data: frame, queuedAt: time.Now(), generation: s.generation.Load()})
+			flow.bytes += len(frame)
+			s.bytes += len(frame)
+			s.frames++
+			if uint64(s.bytes) > s.maxQueuedBytes {
+				s.maxQueuedBytes = uint64(s.bytes)
+			}
+			s.cond.Signal()
+			return true
+		}
 		s.cond.Wait()
 	}
-	if s.stopped {
-		return false
+}
+
+// CancelFlow drops frames which have not entered KCP after the peer has
+// explicitly closed the logical connection. Connection IDs are monotonic for
+// a RelayBridge lifetime, so rejecting later enqueues for the same ID is safe
+// and prevents a racing socket reader from rebuilding a stale backlog.
+func (s *fairSender) CancelFlow(connID uint32) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.canceled[connID] = struct{}{}
+	if flow := s.flows[connID]; flow != nil {
+		s.bytes -= flow.bytes
+		s.frames -= len(flow.frames)
+		s.removeActiveLocked(connID)
 	}
-	if len(flow.frames) == 0 {
-		flow.deficit = fairSchedulerQuantum
-		s.active = append(s.active, connID)
-	}
-	flow.frames = append(flow.frames, queuedRelayFrame{data: frame, queuedAt: time.Now(), generation: s.generation.Load()})
-	flow.bytes += len(frame)
-	s.bytes += len(frame)
-	s.frames++
-	if uint64(s.bytes) > s.maxQueuedBytes {
-		s.maxQueuedBytes = uint64(s.bytes)
-	}
-	s.cond.Signal()
-	return true
+	s.cond.Broadcast()
 }
 
 func (s *fairSender) Reset() {
@@ -98,6 +129,7 @@ func (s *fairSender) Reset() {
 	s.mu.Lock()
 	s.generation.Add(1)
 	s.flows = make(map[uint32]*fairFlow)
+	s.canceled = make(map[uint32]struct{})
 	s.active = nil
 	s.cursor = 0
 	s.bytes = 0
@@ -113,6 +145,7 @@ func (s *fairSender) Stop() {
 	s.generation.Add(1)
 	s.stopped = true
 	s.flows = make(map[uint32]*fairFlow)
+	s.canceled = make(map[uint32]struct{})
 	s.active = nil
 	s.bytes = 0
 	s.frames = 0

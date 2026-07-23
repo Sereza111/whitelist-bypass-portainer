@@ -50,6 +50,27 @@ jobs:
         with:
           gradle-version: '8.13'
 
+      - name: Validate main routing selector layout
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+
+          path = "android-app/app/src/main/res/layout/fragment_main_screen.xml"
+          root = ET.parse(path).getroot()
+          android = "{http://schemas.android.com/apk/res/android}"
+          expected = {"@+id/routeTunOption", "@+id/routeProxyOption"}
+          found = {
+              node.attrib.get(android + "id")
+              for node in root.iter()
+              if node.attrib.get(android + "id") in expected
+              and node.attrib.get(android + "layout_height") == "wrap_content"
+          }
+          missing = expected - found
+          if missing:
+              raise SystemExit(f"routing selector options must be visible wrap_content rows: {sorted(missing)}")
+          PY
+
       - name: Set build metadata
         shell: bash
         run: |
@@ -57,7 +78,7 @@ jobs:
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
             version="${GITHUB_REF_NAME#v}"
           else
-            version="0.5.0-alpha.11+${short_sha}"
+            version="0.5.0-alpha.12+${short_sha}"
           fi
           echo "BUILD_VERSION=${version}" >> "${GITHUB_ENV}"
           echo "BUILD_COMMIT=${GITHUB_SHA}" >> "${GITHUB_ENV}"

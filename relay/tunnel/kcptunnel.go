@@ -18,7 +18,11 @@ const (
 	// roughly window/RTT (the 256 profile measured 0.5-0.7 Mbps at 3-4s RTT).
 	// Keep the conservative profile available, but give normal profiles enough
 	// bandwidth-delay product for a transcontinental call.
-	kcpBalancedWindow   = 1024
+	// Balanced used to allow 1024 unacknowledged ~1 KiB segments. At the
+	// measured 1 Mbps carrier that alone represented roughly eight seconds of
+	// hidden queue and produced 7s loaded ping without packet loss or an ACK
+	// stall. Keep enough BDP for a lossy SFU, but bound normal queue growth.
+	kcpBalancedWindow   = 512
 	kcpFastWindow       = 2048
 	kcpStableWindow     = 256
 	kcpSegmentMTU       = 1000

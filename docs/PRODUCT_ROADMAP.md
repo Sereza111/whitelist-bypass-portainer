@@ -81,6 +81,11 @@ API responses, security checklist пройден.
 - dual-track benchmark;
 - QUIC carrier prototype.
 
+**Статус:** per-flow queues, DRR, negotiated priority control/reliable DNS,
+ACK-stall recovery и alpha.12 bounded-latency pass реализованы. Credit-based
+flow control, adaptive pacing, UDP/443 policy, IPv6 и QUIC prototype остаются
+открытыми.
+
 **Gate:** большой download не блокирует DNS и открытие новой страницы; p95
 CONNECT latency остаётся в заданном бюджете.
 

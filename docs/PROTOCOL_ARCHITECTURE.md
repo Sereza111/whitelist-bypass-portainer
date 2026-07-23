@@ -14,8 +14,8 @@ flowchart LR
     MUX --> MODE{"Транспорт"}
     MODE -->|DC| SCTP["WebRTC SCTP DataChannel\nreliable + ordered"]
     MODE -->|Video| OBF["XChaCha20-Poly1305\n+ псевдо-VP8 framing"]
-    OBF --> KCP["KCP reliability\nтолько WB Stream Video"]
-    OBF --> RAW["Raw VP8\nVK / Telemost / Dion"]
+    OBF --> KCP["Negotiated KCP reliability\nmatching VK / WB"]
+    OBF --> RAW["Raw VP8\nlegacy fallback / другие providers"]
     KCP --> RTP["WebRTC RTP video"]
     RAW --> RTP
     SCTP --> SFU["VK / Telemost / WB / Dion SFU"]
@@ -99,7 +99,8 @@ CONNECT и интерактивный трафик.
 | Платформа/режим | Нижний транспорт | Надёжность в baseline |
 |---|---|---|
 | VK DC | SCTP DataChannel | reliable/ordered |
-| VK Video | VP8/RTP | нет дополнительной ARQ |
+| VK Video, matching peers | VP8/RTP + negotiated KCP | KCP |
+| VK Video, legacy peer | VP8/RTP | raw fallback без дополнительной ARQ |
 | Telemost Video | VP8/RTP | нет дополнительной ARQ |
 | WB Stream DC | SCTP DataChannel | reliable/ordered |
 | WB Stream Video | VP8/RTP + KCP | KCP |
@@ -111,10 +112,15 @@ CONNECT и интерактивный трафик.
 причину частично загружающихся сайтов в VK Video.
 
 Legacy WB KCP сохраняет быстрый профиль. Negotiated VK KCP по умолчанию
-использует balanced profile: `NoDelay(1,20,2,0)`, окна `256/256`, bounded
-output queue и WaitSnd backpressure. MTU adaptive-сегмента выровнен так, чтобы
-обычный relay frame помещался в один carrier frame. Для сильной потери доступен
-stable profile, а fast оставлен только для A/B на чистом carrier.
+использует balanced profile: `NoDelay(1,20,2,0)`, окна `512/512`, bounded
+output queue и WaitSnd backpressure. Stable использует `256/256`, fast —
+`2048/2048`. MTU adaptive-сегмента выровнен так, чтобы обычный relay frame
+помещался в один carrier frame.
+
+Над KCP работает DRR scheduler. После полевого alpha.11 теста его буферы
+ограничены `64 KiB` на logical flow и `512 KiB` суммарно. При удалённом CLOSE
+ещё не отправленный хвост flow отменяется; повторные DATA для уже закрытого ID
+получают один NACK вместо бесконечного шторма CLOSE/log.
 
 ### 6. Server egress
 
@@ -210,3 +216,22 @@ KCP segment MTU равен 1122 байтам: вместе с 4-byte marker он
 RelayBridge каждые 10 секунд пишет строку `METRICS` с relay bytes/frames,
 control frames, временем блокировки `SendData`, активными TCP/UDP flows,
 результатом handshake и transport-specific queue/KCP counters.
+
+## Полевой результат alpha.11: живой carrier с чрезмерной очередью
+
+Matching Android и Creator согласовали `caps=0x1b`, `legacy=false` и
+`adaptive-kcp-active-balanced`. Потерь KCP и ACK-stall не было, но Speedtest
+открыл несколько bulk flows и обнаружил bufferbloat:
+
+- Joiner: `fair_queue_max≈1.05 MiB`, `fair_max_wait_ms≈15908`,
+  `kcp_wait_snd=1024` более минуты;
+- Creator: `fair_queue_max≈4.19 MiB`, `fair_max_wait_ms≈38641`,
+  `kcp_backpressure_ms≈52780`;
+- фактический relay throughput был около `1.1 Mbps`, loaded ping достигал
+  `7064 ms`;
+- краткий индикатор Speedtest около `270 Mbps` не подтверждается byte counters
+  и является стартовой оценкой на маленьком burst.
+
+Это не silent carrier failure: входящие segments и ACK продолжали двигаться,
+поэтому reconnect watchdog закономерно не сработал. Alpha.12 уменьшает буферы
+и отменяет stale flow backlog, сохраняя backpressure вместо byte drop.
