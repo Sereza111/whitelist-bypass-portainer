@@ -14,7 +14,7 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
-## Active handoff (2026-07-25, alpha.15 candidate)
+## Active handoff (2026-07-25, alpha.15 completion)
 
 - Matching Android alpha.14 field log `relay (15).log` is external-only and
   must never be committed. It reaches `Captcha page ready`, but never logs
@@ -30,8 +30,15 @@ Portainer and a headless Joiner in Video mode.
   generic proxy. Never log the rewritten URL, query, token, link or cookies.
 - Integration coverage reproduces a 301 between two upstream servers and
   asserts the final client host remains `127.0.0.1` and the secondary HTML has
-  the completion hook. Relay tests and vet pass locally. Android still requires
-  CI before publishing the immutable alpha.15 tag.
+  the completion hook. Relay tests/vet, manager tests/vet/JS syntax, desktop
+  Joiner tests/vet and TypeScript build passed locally.
+- `v0.5.0-alpha.15` is published at immutable commit `490d8d0`. Branch and tag
+  Android, Windows and Docker workflows passed. The APK checksum is
+  `04056e97bf2e14e32529e67f1212d7b3f643f73649527de73dca117abc305bf3`;
+  the EXE checksum is
+  `c43c3f9bb2f1a5348f2564de422051f31ae5917ac49ec42cc7d5ab215fc4ff9d`.
+  Both checksum-file values match GitHub asset digests. GHCR contains
+  `linux/amd64`, `linux/arm64` and `linux/386`. Do not move or replace the tag.
 
 ## Active handoff (2026-07-25, alpha.14 completion)
 
