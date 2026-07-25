@@ -14,7 +14,7 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
-## Active handoff (2026-07-25, alpha.14 candidate)
+## Active handoff (2026-07-25, alpha.14 completion)
 
 - Matching Android alpha.13 field log `relay (14).log` is external-only and
   must never be committed. It proves build `d58a01a` ran, then stopped at
@@ -35,8 +35,11 @@ Portainer and a headless Joiner in Video mode.
   server VK creates isolated panel sessions, then admin uses New client ->
   Start -> Copy to phone. Panel text now explains this. A future multi-identity
   provider pool must use isolated server-side QR slots.
-- Candidate metadata is `0.5.0-alpha.14`. Run relay/manager/desktop tests and
-  branch Android/Windows/Docker CI before creating the immutable tag.
+- `v0.5.0-alpha.14` is published at immutable commit `6b6fd7c`. Local Go
+  tests/vet, manager checks and TypeScript passed; branch and tag Android,
+  Windows and Docker workflows passed. Release APK/EXE checksum values match
+  GitHub asset digests. GHCR has `linux/amd64`, `linux/arm64` and `linux/386`.
+  Do not move or replace the tag.
 
 ## Active handoff (2026-07-25, alpha.13 completion)
 
