@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"net"
 	"net/http"
@@ -79,7 +80,7 @@ func StartCaptchaProxy(redirectURI string, resolveFn ResolveFunc, logFn func(str
 		}
 	}
 
-	inspectResponse := func(res *http.Response, responseUpstreamOrigin string, rewriteHTML bool) error {
+	inspectResponse := func(res *http.Response, source string) error {
 		rewriteProxyCookies(res)
 		for _, headerName := range []string{"X-Success-Token", "X-Captcha-Token", "X-Captcha-Success-Token"} {
 			deliverToken(res.Header.Get(headerName), "response header")
@@ -88,8 +89,8 @@ func StartCaptchaProxy(redirectURI string, resolveFn ResolveFunc, logFn func(str
 		if res.StatusCode >= 300 && res.StatusCode < 400 {
 			if location := res.Header.Get("Location"); location != "" {
 				deliverToken(extractSuccessTokenFromURL(location), "redirect")
-				if rewriteHTML {
-					res.Header.Set("Location", strings.ReplaceAll(location, responseUpstreamOrigin, localOrigin))
+				if rewritten, ok := rewriteCaptchaRedirect(location, res.Request.URL, localOrigin, upstreamOrigin); ok {
+					res.Header.Set("Location", rewritten)
 				}
 			}
 		}
@@ -97,10 +98,6 @@ func StartCaptchaProxy(redirectURI string, resolveFn ResolveFunc, logFn func(str
 		contentType := strings.ToLower(res.Header.Get("Content-Type"))
 		requestPath := strings.ToLower(res.Request.URL.Path)
 		if responseLogCount.Add(1) <= 16 {
-			source := "primary"
-			if !rewriteHTML {
-				source = "secondary"
-			}
 			captchaLog(logFn, "captcha proxy: %s response status=%d type=%s bytes=%d",
 				source, res.StatusCode, captchaContentClass(contentType), res.ContentLength)
 		}
@@ -134,7 +131,7 @@ func StartCaptchaProxy(redirectURI string, resolveFn ResolveFunc, logFn func(str
 		res.Body.Close()
 		deliverToken(extractSuccessToken(bodyBytes), "response")
 
-		if rewriteHTML && isHTMLLike(contentType) {
+		if isHTMLLike(contentType) {
 			for _, h := range []string{
 				"Content-Security-Policy", "Content-Security-Policy-Report-Only",
 				"X-Content-Security-Policy", "X-WebKit-CSP",
@@ -144,7 +141,7 @@ func StartCaptchaProxy(redirectURI string, resolveFn ResolveFunc, logFn func(str
 			} {
 				res.Header.Del(h)
 			}
-			bodyBytes = []byte(rewriteCaptchaHTML(string(bodyBytes), localOrigin, responseUpstreamOrigin))
+			bodyBytes = []byte(rewriteCaptchaHTML(string(bodyBytes), localOrigin, res.Request.URL.String()))
 		}
 
 		if decompressed {
@@ -175,7 +172,7 @@ func StartCaptchaProxy(redirectURI string, resolveFn ResolveFunc, logFn func(str
 			}
 		},
 		ModifyResponse: func(res *http.Response) error {
-			return inspectResponse(res, upstreamOrigin, true)
+			return inspectResponse(res, "primary")
 		},
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
 			captchaLog(logFn, "captcha proxy: upstream request failed: %s", safeCaptchaError(err))
@@ -193,7 +190,7 @@ func StartCaptchaProxy(redirectURI string, resolveFn ResolveFunc, logFn func(str
 	mux.HandleFunc("/generic_proxy", func(w http.ResponseWriter, r *http.Request) {
 		proxyURL := r.URL.Query().Get("proxy_url")
 		parsed, err := url.Parse(proxyURL)
-		if err != nil || parsed.Host == "" {
+		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 			http.Error(w, "Bad URL", http.StatusBadRequest)
 			return
 		}
@@ -214,7 +211,7 @@ func StartCaptchaProxy(redirectURI string, resolveFn ResolveFunc, logFn func(str
 				}
 			},
 			ModifyResponse: func(res *http.Response) error {
-				return inspectResponse(res, parsed.Scheme+"://"+parsed.Host, false)
+				return inspectResponse(res, "secondary")
 			},
 			ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
 				captchaLog(logFn, "captcha proxy: secondary upstream failed: %s", safeCaptchaError(err))
@@ -491,30 +488,54 @@ func parseURLFragment(fragment string) url.Values {
 	return values
 }
 
-func rewriteCaptchaHTML(html, localOrigin, upstreamOrigin string) string {
-	html = strings.ReplaceAll(html, upstreamOrigin, localOrigin)
+func rewriteCaptchaRedirect(location string, requestURL *url.URL, localOrigin, primaryUpstreamOrigin string) (string, bool) {
+	if requestURL == nil {
+		return "", false
+	}
+	redirectURL, err := url.Parse(location)
+	if err != nil {
+		return "", false
+	}
+	redirectURL = requestURL.ResolveReference(redirectURL)
+	if redirectURL.Scheme != "http" && redirectURL.Scheme != "https" {
+		return "", false
+	}
+
+	redirectOrigin := redirectURL.Scheme + "://" + redirectURL.Host
+	if strings.EqualFold(redirectOrigin, primaryUpstreamOrigin) {
+		return localOrigin + redirectURL.RequestURI(), true
+	}
+	return localOrigin + "/generic_proxy?proxy_url=" + url.QueryEscape(redirectURL.String()), true
+}
+
+func rewriteCaptchaHTML(documentHTML, localOrigin, upstreamPage string) string {
+	base := fmt.Sprintf(`<base href="%s">`, html.EscapeString(upstreamPage))
+	localOriginJSON, _ := json.Marshal(localOrigin)
+	upstreamPageJSON, _ := json.Marshal(upstreamPage)
 
 	script := fmt.Sprintf(`
 <script>
 (function() {
-    var localOrigin = %q;
-    var upstreamOrigin = %q;
+    var localOrigin = %s;
+    var upstreamPage = %s;
 
     function rewriteUrl(urlStr) {
         if (!urlStr || typeof urlStr !== 'string') return urlStr;
         if (urlStr.indexOf(localOrigin) === 0) return urlStr;
-        if (urlStr.indexOf(upstreamOrigin) === 0) return localOrigin + urlStr.slice(upstreamOrigin.length);
-        if (urlStr.indexOf('//') === 0) {
-            return '/generic_proxy?proxy_url=' + encodeURIComponent(window.location.protocol + urlStr);
+        if (urlStr.indexOf('/local-captcha-result') === 0 || urlStr.indexOf('/generic_proxy') === 0) return urlStr;
+        if (urlStr.charAt(0) === '#' || /^(data|blob|javascript|mailto|tel):/i.test(urlStr)) return urlStr;
+        try {
+            var absoluteUrl = new URL(urlStr, upstreamPage);
+            if (absoluteUrl.protocol !== 'http:' && absoluteUrl.protocol !== 'https:') return urlStr;
+            return localOrigin + '/generic_proxy?proxy_url=' + encodeURIComponent(absoluteUrl.href);
+        } catch (e) {
+            return urlStr;
         }
-        if (urlStr.indexOf('http://') === 0 || urlStr.indexOf('https://') === 0) {
-            return '/generic_proxy?proxy_url=' + encodeURIComponent(urlStr);
-        }
-        return urlStr;
     }
 
     function rewriteElementAttr(el, attr) {
         if (!el || !el.getAttribute) return;
+        if (el.tagName && el.tagName.toLowerCase() === 'base') return;
         var value = el.getAttribute(attr);
         if (!value) return;
         var rewritten = rewriteUrl(value);
@@ -711,13 +732,14 @@ func rewriteCaptchaHTML(html, localOrigin, upstreamOrigin string) string {
     }
 })();
 </script>
-`, localOrigin, upstreamOrigin)
+`, localOriginJSON, upstreamPageJSON)
 
-	if idx := strings.Index(html, "</head>"); idx >= 0 {
-		return html[:idx] + script + html[idx:]
+	headPattern := regexp.MustCompile(`(?i)<head\b[^>]*>`)
+	if head := headPattern.FindStringIndex(documentHTML); head != nil {
+		return documentHTML[:head[1]] + base + script + documentHTML[head[1]:]
 	}
-	if idx := strings.Index(html, "</body>"); idx >= 0 {
-		return html[:idx] + script + html[idx:]
+	if idx := strings.Index(strings.ToLower(documentHTML), "</body>"); idx >= 0 {
+		return documentHTML[:idx] + base + script + documentHTML[idx:]
 	}
-	return html + script
+	return base + script + documentHTML
 }

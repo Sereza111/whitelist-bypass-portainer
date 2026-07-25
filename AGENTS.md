@@ -14,6 +14,25 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
+## Active handoff (2026-07-25, alpha.15 candidate)
+
+- Matching Android alpha.14 field log `relay (15).log` is external-only and
+  must never be committed. It reaches `Captcha page ready`, but never logs
+  `captcha proxy: completion captured` or `vk-auth: captcha solved`.
+- The decisive evidence is one proxied HTTP 301 followed by no primary or
+  secondary responses. VK redirected the WebView to another origin; the old
+  proxy rewrote only redirects containing the original origin, so the visible
+  challenge escaped loopback and its successful result was invisible locally.
+- Alpha.15 resolves every redirect against the response request URL. Original-
+  origin redirects map to loopback paths; cross-origin redirects map to
+  `generic_proxy`. Secondary HTML now receives the same completion hook, an
+  upstream base URL, and relative Fetch/XHR/DOM URLs are routed through the
+  generic proxy. Never log the rewritten URL, query, token, link or cookies.
+- Integration coverage reproduces a 301 between two upstream servers and
+  asserts the final client host remains `127.0.0.1` and the secondary HTML has
+  the completion hook. Relay tests and vet pass locally. Android still requires
+  CI before publishing the immutable alpha.15 tag.
+
 ## Active handoff (2026-07-25, alpha.14 completion)
 
 - Matching Android alpha.13 field log `relay (14).log` is external-only and

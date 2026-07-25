@@ -2,9 +2,11 @@ package joiner
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 )
@@ -88,5 +90,45 @@ func TestCaptchaProxyCapturesJSONFromGenericProxy(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		StopCaptchaProxy()
 		t.Fatal("timed out waiting for captured token")
+	}
+}
+
+func TestCaptchaProxyKeepsCrossOriginRedirectInsideLoopback(t *testing.T) {
+	secondary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, `<html><head><title>VK ID</title></head><body>captcha</body></html>`)
+	}))
+	defer secondary.Close()
+
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, secondary.URL+"/challenge/start?opaque=secret", http.StatusMovedPermanently)
+	}))
+	defer primary.Close()
+
+	port := StartCaptchaProxy(primary.URL, nil, nil)
+	if port == 0 {
+		t.Fatal("captcha proxy did not start")
+	}
+	defer StopCaptchaProxy()
+
+	response, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/", port))
+	if err != nil {
+		t.Fatalf("captcha proxy request failed: %v", err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("read captcha response: %v", err)
+	}
+
+	if got := response.Request.URL.Hostname(); got != "127.0.0.1" {
+		t.Fatalf("redirect escaped loopback proxy to %q", got)
+	}
+	page := string(body)
+	if !strings.Contains(page, "/local-captcha-result") {
+		t.Fatal("redirected HTML does not contain the completion hook")
+	}
+	if !strings.Contains(page, `<base href="`+secondary.URL+`/challenge/start?opaque=secret">`) {
+		t.Fatal("redirected HTML does not preserve its upstream base URL")
 	}
 }
