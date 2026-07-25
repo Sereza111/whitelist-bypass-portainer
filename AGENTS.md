@@ -14,7 +14,7 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
-## Active handoff (2026-07-25, alpha.13 candidate)
+## Active handoff (2026-07-25, alpha.13 completion)
 
 - User field logs `relay (11).log`, `(12).log`, `(13).log` remain outside the
   repository. The successful control passed captcha and ran `7h10m50s` with
@@ -39,9 +39,11 @@ Portainer and a headless Joiner in Video mode.
 - Local `go test ./...` and `go vet ./...` pass for relay, VK Creator, manager
   and desktop Joiner. Windows TypeScript build passes. `go test -race` is not
   locally available because CGO/compiler is absent. Android requires CI.
-- Candidate version metadata is `0.5.0-alpha.13`; do not tag until branch
-  Android/Windows/Docker CI is green. Published `v0.5.0-alpha.12` at `680966f`
-  remains immutable.
+- `v0.5.0-alpha.13` is published at immutable commit `d58a01a`. Branch and tag
+  Android/Windows/Docker workflows passed. Release APK/EXE checksum-file values
+  match GitHub asset SHA-256 digests. GHCR contains `linux/amd64`,
+  `linux/arm64` and `linux/386`. Do not move or replace the tag. Published
+  `v0.5.0-alpha.12` at `680966f` also remains immutable.
 
 ## Active handoff (2026-07-23, alpha.12 completion)
 
