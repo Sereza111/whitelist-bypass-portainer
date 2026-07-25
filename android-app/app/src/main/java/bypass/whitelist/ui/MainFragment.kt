@@ -45,7 +45,7 @@ class MainFragment : Fragment(R.layout.fragment_main_screen) {
 
         container.bindCalls(Prefs.savedDestinations, Prefs.activeDestinationId)
         container.bindHero(connected = isHostConnected(), status = hostStatus())
-        container.bindRoutingMode(Prefs.routingMode, isHostConnected() || isHostConnecting())
+        container.bindRoutingMode(Prefs.proxyOnly, isHostConnected() || isHostConnecting())
         if (!isResumed) container.pauseAnimations()
 
         container.onAddCallClicked = {
@@ -67,21 +67,17 @@ class MainFragment : Fragment(R.layout.fragment_main_screen) {
                 container.showPingResult(success, rttMs)
             }
         }
-        container.onRoutingModeChanged = { mode ->
+        container.onRoutingModeChanged = { proxyOnly ->
             if (isHostConnected() || isHostConnecting()) {
                 Toast.makeText(requireContext(), R.string.routing_proxy_locked, Toast.LENGTH_SHORT).show()
             } else {
-                Prefs.routingMode = mode
-                container.bindRoutingMode(Prefs.routingMode, false)
-                if (mode == RoutingMode.APPS && Prefs.splitTunnelingPackages.isEmpty()) {
-                    openAppSelector()
-                }
+                Prefs.proxyOnly = proxyOnly
+                container.bindRoutingMode(Prefs.proxyOnly, false)
             }
         }
-        container.onAppsConfigurePressed = ::openAppSelector
         container.onProxyConfigurePressed = {
             ProxyActionSheet.show(parentFragmentManager) {
-                container.bindRoutingMode(Prefs.routingMode, isHostConnected() || isHostConnecting())
+                container.bindRoutingMode(Prefs.proxyOnly, isHostConnected() || isHostConnecting())
             }
         }
         container.onProxyCopyPressed = {
@@ -110,7 +106,7 @@ class MainFragment : Fragment(R.layout.fragment_main_screen) {
         super.onResume()
         content?.bindCalls(Prefs.savedDestinations, Prefs.activeDestinationId)
         content?.bindHero(connected = isHostConnected(), status = hostStatus())
-        content?.bindRoutingMode(Prefs.routingMode, isHostConnected() || isHostConnecting())
+        content?.bindRoutingMode(Prefs.proxyOnly, isHostConnected() || isHostConnecting())
         content?.resumeAnimations()
         if (isHostConnected()) {
             tickHandler.removeCallbacks(tickRunnable)
@@ -139,7 +135,7 @@ class MainFragment : Fragment(R.layout.fragment_main_screen) {
             pendingStatus = status
         }
         if (isHostConnected()) refreshStats()
-        container?.bindRoutingMode(Prefs.routingMode, isHostConnected() || isHostConnecting())
+        container?.bindRoutingMode(Prefs.proxyOnly, isHostConnected() || isHostConnecting())
     }
 
     fun onStatusTextChanged(text: String) {
@@ -154,7 +150,7 @@ class MainFragment : Fragment(R.layout.fragment_main_screen) {
         }
         if (!isResumed) return
         content?.bindHero(connected = connected, status = hostStatus())
-        content?.bindRoutingMode(Prefs.routingMode, connected || isHostConnecting())
+        content?.bindRoutingMode(Prefs.proxyOnly, connected || isHostConnecting())
         if (connected) {
             refreshStats()
             tickHandler.removeCallbacks(tickRunnable)
@@ -263,10 +259,6 @@ class MainFragment : Fragment(R.layout.fragment_main_screen) {
                 RoutingMode.SOCKS5 -> getString(R.string.routing_mode_proxy)
             },
         )
-    }
-
-    private fun openAppSelector() {
-        (activity as? MainActivityHost)?.pushSubPage(SplitTunnelingScreenFragment())
     }
 
     private fun formatUptime(ms: Long): String {

@@ -163,7 +163,7 @@ func RunVKAuth(joinLink string, displayName string, logFn func(string, ...any), 
 				logFn("vk-auth: captcha required")
 				statusFn("Solve the captcha:")
 
-				proxyPort := StartCaptchaProxy(captchaErr.redirectURI, resolveFn)
+				proxyPort := StartCaptchaProxy(captchaErr.redirectURI, resolveFn, logFn)
 				if proxyPort == 0 {
 					return "", fmt.Errorf("failed to start captcha proxy")
 				}

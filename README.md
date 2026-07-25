@@ -6,12 +6,12 @@ Dion. Это уже не минимальная Docker-обёртка upstream: 
 клиенты, SOCKS5/TUN, автоматическое восстановление звонков, диагностику и
 multi-arch релизный pipeline.
 
-Текущий релиз: **[v0.5.0-alpha.13](https://github.com/Sereza111/whitelist-bypass-portainer/releases/tag/v0.5.0-alpha.13)**.
+Текущий релиз: **[v0.5.0-alpha.14](https://github.com/Sereza111/whitelist-bypass-portainer/releases/tag/v0.5.0-alpha.14)**.
 
 Docker image:
 
 ```text
-ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.13
+ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.14
 ```
 
 Проект основан на
@@ -133,7 +133,7 @@ ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.13
 
 | Переменная | Рекомендуемое значение |
 |---|---|
-| `WLB_IMAGE` | `ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.13` |
+| `WLB_IMAGE` | `ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.14` |
 | `PANEL_USERNAME` | новый логин, по умолчанию `admin` |
 | `PANEL_PASSWORD` | уникальный пароль длиной от 12 символов |
 | `WLB_SECRETS_DIR` | `/opt/whitelist-bypass/secrets` |
@@ -195,7 +195,7 @@ Recovery key является секретом устройства. Не пуб
 В логах клиента и сервера должны совпадать:
 
 ```text
-[build] version=0.5.0-alpha.13 commit=... built=...
+[build] version=0.5.0-alpha.14 commit=... built=...
 ```
 
 Если на телефоне осталась старая debug-signed `alpha.8`, её нужно удалить один
@@ -371,11 +371,11 @@ docker compose --env-file .env.portainer -f portainer-stack-build.yml up -d --bu
 - reconnect race и directional ACK stall recovery;
 - bounded per-flow queues и DRR fairness;
 - полноценный panel control center;
-- Android Device / Apps / SOCKS5 routing и Windows TUN / SOCKS5 routing;
+- Android Tunnel / Proxy с прозрачной per-app областью в настройках и Windows TUN / SOCKS5 routing;
 - peer health watchdog, KCP lifecycle cleanup и carrier DNS fallback.
 
 Подробные изменения последнего релиза:
-[docs/ALPHA13_RELEASE_NOTES.md](docs/ALPHA13_RELEASE_NOTES.md).
+[docs/ALPHA14_RELEASE_NOTES.md](docs/ALPHA14_RELEASE_NOTES.md).
 
 ## Дополнительная документация
 

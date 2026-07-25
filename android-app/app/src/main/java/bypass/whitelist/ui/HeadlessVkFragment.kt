@@ -6,6 +6,11 @@ import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.webkit.CookieManager
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.ImageButton
@@ -49,10 +54,38 @@ class HeadlessVkFragment : Fragment(), JoinSessionShutdown {
 
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true
+        webView.settings.cacheMode = WebSettings.LOAD_NO_CACHE
+        webView.settings.javaScriptCanOpenWindowsAutomatically = false
+        webView.settings.setSupportMultipleWindows(false)
+        CookieManager.getInstance().setAcceptCookie(true)
+        CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
         webView.webViewClient = object : WebViewClient() {
+            override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
+                if (!isSessionAlive() || url == BLANK_URL) return
+                host?.appendLog("Captcha page loading")
+            }
+
             override fun onPageFinished(view: WebView, url: String) {
                 if (!isSessionAlive() || url == BLANK_URL) return
+                host?.appendLog("Captcha page ready")
                 host?.onJoinStatusText("Confirm the VK captcha; connection will continue automatically")
+            }
+
+            override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+                if (!isSessionAlive() || !request.isForMainFrame) return
+                val message = "Captcha page load failed (WebView code ${error.errorCode})"
+                host?.appendLog(message)
+                host?.onJoinStatusText("Captcha could not load. Check the connection and tap Retry")
+            }
+
+            override fun onReceivedHttpError(
+                view: WebView,
+                request: WebResourceRequest,
+                errorResponse: WebResourceResponse,
+            ) {
+                if (!isSessionAlive() || !request.isForMainFrame) return
+                host?.appendLog("Captcha page HTTP ${errorResponse.statusCode}")
+                host?.onJoinStatusText("Captcha server returned an error. Tap Retry")
             }
         }
         webView.setBackgroundColor(Color.WHITE)

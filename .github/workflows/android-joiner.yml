@@ -59,7 +59,7 @@ jobs:
           path = "android-app/app/src/main/res/layout/fragment_main_screen.xml"
           root = ET.parse(path).getroot()
           android = "{http://schemas.android.com/apk/res/android}"
-          expected = {"@+id/routeTunOption", "@+id/routeAppsOption", "@+id/routeProxyOption"}
+          expected = {"@+id/routeTunOption", "@+id/routeProxyOption"}
           found = {
               node.attrib.get(android + "id")
               for node in root.iter()
@@ -79,7 +79,7 @@ jobs:
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
             version="${GITHUB_REF_NAME#v}"
           else
-            version="0.5.0-alpha.13+${short_sha}"
+            version="0.5.0-alpha.14+${short_sha}"
           fi
           echo "BUILD_VERSION=${version}" >> "${GITHUB_ENV}"
           echo "BUILD_COMMIT=${GITHUB_SHA}" >> "${GITHUB_ENV}"

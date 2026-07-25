@@ -17,6 +17,10 @@ func TestExtractSuccessTokenSupportsCurrentAndNestedPayloads(t *testing.T) {
 		{"legacy response", `{"response":{"success_token":"legacy-token"}}`},
 		{"nested result", `{"result":{"challenge":{"successToken":"nested-token"}}}`},
 		{"array response", `{"data":[{"payload":{"success-token":"array-token"}}]}`},
+		{"completion message", `{"type":"challenge_complete","token":"message-token"}`},
+		{"nested completion message", `{"event":"challenge_success","data":{"responseToken":"nested-message-token"}}`},
+		{"json envelope", `for (;;);{"response":{"success_token":"envelope-token"}}`},
+		{"form response", `status=success&success_token=form-token`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if got := extractSuccessToken([]byte(test.body)); got == "" {
@@ -26,6 +30,9 @@ func TestExtractSuccessTokenSupportsCurrentAndNestedPayloads(t *testing.T) {
 	}
 	if got := extractSuccessToken([]byte(`{"response":{"status":"ok"}}`)); got != "" {
 		t.Fatalf("response without a token produced %q", got)
+	}
+	if got := extractSuccessToken([]byte(`{"status":"pending","token":"wrong-token"}`)); got != "" {
+		t.Fatalf("pending response produced %q", got)
 	}
 }
 
@@ -54,7 +61,7 @@ func TestCaptchaProxyCapturesJSONFromGenericProxy(t *testing.T) {
 	}))
 	defer result.Close()
 
-	port := StartCaptchaProxy(landing.URL, nil)
+	port := StartCaptchaProxy(landing.URL, nil, nil)
 	if port == 0 {
 		t.Fatal("captcha proxy did not start")
 	}

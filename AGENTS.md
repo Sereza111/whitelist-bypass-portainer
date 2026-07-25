@@ -14,6 +14,30 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
+## Active handoff (2026-07-25, alpha.14 candidate)
+
+- Matching Android alpha.13 field log `relay (14).log` is external-only and
+  must never be committed. It proves build `d58a01a` ran, then stopped at
+  `vk-auth: captcha required`. The user pressed Retry repeatedly, but the log
+  contained neither `Captcha page ready` nor `captcha solved`.
+- Alpha.14 candidate broadens captcha completion beyond endpoint-specific JSON:
+  cross-origin `postMessage`, nested success events, JSONP, form/text bodies,
+  query/hash, XHR/Fetch and DOM are inspected. WebView enables third-party
+  cookies and no-cache loading. Safe logs expose page lifecycle and response
+  class/status/size only; never URLs, query, tokens, links or cookies.
+- Per user request Android main now shows only Tunnel and Proxy. Transparent
+  selected-app routing remains under Settings -> Split tunneling -> Only and
+  continues to use VpnService. Internal RoutingMode migration/safety checks are
+  preserved.
+- Do not implement client VK cookie extraction/upload. Android cannot read the
+  VK app's cookies under the normal sandbox, and uploading them would hand the
+  personal account to the server. Normal users already join anonymously: one
+  server VK creates isolated panel sessions, then admin uses New client ->
+  Start -> Copy to phone. Panel text now explains this. A future multi-identity
+  provider pool must use isolated server-side QR slots.
+- Candidate metadata is `0.5.0-alpha.14`. Run relay/manager/desktop tests and
+  branch Android/Windows/Docker CI before creating the immutable tag.
+
 ## Active handoff (2026-07-25, alpha.13 completion)
 
 - User field logs `relay (11).log`, `(12).log`, `(13).log` remain outside the

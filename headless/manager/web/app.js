@@ -286,7 +286,11 @@ function renderProfiles() {
   const root = byId('profiles');
   const query = (byId('profileSearch')?.value || '').trim().toLowerCase();
   const visible = app.profiles.filter((profile) => `${profile.name} ${profile.config.mode}`.toLowerCase().includes(query));
-  const signature = JSON.stringify([visible, query]);
+  const mobileReadyProfiles = app.sessions
+    .filter((session) => session.status?.sessionLink)
+    .map((session) => session.clientId)
+    .sort();
+  const signature = JSON.stringify([visible, query, mobileReadyProfiles]);
   if (signature === app.profileSignature) return;
   app.profileSignature = signature;
   byId('profileResultCount').textContent = visible.length;
@@ -296,13 +300,16 @@ function renderProfiles() {
   }
   root.innerHTML = visible.map((profile) => {
     const state = profile.enabled ? 'enabled' : 'disabled';
+    const mobileReady = app.sessions.some((session) => session.clientId === profile.id && session.status?.sessionLink);
     return `<article class="profile-card ${state}" data-menu-kind="profile" data-menu-id="${profile.id}">
       <div class="profile-identity"><div class="profile-glyph">${escapeHTML(profile.name.slice(0, 1).toUpperCase())}</div><span><strong>${escapeHTML(profile.name)}</strong><small>${escapeHTML(profile.id)}</small></span></div>
       <div class="profile-provider">${escapeHTML(profile.config.mode.toUpperCase())}<small>${escapeHTML(profile.config.kcpProfile || 'auto')}</small></div>
       <div class="profile-meta">${profile.autoRestart ? 'Автовосстановление' : 'Ручной запуск'}<small>лимит ${profile.maxSessions} · ${profile.recoveryRecipient ? 'свой VK' : 'общий VK'}</small></div>
       <span class="state-label">${profile.enabled ? 'Активен' : 'Отключён'}</span>
       <div class="profile-actions">
-        <button class="small start-client" data-id="${profile.id}" ${profile.enabled ? '' : 'disabled'}>Запустить</button>
+        ${mobileReady
+          ? `<button class="small mobile-client" data-id="${profile.id}">В телефон</button>`
+          : `<button class="small start-client" data-id="${profile.id}" ${profile.enabled ? '' : 'disabled'}>Запустить</button>`}
         <button class="icon-button menu-trigger" type="button" data-kind="profile" data-id="${profile.id}" title="Все действия" aria-label="Действия профиля">⋮</button>
       </div>
     </article>`;

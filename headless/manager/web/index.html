@@ -83,6 +83,7 @@
           <div class="clients-layout">
             <aside id="clientEditor" class="panel editor-panel">
               <div class="panel-head"><div><span class="kicker">Профиль доступа</span><h2 id="editorTitle">Новый клиент</h2></div><button id="closeClientEditor" class="icon-button close-editor" type="button" aria-label="Закрыть">×</button></div>
+              <p class="field-help">Пользователь входит в звонок как гость: его VK, пароль и cookies не нужны. Один серверный VK создаёт отдельный звонок для каждого профиля.</p>
               <form id="profileForm">
                 <input id="editingId" type="hidden">
                 <label>Название клиента<input id="profileName" maxlength="80" placeholder="Телефон, ноутбук, друг…" required></label>
@@ -131,7 +132,7 @@
           <div class="provider-grid">
             <article class="panel provider-card">
               <div class="provider-brand"><span class="provider-logo">VK</span><div><span class="kicker">Источник звонков</span><h2>Серверный аккаунт</h2></div><span id="providerAccountBadge" class="status-badge">Проверка</span></div>
-              <p>Панель входит через QR и хранит cookies только в закрытом каталоге сервера. Пароль не вводится и не показывается.</p>
+              <p>Панель входит через QR и хранит cookies только в закрытом каталоге сервера. Этот технический аккаунт создаёт независимые звонки для всех клиентов; их личные cookies не передаются.</p>
               <div class="identity-row"><span>Аккаунт</span><strong id="providerAccountID">Не подключён</strong></div>
               <button id="vkLoginOpen" class="primary full" type="button">Подключить / сменить через QR</button>
             </article>
