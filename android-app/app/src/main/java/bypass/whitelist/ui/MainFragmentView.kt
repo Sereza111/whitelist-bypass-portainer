@@ -12,6 +12,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import bypass.whitelist.R
 import bypass.whitelist.tunnel.CallConfig
+import bypass.whitelist.tunnel.RoutingMode
 import bypass.whitelist.tunnel.SplitTunnelingMode
 import bypass.whitelist.tunnel.VpnStatus
 import bypass.whitelist.util.Callback
@@ -32,12 +33,18 @@ class MainFragmentView(private val root: View) {
     private val statusDot: View = root.findViewById(R.id.statusDot)
     private val statusDetail: TextView = root.findViewById(R.id.statusDetail)
     private val routeTunOption: View = root.findViewById(R.id.routeTunOption)
+    private val routeAppsOption: View = root.findViewById(R.id.routeAppsOption)
     private val routeProxyOption: View = root.findViewById(R.id.routeProxyOption)
     private val routeTunTitle: TextView = root.findViewById(R.id.routeTunTitle)
     private val routeTunSub: TextView = root.findViewById(R.id.routeTunSub)
+    private val routeAppsTitle: TextView = root.findViewById(R.id.routeAppsTitle)
     private val routeProxyTitle: TextView = root.findViewById(R.id.routeProxyTitle)
     private val routeTunCheck: View = root.findViewById(R.id.routeTunCheck)
+    private val routeAppsCheck: View = root.findViewById(R.id.routeAppsCheck)
     private val routeProxyCheck: View = root.findViewById(R.id.routeProxyCheck)
+    private val routeAppsDetails: View = root.findViewById(R.id.routeAppsDetails)
+    private val routeAppsCount: TextView = root.findViewById(R.id.routeAppsCount)
+    private val routeAppsConfigure: View = root.findViewById(R.id.routeAppsConfigure)
     private val routeProxyDetails: View = root.findViewById(R.id.routeProxyDetails)
     private val routeProxyEndpoint: TextView = root.findViewById(R.id.routeProxyEndpoint)
     private val routeProxyConfigure: View = root.findViewById(R.id.routeProxyConfigure)
@@ -57,7 +64,8 @@ class MainFragmentView(private val root: View) {
     var onAddCallClicked: Callback? = null
     var onHeroPressed: Callback? = null
     var onPingPressed: Callback? = null
-    var onRoutingModeChanged: ParamCallback<Boolean>? = null
+    var onRoutingModeChanged: ParamCallback<RoutingMode>? = null
+    var onAppsConfigurePressed: Callback? = null
     var onProxyConfigurePressed: Callback? = null
     var onProxyCopyPressed: Callback? = null
     var onCallSelected: ParamCallback<CallConfig>? = null
@@ -73,11 +81,14 @@ class MainFragmentView(private val root: View) {
         emptyCta.clipToOutline = true
         pingButton.clipToOutline = true
         routeTunOption.clipToOutline = true
+        routeAppsOption.clipToOutline = true
         routeProxyOption.clipToOutline = true
         addButton.setOnClickListener { onAddCallClicked?.invoke() }
         emptyCta.setOnClickListener { onAddCallClicked?.invoke() }
-        routeTunOption.setOnClickListener { onRoutingModeChanged?.invoke(false) }
-        routeProxyOption.setOnClickListener { onRoutingModeChanged?.invoke(true) }
+        routeTunOption.setOnClickListener { onRoutingModeChanged?.invoke(RoutingMode.DEVICE) }
+        routeAppsOption.setOnClickListener { onRoutingModeChanged?.invoke(RoutingMode.APPS) }
+        routeProxyOption.setOnClickListener { onRoutingModeChanged?.invoke(RoutingMode.SOCKS5) }
+        routeAppsConfigure.setOnClickListener { onAppsConfigurePressed?.invoke() }
         routeProxyConfigure.setOnClickListener { onProxyConfigurePressed?.invoke() }
         routeProxyCopy.setOnClickListener { onProxyCopyPressed?.invoke() }
         hero.setOnTouchListener { v, event ->
@@ -186,24 +197,41 @@ class MainFragmentView(private val root: View) {
         statusDetail.text = text
     }
 
-    fun bindRoutingMode(proxyOnly: Boolean, locked: Boolean) {
+    fun bindRoutingMode(mode: RoutingMode, locked: Boolean) {
         val context = root.context
-        routeTunOption.setBackgroundResource(if (proxyOnly) R.drawable.bg_destination_card else R.drawable.bg_destination_card_active)
-        routeProxyOption.setBackgroundResource(if (proxyOnly) R.drawable.bg_destination_card_active else R.drawable.bg_destination_card)
-        routeTunTitle.setTextColor(context.getColor(if (proxyOnly) R.color.ink else R.color.accent_emerald))
-        routeProxyTitle.setTextColor(context.getColor(if (proxyOnly) R.color.accent_emerald else R.color.ink))
-        routeTunCheck.visibility = if (proxyOnly) View.INVISIBLE else View.VISIBLE
-        routeProxyCheck.visibility = if (proxyOnly) View.VISIBLE else View.INVISIBLE
-        routeTunCheck.setBackgroundResource(if (proxyOnly) R.drawable.bg_action_check_idle else R.drawable.bg_action_check_active)
-        routeProxyCheck.setBackgroundResource(if (proxyOnly) R.drawable.bg_action_check_active else R.drawable.bg_action_check_idle)
-        routeProxyDetails.visibility = if (proxyOnly) View.VISIBLE else View.GONE
+        val device = mode == RoutingMode.DEVICE
+        val apps = mode == RoutingMode.APPS
+        val socks = mode == RoutingMode.SOCKS5
+        routeTunOption.setBackgroundResource(if (device) R.drawable.bg_destination_card_active else R.drawable.bg_destination_card)
+        routeAppsOption.setBackgroundResource(if (apps) R.drawable.bg_destination_card_active else R.drawable.bg_destination_card)
+        routeProxyOption.setBackgroundResource(if (socks) R.drawable.bg_destination_card_active else R.drawable.bg_destination_card)
+        routeTunTitle.setTextColor(context.getColor(if (device) R.color.accent_emerald else R.color.ink))
+        routeAppsTitle.setTextColor(context.getColor(if (apps) R.color.accent_emerald else R.color.ink))
+        routeProxyTitle.setTextColor(context.getColor(if (socks) R.color.accent_emerald else R.color.ink))
+        routeTunCheck.visibility = if (device) View.VISIBLE else View.INVISIBLE
+        routeAppsCheck.visibility = if (apps) View.VISIBLE else View.INVISIBLE
+        routeProxyCheck.visibility = if (socks) View.VISIBLE else View.INVISIBLE
+        routeTunCheck.setBackgroundResource(if (device) R.drawable.bg_action_check_active else R.drawable.bg_action_check_idle)
+        routeAppsCheck.setBackgroundResource(if (apps) R.drawable.bg_action_check_active else R.drawable.bg_action_check_idle)
+        routeProxyCheck.setBackgroundResource(if (socks) R.drawable.bg_action_check_active else R.drawable.bg_action_check_idle)
+        routeAppsDetails.visibility = if (apps) View.VISIBLE else View.GONE
+        routeProxyDetails.visibility = if (socks) View.VISIBLE else View.GONE
+        val selectedApps = Prefs.splitTunnelingPackages.size
+        routeAppsCount.text = if (selectedApps == 0) {
+            context.getString(R.string.routing_apps_empty)
+        } else {
+            context.resources.getQuantityString(R.plurals.routing_apps_selected_count, selectedApps, selectedApps)
+        }
         routeProxyEndpoint.text = context.getString(R.string.routing_proxy_endpoint, Prefs.socksPort)
-        routeTunSub.text = context.getString(when (Prefs.splitTunnelingMode) {
-            SplitTunnelingMode.NONE -> R.string.routing_mode_tun_sub
-            SplitTunnelingMode.BYPASS -> R.string.routing_mode_tun_bypass_sub
-            SplitTunnelingMode.ONLY -> R.string.routing_mode_tun_only_sub
-        })
+        routeTunSub.text = context.getString(
+            if (device && Prefs.splitTunnelingMode == SplitTunnelingMode.BYPASS) {
+                R.string.routing_mode_tun_bypass_sub
+            } else {
+                R.string.routing_mode_tun_sub
+            }
+        )
         routeTunOption.alpha = if (locked) 0.58f else 1f
+        routeAppsOption.alpha = if (locked) 0.58f else 1f
         routeProxyOption.alpha = if (locked) 0.58f else 1f
     }
 

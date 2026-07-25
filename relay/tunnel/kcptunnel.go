@@ -31,6 +31,12 @@ const (
 	kcpOutputQueueDepth = 1024
 	kcpBackpressurePoll = 5 * time.Millisecond
 	kcpHighWaterPercent = 75
+	kcpAutoMinWindow    = 256
+	kcpAutoMaxWindow    = 512
+	kcpAutoStepUp       = 32
+	kcpAutoStepDown     = 64
+	kcpAutoSampleEvery  = 2 * time.Second
+	kcpAutoQueueBudget  = time.Second
 )
 
 var (
@@ -42,6 +48,7 @@ const (
 	KCPProfileFast     = "fast"
 	KCPProfileBalanced = "balanced"
 	KCPProfileStable   = "stable"
+	KCPProfileAuto     = "auto"
 )
 
 type KCPTunnel struct {
@@ -77,6 +84,8 @@ type KCPTunnel struct {
 	stallRecoveries    atomic.Uint64
 	ackStallRecoveries atomic.Uint64
 	stallNotified      atomic.Bool
+	autoAckedSegments  atomic.Uint64
+	autoWindowChanges  atomic.Uint64
 }
 
 func NewKCPTunnel(inner DataTunnel, logFn func(string, ...any)) *KCPTunnel {
@@ -153,6 +162,10 @@ func (t *KCPTunnel) SetProfile(profile string) string {
 	profile = strings.ToLower(strings.TrimSpace(profile))
 	t.mu.Lock()
 	switch profile {
+	case KCPProfileAuto:
+		t.kcp.NoDelay(1, 20, 2, 0)
+		t.kcp.WndSize(kcpAutoMinWindow, kcpBalancedWindow)
+		t.maxWaitSnd = kcpAutoMinWindow
 	case KCPProfileFast:
 		t.kcp.NoDelay(1, 10, 2, 1)
 		t.kcp.WndSize(kcpFastWindow, kcpFastWindow)
@@ -243,10 +256,16 @@ func (t *KCPTunnel) handleInnerData(segment []byte) {
 		}
 	}
 	t.mu.Unlock()
-	sequenceAdvanced := hasAckProgress && advanceAtomicSequence(&t.lastAckSequence, ackSequence)
+	sequenceAdvanced, ackedSegments := false, uint32(0)
+	if hasAckProgress {
+		sequenceAdvanced, ackedSegments = advanceAtomicSequenceBy(&t.lastAckSequence, ackSequence)
+	}
 	if sequenceAdvanced || waitSndAfter < waitSndBefore {
 		t.lastAckUnixNano.Store(time.Now().UnixNano())
 		t.stallNotified.Store(false)
+	}
+	if ackedSegments > 0 {
+		t.autoAckedSegments.Add(uint64(ackedSegments))
 	}
 	if cb == nil {
 		return
@@ -298,18 +317,24 @@ func sequenceAfter(next, current uint32) bool {
 }
 
 func advanceAtomicSequence(target *atomic.Uint32, next uint32) bool {
+	advanced, _ := advanceAtomicSequenceBy(target, next)
+	return advanced
+}
+
+func advanceAtomicSequenceBy(target *atomic.Uint32, next uint32) (bool, uint32) {
 	for current := target.Load(); sequenceAfter(next, current); current = target.Load() {
 		if target.CompareAndSwap(current, next) {
-			return true
+			return true, next - current
 		}
 	}
-	return false
+	return false, 0
 }
 
 func (t *KCPTunnel) TunnelMetrics() TunnelMetrics {
 	t.mu.Lock()
 	waitSnd := t.kcp.WaitSnd()
 	profile := t.profile
+	window := t.maxWaitSnd
 	t.mu.Unlock()
 	return TunnelMetrics{
 		Kind:                  "kcp-vp8-" + profile,
@@ -321,11 +346,13 @@ func (t *KCPTunnel) TunnelMetrics() TunnelMetrics {
 		KCPOutputSegments:     t.outputSegments.Load(),
 		KCPDroppedSegments:    t.droppedSegments.Load(),
 		KCPWaitSnd:            waitSnd,
+		KCPWindow:             window,
 		KCPBackpressureNanos:  t.backpressureNanos.Load(),
 		KCPOutputQueueDepth:   len(t.outputCh),
 		KCPOutputQueueCap:     cap(t.outputCh),
 		KCPStallRecoveries:    t.stallRecoveries.Load(),
 		KCPAckStallRecoveries: t.ackStallRecoveries.Load(),
+		KCPAutoWindowChanges:  t.autoWindowChanges.Load(),
 		KCPLastInputAgeNanos:  uint64(time.Since(time.Unix(0, t.lastInputUnixNano.Load()))),
 		KCPLastAckAgeNanos:    uint64(time.Since(time.Unix(0, t.lastAckUnixNano.Load()))),
 		TrackCount:            1,
@@ -357,6 +384,9 @@ func (t *KCPTunnel) updateLoop() {
 	ticker := time.NewTicker(kcpUpdateInterval)
 	defer ticker.Stop()
 	ticks := 0
+	lastAutoSample := time.Now()
+	lastAutoAcked := uint64(0)
+	autoAckRate := float64(0)
 	for {
 		select {
 		case <-t.stopCh:
@@ -366,11 +396,40 @@ func (t *KCPTunnel) updateLoop() {
 			t.kcp.Update()
 			waitSnd := t.kcp.WaitSnd()
 			maxWaitSnd := t.maxWaitSnd
+			profile := t.profile
 			t.mu.Unlock()
 			lastInput := time.Unix(0, t.lastInputUnixNano.Load())
 			lastAck := time.Unix(0, t.lastAckUnixNano.Load())
-			highWater := maxWaitSnd * kcpHighWaterPercent / 100
 			now := time.Now()
+			if profile == KCPProfileAuto && now.Sub(lastAutoSample) >= kcpAutoSampleEvery {
+				acked := t.autoAckedSegments.Load()
+				elapsed := now.Sub(lastAutoSample).Seconds()
+				sampleRate := float64(acked-lastAutoAcked) / elapsed
+				if sampleRate == 0 && waitSnd == 0 {
+					autoAckRate = 0
+				} else if autoAckRate == 0 {
+					autoAckRate = sampleRate
+				} else {
+					autoAckRate = autoAckRate*0.7 + sampleRate*0.3
+				}
+				lastAutoAcked = acked
+				lastAutoSample = now
+				newWindow := nextAutoKCPWindow(maxWaitSnd, autoAckRate, waitSnd)
+				if newWindow != maxWaitSnd {
+					t.mu.Lock()
+					if t.profile == KCPProfileAuto {
+						t.kcp.WndSize(newWindow, kcpBalancedWindow)
+						t.maxWaitSnd = newWindow
+						maxWaitSnd = newWindow
+						t.autoWindowChanges.Add(1)
+					}
+					t.mu.Unlock()
+					if t.logFn != nil {
+						t.logFn("kcptunnel: auto window=%d ack_rate=%.1fseg/s wait_snd=%d", newWindow, autoAckRate, waitSnd)
+					}
+				}
+			}
+			highWater := maxWaitSnd * kcpHighWaterPercent / 100
 			if waitSnd < highWater {
 				t.highWaterUnixNano.Store(0)
 			} else if t.highWaterUnixNano.Load() == 0 {
@@ -408,4 +467,49 @@ func (t *KCPTunnel) updateLoop() {
 			}
 		}
 	}
+}
+
+func nextAutoKCPWindow(current int, ackRate float64, waitSnd int) int {
+	target := kcpAutoMinWindow
+	if ackRate > 0 {
+		target = int(ackRate * kcpAutoQueueBudget.Seconds())
+		if target < kcpAutoMinWindow {
+			target = kcpAutoMinWindow
+		}
+		if target > kcpAutoMaxWindow {
+			target = kcpAutoMaxWindow
+		}
+		target = (target + kcpAutoStepUp - 1) / kcpAutoStepUp * kcpAutoStepUp
+	}
+	if waitSnd == 0 && ackRate == 0 {
+		target = kcpAutoMinWindow
+	}
+	// ACK rate is itself capped by the current send window. When at least half
+	// the window is occupied and ACKs are still moving at a useful rate, one
+	// cautious probe step prevents Auto from getting permanently pinned at its
+	// initial 256-segment ceiling.
+	if waitSnd >= current/2 && ackRate >= float64(current)/2 && target <= current {
+		target = current + kcpAutoStepUp
+		if target > kcpAutoMaxWindow {
+			target = kcpAutoMaxWindow
+		}
+	}
+	if target > current && waitSnd >= current/2 {
+		current += kcpAutoStepUp
+		if current > target {
+			current = target
+		}
+	} else if target < current {
+		current -= kcpAutoStepDown
+		if current < target {
+			current = target
+		}
+	}
+	if current < kcpAutoMinWindow {
+		return kcpAutoMinWindow
+	}
+	if current > kcpAutoMaxWindow {
+		return kcpAutoMaxWindow
+	}
+	return current
 }

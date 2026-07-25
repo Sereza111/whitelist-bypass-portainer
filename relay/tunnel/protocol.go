@@ -31,6 +31,8 @@ type DataTunnel interface {
 func EncodeKCPProfile(profile string) []byte {
 	code := byte(2)
 	switch profile {
+	case KCPProfileAuto:
+		code = 4
 	case KCPProfileStable:
 		code = 1
 	case KCPProfileFast:
@@ -50,6 +52,8 @@ func DecodeKCPProfile(payload []byte) (string, bool) {
 		return KCPProfileBalanced, true
 	case 3:
 		return KCPProfileFast, true
+	case 4:
+		return KCPProfileAuto, true
 	default:
 		return "", false
 	}
@@ -60,16 +64,30 @@ func PreferSaferKCPProfile(local, peer string) string {
 		switch profile {
 		case KCPProfileStable:
 			return 1
-		case KCPProfileFast:
-			return 3
-		default:
+		case KCPProfileAuto:
 			return 2
+		case KCPProfileBalanced:
+			return 3
+		case KCPProfileFast:
+			return 4
+		default:
+			return 3
 		}
 	}
 	if rank(peer) < rank(local) {
 		return peer
 	}
 	return local
+}
+
+// KCPProfileForPeer keeps the new Auto wire value away from older peers that
+// negotiated profile exchange before Auto existed. Balanced is the compatible
+// bounded fallback used by alpha.12 and earlier clients.
+func KCPProfileForPeer(profile string, supportsAuto bool) string {
+	if profile == KCPProfileAuto && !supportsAuto {
+		return KCPProfileBalanced
+	}
+	return profile
 }
 
 func EncodeVP8Config(fps, batch, trackCount int) []byte {

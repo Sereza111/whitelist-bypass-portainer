@@ -25,7 +25,7 @@ import (
 )
 
 var (
-	Version     = "0.5.0-alpha.12"
+	Version     = "0.5.0-alpha.13"
 	BuildCommit = "unknown"
 	BuildTime   = "unknown"
 )
@@ -169,7 +169,7 @@ func (m *manager) normalizeRequest(req sessionRequest) (sessionRequest, error) {
 		req.VideoReliability = "auto"
 	}
 	if req.KCPProfile == "" {
-		req.KCPProfile = "balanced"
+		req.KCPProfile = "auto"
 	}
 	switch req.Mode {
 	case "vk", "telemost", "wbstream", "dion":
@@ -184,8 +184,8 @@ func (m *manager) normalizeRequest(req sessionRequest) (sessionRequest, error) {
 	if req.VideoReliability != "auto" && req.VideoReliability != "raw" {
 		return req, errors.New("videoReliability must be auto or raw")
 	}
-	if req.KCPProfile != "fast" && req.KCPProfile != "balanced" && req.KCPProfile != "stable" {
-		return req, errors.New("kcpProfile must be fast, balanced, or stable")
+	if req.KCPProfile != "auto" && req.KCPProfile != "fast" && req.KCPProfile != "balanced" && req.KCPProfile != "stable" {
+		return req, errors.New("kcpProfile must be auto, fast, balanced, or stable")
 	}
 	return req, nil
 }
@@ -503,7 +503,7 @@ func main() {
 				Config: sessionRequest{
 					Mode: envOr("CREATOR_MODE", "vk"), Resources: envOr("RESOURCES", "default"),
 					DisplayName:      envOr("DISPLAY_NAME", "Headless"),
-					VideoReliability: envOr("VIDEO_RELIABILITY", "auto"), KCPProfile: envOr("KCP_PROFILE", "balanced"),
+					VideoReliability: envOr("VIDEO_RELIABILITY", "auto"), KCPProfile: envOr("KCP_PROFILE", "auto"),
 				},
 			})
 		}

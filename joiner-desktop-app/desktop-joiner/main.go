@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -113,7 +114,7 @@ func main() {
 	noTun := flag.Bool("no-tun", false, "expose SOCKS5 only, do not bring up the wintun adapter")
 	dualTrack := flag.Bool("dual-track", false, "VK/WB Stream: dual-track tunnel (second screenshare channel) for higher throughput")
 	videoReliability := flag.String("video-reliability", "auto", "VK Video reliability: auto or raw")
-	kcpProfile := flag.String("kcp-profile", tunnel.KCPProfileBalanced, "KCP profile: fast, balanced, or stable")
+	kcpProfile := flag.String("kcp-profile", tunnel.KCPProfileAuto, "KCP profile: auto, stable, balanced, or fast")
 	cleanupRoutes := flag.Bool("cleanup-routes", false, "remove stale Windows split-default routes and exit")
 	remoteSocks := flag.String("remote-socks", "", "phone/LAN SOCKS5 endpoint as IPv4:port (starts system-wide TUN without joining a call)")
 	remoteSocksUser := flag.String("remote-socks-user", "", "username for phone/LAN SOCKS5")
@@ -295,6 +296,7 @@ func main() {
 		readBuf := common.VP8BufSize
 		trackCount := 1
 		var adaptive *tunnel.AdaptiveKCPTunnel
+		var peerSupportsAuto atomic.Bool
 		if _, ok := t.(*tunnel.DCTunnel); ok {
 			readBuf = common.DCBufSize
 		} else if strings.EqualFold(*platform, "vk") && *videoReliability == "auto" {
@@ -319,26 +321,29 @@ func main() {
 			}
 			bridge.SetOnHandshake(func(result tunnel.HandshakeResult) {
 				if result.Supports(tunnel.CapabilityVideoKCP1) {
+					peerSupportsAuto.Store(result.Supports(tunnel.CapabilityKCPAuto))
+					compatibleProfile := tunnel.KCPProfileForPeer(*kcpProfile, peerSupportsAuto.Load())
 					if result.Supports(tunnel.CapabilityPriorityControl) {
 						adaptive.EnablePriorityControl()
 					} else {
-						effective := adaptive.SetKCPProfile(tunnel.PreferSaferKCPProfile(*kcpProfile, tunnel.KCPProfileBalanced))
+						effective := adaptive.SetKCPProfile(tunnel.PreferSaferKCPProfile(compatibleProfile, tunnel.KCPProfileBalanced))
 						log.Printf("[transport] peer lacks profile/control capability; compatibility profile=%s", effective)
 					}
 					adaptive.EnableKCP()
 					if result.Supports(tunnel.CapabilityPriorityControl) {
-						bridge.SendKCPProfile(*kcpProfile)
+						bridge.SendKCPProfile(compatibleProfile)
 					}
 				} else {
 					adaptive.EnableRawCompatibility()
 				}
 			})
 			bridge.SetOnPeerKCPProfile(func(profile string) {
-				effective := adaptive.SetKCPProfile(tunnel.PreferSaferKCPProfile(*kcpProfile, profile))
+				localProfile := tunnel.KCPProfileForPeer(*kcpProfile, peerSupportsAuto.Load())
+				effective := adaptive.SetKCPProfile(tunnel.PreferSaferKCPProfile(localProfile, profile))
 				log.Printf("[transport] negotiated bidirectional KCP profile=%s", effective)
 			})
 			bridge.ConfigureHandshake(
-				tunnel.CapabilityMetricsV1|tunnel.CapabilityVideoKCP1|tunnel.CapabilityPriorityControl|tunnel.CapabilityReliableDNS,
+				tunnel.CapabilityMetricsV1|tunnel.CapabilityVideoKCP1|tunnel.CapabilityPriorityControl|tunnel.CapabilityReliableDNS|tunnel.CapabilityKCPAuto,
 				common.VP8BufSize,
 				tunnel.ReliabilityRawVP8,
 				trackCount,

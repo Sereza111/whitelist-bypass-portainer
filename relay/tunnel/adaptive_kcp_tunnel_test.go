@@ -62,6 +62,7 @@ func TestAdaptiveKCPProfiles(t *testing.T) {
 	defer adaptive.Stop()
 
 	for input, want := range map[string]string{
+		"auto":     KCPProfileAuto,
 		"fast":     KCPProfileFast,
 		"stable":   KCPProfileStable,
 		"BALANCED": KCPProfileBalanced,
@@ -77,6 +78,9 @@ func TestPreferSaferKCPProfile(t *testing.T) {
 	for _, test := range []struct{ local, peer, want string }{
 		{KCPProfileFast, KCPProfileBalanced, KCPProfileBalanced},
 		{KCPProfileBalanced, KCPProfileFast, KCPProfileBalanced},
+		{KCPProfileAuto, KCPProfileBalanced, KCPProfileAuto},
+		{KCPProfileBalanced, KCPProfileAuto, KCPProfileAuto},
+		{KCPProfileAuto, KCPProfileStable, KCPProfileStable},
 		{KCPProfileStable, KCPProfileFast, KCPProfileStable},
 		{KCPProfileFast, KCPProfileStable, KCPProfileStable},
 	} {
@@ -87,7 +91,7 @@ func TestPreferSaferKCPProfile(t *testing.T) {
 }
 
 func TestKCPProfileEncoding(t *testing.T) {
-	for _, want := range []string{KCPProfileStable, KCPProfileBalanced, KCPProfileFast} {
+	for _, want := range []string{KCPProfileAuto, KCPProfileStable, KCPProfileBalanced, KCPProfileFast} {
 		frame := EncodeKCPProfile(want)
 		decoded := false
 		DecodeFrames(frame, func(connID uint32, msgType byte, payload []byte) {
@@ -104,10 +108,37 @@ func TestKCPProfileEncoding(t *testing.T) {
 			t.Fatalf("profile %q frame was not decoded", want)
 		}
 	}
-	for _, payload := range [][]byte{nil, {}, {0}, {4}, {1, 2}} {
+	for _, payload := range [][]byte{nil, {}, {0}, {5}, {1, 2}} {
 		if got, ok := DecodeKCPProfile(payload); ok {
 			t.Fatalf("malformed profile %v decoded as %q", payload, got)
 		}
+	}
+}
+
+func TestKCPProfileForPeer(t *testing.T) {
+	if got := KCPProfileForPeer(KCPProfileAuto, false); got != KCPProfileBalanced {
+		t.Fatalf("legacy peer profile=%q, want balanced", got)
+	}
+	if got := KCPProfileForPeer(KCPProfileAuto, true); got != KCPProfileAuto {
+		t.Fatalf("auto-capable peer profile=%q, want auto", got)
+	}
+}
+
+func TestAutoKCPWindowController(t *testing.T) {
+	if got := nextAutoKCPWindow(256, 700, 256); got != 288 {
+		t.Fatalf("high-rate auto window=%d, want one cautious step to 288", got)
+	}
+	if got := nextAutoKCPWindow(512, 120, 512); got != 448 {
+		t.Fatalf("low-rate auto window=%d, want fast decrease to 448", got)
+	}
+	if got := nextAutoKCPWindow(320, 700, 10); got != 320 {
+		t.Fatalf("idle auto window grew without demand: %d", got)
+	}
+	if got := nextAutoKCPWindow(256, 250, 128); got != 288 {
+		t.Fatalf("saturated initial window=%d, want one probe step to 288", got)
+	}
+	if got := nextAutoKCPWindow(320, 0, 0); got != 256 {
+		t.Fatalf("idle auto window=%d, want minimum 256", got)
 	}
 }
 

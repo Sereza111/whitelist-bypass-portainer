@@ -21,6 +21,7 @@ const (
 	CapabilityMuxFlowControl  uint64 = 1 << 2
 	CapabilityPriorityControl uint64 = 1 << 3
 	CapabilityReliableDNS     uint64 = 1 << 4
+	CapabilityKCPAuto         uint64 = 1 << 5
 )
 
 type ReliabilityMode byte

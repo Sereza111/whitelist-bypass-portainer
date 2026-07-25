@@ -38,12 +38,23 @@ class HeadlessVkFragment : Fragment(), JoinSessionShutdown {
         view.findViewById<ImageButton>(R.id.captchaBackButton).setOnClickListener {
             host?.onJoinCancel()
         }
+        view.findViewById<View>(R.id.captchaRetryButton).setOnClickListener {
+            if (!isSessionAlive()) return@setOnClickListener
+            host?.appendLog("Captcha page reload requested")
+            host?.onJoinStatusText("Reloading captcha...")
+            webView.reload()
+        }
         val url = requireArguments().getString(ARG_URL, "")
         val displayName = Prefs.autofillName
 
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true
-        webView.webViewClient = WebViewClient()
+        webView.webViewClient = object : WebViewClient() {
+            override fun onPageFinished(view: WebView, url: String) {
+                if (!isSessionAlive() || url == BLANK_URL) return
+                host?.onJoinStatusText("Confirm the VK captcha; connection will continue automatically")
+            }
+        }
         webView.setBackgroundColor(Color.WHITE)
         webView.isVisible = false
 
@@ -127,4 +138,3 @@ class HeadlessVkFragment : Fragment(), JoinSessionShutdown {
         }
     }
 }
-

@@ -44,7 +44,7 @@
 		<div class="connection-rail" aria-label="Connection summary">
 		  <article><span>provider</span><strong id="summaryPlatform">-</strong></article>
 		  <article><span>route</span><strong id="summaryRoute">System TUN</strong></article>
-		  <article><span>reliability</span><strong id="summaryProfile">Balanced</strong></article>
+		  <article><span>reliability</span><strong id="summaryProfile">Auto</strong></article>
 		</div>
 		<section id="routingModePanel" class="routing-mode" aria-labelledby="routingModeTitle">
 		  <div class="routing-mode-heading">
@@ -151,8 +151,9 @@
         <label>
           KCP profile
           <select id="kcpProfile">
+            <option value="auto" selected>Auto — recommended</option>
             <option value="stable">Stable — high loss</option>
-            <option value="balanced" selected>Balanced — recommended</option>
+            <option value="balanced">Balanced — manual override</option>
             <option value="fast">Fast — experimental, SOCKS-only</option>
           </select>
         </label>

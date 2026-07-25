@@ -64,7 +64,7 @@ class HeadlessRelayController(
                     "--socks-user", SocksAuth.user,
                     "--socks-pass", SocksAuth.pass,
                     "--video-reliability", "auto",
-                    "--kcp-profile", "balanced"
+                    "--kcp-profile", "auto"
                 )
                 processBuilder.redirectErrorStream(true)
                 val proc = processBuilder.start()

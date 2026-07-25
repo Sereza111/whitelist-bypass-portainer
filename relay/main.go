@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"sync"
+	"sync/atomic"
 
 	"whitelist-bypass/relay/androidbind"
 	"whitelist-bypass/relay/common"
@@ -34,7 +35,7 @@ func main() {
 	upstreamUser := flag.String("upstream-user", "", "upstream SOCKS5 username")
 	upstreamPass := flag.String("upstream-pass", "", "upstream SOCKS5 password")
 	videoReliability := flag.String("video-reliability", "auto", "VK Video reliability: auto or raw")
-	kcpProfile := flag.String("kcp-profile", tunnel.KCPProfileBalanced, "KCP profile: fast, balanced, or stable")
+	kcpProfile := flag.String("kcp-profile", tunnel.KCPProfileAuto, "KCP profile: auto, stable, balanced, or fast")
 	flag.String("local-ip", "", "local IP address (unused, passed via hook)")
 	flag.Parse()
 
@@ -84,6 +85,7 @@ func main() {
 			readBuf := common.VP8BufSize
 			trackCount := 1
 			var adaptive *tunnel.AdaptiveKCPTunnel
+			var peerSupportsAuto atomic.Bool
 			if _, ok := tun.(*tunnel.DCTunnel); ok {
 				readBuf = common.DCBufSize
 			} else if negotiateVKVideoKCP && *videoReliability == "auto" {
@@ -103,26 +105,29 @@ func main() {
 				}
 				bridge.SetOnHandshake(func(result tunnel.HandshakeResult) {
 					if result.Supports(tunnel.CapabilityVideoKCP1) {
+						peerSupportsAuto.Store(result.Supports(tunnel.CapabilityKCPAuto))
+						compatibleProfile := tunnel.KCPProfileForPeer(*kcpProfile, peerSupportsAuto.Load())
 						if result.Supports(tunnel.CapabilityPriorityControl) {
 							adaptive.EnablePriorityControl()
 						} else {
-							effective := adaptive.SetKCPProfile(tunnel.PreferSaferKCPProfile(*kcpProfile, tunnel.KCPProfileBalanced))
+							effective := adaptive.SetKCPProfile(tunnel.PreferSaferKCPProfile(compatibleProfile, tunnel.KCPProfileBalanced))
 							log.Printf("relay: peer lacks profile/control capability; compatibility profile=%s", effective)
 						}
 						adaptive.EnableKCP()
 						if result.Supports(tunnel.CapabilityPriorityControl) {
-							bridge.SendKCPProfile(*kcpProfile)
+							bridge.SendKCPProfile(compatibleProfile)
 						}
 						return
 					}
 					adaptive.EnableRawCompatibility()
 				})
 				bridge.SetOnPeerKCPProfile(func(profile string) {
-					effective := adaptive.SetKCPProfile(tunnel.PreferSaferKCPProfile(*kcpProfile, profile))
+					localProfile := tunnel.KCPProfileForPeer(*kcpProfile, peerSupportsAuto.Load())
+					effective := adaptive.SetKCPProfile(tunnel.PreferSaferKCPProfile(localProfile, profile))
 					log.Printf("relay: negotiated bidirectional KCP profile=%s", effective)
 				})
 				bridge.ConfigureHandshake(
-					tunnel.CapabilityMetricsV1|tunnel.CapabilityVideoKCP1|tunnel.CapabilityPriorityControl|tunnel.CapabilityReliableDNS,
+					tunnel.CapabilityMetricsV1|tunnel.CapabilityVideoKCP1|tunnel.CapabilityPriorityControl|tunnel.CapabilityReliableDNS|tunnel.CapabilityKCPAuto,
 					common.VP8BufSize,
 					tunnel.ReliabilityRawVP8,
 					trackCount,

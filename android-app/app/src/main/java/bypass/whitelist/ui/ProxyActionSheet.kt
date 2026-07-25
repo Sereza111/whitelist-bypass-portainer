@@ -37,7 +37,6 @@ class ProxyActionSheet : BottomSheetDialogFragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
 		selectedAuth = Prefs.socksAuthMode
-		view.findViewById<View>(R.id.proxyPortCard).clipToOutline = true
 		view.findViewById<View>(R.id.proxyLanCard).clipToOutline = true
 		view.findViewById<View>(R.id.proxyLanDetails).clipToOutline = true
 		val portInput = view.findViewById<EditText>(R.id.proxyPortInput)
@@ -45,7 +44,6 @@ class ProxyActionSheet : BottomSheetDialogFragment() {
         val manualContainer = view.findViewById<LinearLayout>(R.id.proxyManualContainer)
         val userInput = view.findViewById<EditText>(R.id.proxyUserInput)
         val passInput = view.findViewById<EditText>(R.id.proxyPassInput)
-		val proxyOnly = view.findViewById<MaterialSwitch>(R.id.proxyOnlySwitch)
 		val lanSwitch = view.findViewById<MaterialSwitch>(R.id.proxyLanSwitch)
 		val lanDetails = view.findViewById<LinearLayout>(R.id.proxyLanDetails)
 		val lanEndpoint = view.findViewById<TextView>(R.id.proxyLanEndpoint)
@@ -54,7 +52,6 @@ class ProxyActionSheet : BottomSheetDialogFragment() {
 		portInput.setText(Prefs.socksPort.toString())
 		userInput.setText(Prefs.socksUser)
 		passInput.setText(Prefs.socksPass)
-		proxyOnly.isChecked = Prefs.proxyOnly
 		lanSwitch.isChecked = Prefs.allowLan
 		manualContainer.visibility = if (selectedAuth == SocksAuthMode.MANUAL) View.VISIBLE else View.GONE
 
@@ -154,7 +151,6 @@ class ProxyActionSheet : BottomSheetDialogFragment() {
                 Prefs.socksUser = userInput.text.toString().trim()
                 Prefs.socksPass = passInput.text.toString()
             }
-            Prefs.proxyOnly = proxyOnly.isChecked
             onSaved?.invoke()
             dismiss()
         }

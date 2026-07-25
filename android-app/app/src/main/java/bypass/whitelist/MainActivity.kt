@@ -38,6 +38,7 @@ import bypass.whitelist.tunnel.HeadlessJoinController
 import bypass.whitelist.tunnel.HeadlessSessionService
 import bypass.whitelist.tunnel.PortGuard
 import bypass.whitelist.tunnel.ProxyService
+import bypass.whitelist.tunnel.RoutingMode
 import bypass.whitelist.tunnel.TunnelMode
 import bypass.whitelist.tunnel.TunnelServiceState
 import bypass.whitelist.tunnel.TunnelVpnService
@@ -51,6 +52,7 @@ import bypass.whitelist.ui.LogsFragment
 import bypass.whitelist.ui.MainActivityHost
 import bypass.whitelist.ui.MainFragment
 import bypass.whitelist.ui.SettingsScreenFragment
+import bypass.whitelist.ui.SplitTunnelingScreenFragment
 import bypass.whitelist.util.LogWriter
 import bypass.whitelist.util.Net
 import bypass.whitelist.util.Prefs
@@ -330,6 +332,11 @@ class MainActivity :
     }
 
     override fun onConnectPressed(config: CallConfig) {
+        if (Prefs.routingMode == RoutingMode.APPS && Prefs.splitTunnelingPackages.isEmpty()) {
+            Toast.makeText(this, R.string.routing_apps_empty, Toast.LENGTH_SHORT).show()
+            pushSubPage(SplitTunnelingScreenFragment())
+            return
+        }
         if (resetInProgress) {
             pendingConnectConfig = config
             appendLog("Queued connect after previous session stops")

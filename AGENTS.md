@@ -14,6 +14,35 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
+## Active handoff (2026-07-25, alpha.13 candidate)
+
+- User field logs `relay (11).log`, `(12).log`, `(13).log` remain outside the
+  repository. The successful control passed captcha and ran `7h10m50s` with
+  `kcp_wait_snd=7`, zero drops/stalls and bounded fair wait. Broken starts stop
+  at `vk-auth: captcha required`; no `captcha solved`, OK session or auth done.
+  Panel «Жду устройство» is expected because Creator is alive while Android is
+  blocked locally. Restarting the panel does not repair this state.
+- Root captcha bug: `captcha_proxy.go` inspected only the legacy
+  `captchaNotRobot.check` path. Cross-origin/new VK JSON used `generic_proxy`,
+  whose responses were not inspected. Candidate inspects any captcha/JSON
+  response, nested token field, query/hash redirects, XHR/Fetch/navigation/DOM,
+  and has an Android Retry page action. Never log tokens or full URLs.
+- Android routing is now three first-class modes: Device (full VpnService),
+  Apps (transparent selected-app VpnService, Happ-style), and SOCKS5 (manual
+  local/LAN gateway, no VpnService). Legacy proxy/split preferences derive the
+  new mode without rewriting. Empty/uninstalled Apps selection fails closed.
+- Matching VK defaults move from Balanced to Auto KCP. Auto samples ACKed
+  segments every 2s, varies send window 256–512, grows by 32 only under demand,
+  shrinks by 64, and returns to 256 idle. Metrics add `kcp_window` and
+  `kcp_auto_changes`. New capability `kcp_auto` prevents wire code 4 from being
+  sent to alpha.12/older peers; they receive bounded Balanced fallback.
+- Local `go test ./...` and `go vet ./...` pass for relay, VK Creator, manager
+  and desktop Joiner. Windows TypeScript build passes. `go test -race` is not
+  locally available because CGO/compiler is absent. Android requires CI.
+- Candidate version metadata is `0.5.0-alpha.13`; do not tag until branch
+  Android/Windows/Docker CI is green. Published `v0.5.0-alpha.12` at `680966f`
+  remains immutable.
+
 ## Active handoff (2026-07-23, alpha.12 completion)
 
 - New matching alpha.11 field data is in user-supplied logs only; never commit

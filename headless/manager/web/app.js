@@ -115,7 +115,7 @@ function resetForm() {
   byId('editingId').value = '';
   byId('displayName').value = 'Headless';
   byId('resources').value = 'default';
-  byId('kcpProfile').value = 'balanced';
+  byId('kcpProfile').value = 'auto';
   byId('enabled').checked = true;
 	byId('autoRestart').checked = true;
   byId('expiresAt').value = '';
@@ -298,7 +298,7 @@ function renderProfiles() {
     const state = profile.enabled ? 'enabled' : 'disabled';
     return `<article class="profile-card ${state}" data-menu-kind="profile" data-menu-id="${profile.id}">
       <div class="profile-identity"><div class="profile-glyph">${escapeHTML(profile.name.slice(0, 1).toUpperCase())}</div><span><strong>${escapeHTML(profile.name)}</strong><small>${escapeHTML(profile.id)}</small></span></div>
-      <div class="profile-provider">${escapeHTML(profile.config.mode.toUpperCase())}<small>${escapeHTML(profile.config.kcpProfile || 'balanced')}</small></div>
+      <div class="profile-provider">${escapeHTML(profile.config.mode.toUpperCase())}<small>${escapeHTML(profile.config.kcpProfile || 'auto')}</small></div>
       <div class="profile-meta">${profile.autoRestart ? 'Автовосстановление' : 'Ручной запуск'}<small>лимит ${profile.maxSessions} · ${profile.recoveryRecipient ? 'свой VK' : 'общий VK'}</small></div>
       <span class="state-label">${profile.enabled ? 'Активен' : 'Отключён'}</span>
       <div class="profile-actions">
@@ -317,7 +317,7 @@ function renderDashboard() {
     return `<div class="compact-row"><i class="${dot}"></i><span><strong>${escapeHTML(session.clientName)}</strong><small>${escapeHTML(friendlyState(status))}</small></span><span>↓ ${escapeHTML(status.metrics?.rx_kbps || '0')} kbps</span><span>↑ ${escapeHTML(status.metrics?.tx_kbps || '0')} kbps</span><button class="text-button dashboard-session" data-id="${session.id}">Открыть</button></div>`;
   }).join('') : '<p class="empty">Активных каналов пока нет.</p>';
   const profiles = app.profiles.slice(0, 5);
-  byId('dashboardClients').innerHTML = profiles.length ? profiles.map((profile) => `<div class="compact-row"><i class="${profile.enabled ? 'good-dot' : 'bad-dot'}"></i><span><strong>${escapeHTML(profile.name)}</strong><small>${escapeHTML(profile.config.mode.toUpperCase())} · ${escapeHTML(profile.config.kcpProfile || 'balanced')}</small></span><span>${profile.autoRestart ? 'Auto recovery' : 'Manual'}</span><span>лимит ${profile.maxSessions}</span><button class="text-button dashboard-profile" data-id="${profile.id}">Изменить</button></div>`).join('') : '<p class="empty">Создай первый клиентский профиль.</p>';
+  byId('dashboardClients').innerHTML = profiles.length ? profiles.map((profile) => `<div class="compact-row"><i class="${profile.enabled ? 'good-dot' : 'bad-dot'}"></i><span><strong>${escapeHTML(profile.name)}</strong><small>${escapeHTML(profile.config.mode.toUpperCase())} · ${escapeHTML(profile.config.kcpProfile || 'auto')}</small></span><span>${profile.autoRestart ? 'Auto recovery' : 'Manual'}</span><span>лимит ${profile.maxSessions}</span><button class="text-button dashboard-profile" data-id="${profile.id}">Изменить</button></div>`).join('') : '<p class="empty">Создай первый клиентский профиль.</p>';
   document.querySelectorAll('.dashboard-session').forEach((button) => button.onclick = () => selectSession(button.dataset.id));
   document.querySelectorAll('.dashboard-profile').forEach((button) => button.onclick = () => editProfile(button.dataset.id));
 }

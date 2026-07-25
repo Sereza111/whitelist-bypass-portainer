@@ -12,6 +12,7 @@ import androidx.fragment.app.Fragment
 import bypass.whitelist.R
 import bypass.whitelist.tunnel.CallConfig
 import bypass.whitelist.tunnel.CallPlatform
+import bypass.whitelist.tunnel.RoutingMode
 import bypass.whitelist.tunnel.TunnelMode
 import bypass.whitelist.tunnel.VpnStatus
 import bypass.whitelist.util.Prefs
@@ -44,7 +45,7 @@ class MainFragment : Fragment(R.layout.fragment_main_screen) {
 
         container.bindCalls(Prefs.savedDestinations, Prefs.activeDestinationId)
         container.bindHero(connected = isHostConnected(), status = hostStatus())
-        container.bindRoutingMode(Prefs.proxyOnly, isHostConnected() || isHostConnecting())
+        container.bindRoutingMode(Prefs.routingMode, isHostConnected() || isHostConnecting())
         if (!isResumed) container.pauseAnimations()
 
         container.onAddCallClicked = {
@@ -66,17 +67,21 @@ class MainFragment : Fragment(R.layout.fragment_main_screen) {
                 container.showPingResult(success, rttMs)
             }
         }
-        container.onRoutingModeChanged = { proxyOnly ->
+        container.onRoutingModeChanged = { mode ->
             if (isHostConnected() || isHostConnecting()) {
                 Toast.makeText(requireContext(), R.string.routing_proxy_locked, Toast.LENGTH_SHORT).show()
             } else {
-                Prefs.proxyOnly = proxyOnly
-                container.bindRoutingMode(Prefs.proxyOnly, false)
+                Prefs.routingMode = mode
+                container.bindRoutingMode(Prefs.routingMode, false)
+                if (mode == RoutingMode.APPS && Prefs.splitTunnelingPackages.isEmpty()) {
+                    openAppSelector()
+                }
             }
         }
+        container.onAppsConfigurePressed = ::openAppSelector
         container.onProxyConfigurePressed = {
             ProxyActionSheet.show(parentFragmentManager) {
-                container.bindRoutingMode(Prefs.proxyOnly, isHostConnected() || isHostConnecting())
+                container.bindRoutingMode(Prefs.routingMode, isHostConnected() || isHostConnecting())
             }
         }
         container.onProxyCopyPressed = {
@@ -105,7 +110,7 @@ class MainFragment : Fragment(R.layout.fragment_main_screen) {
         super.onResume()
         content?.bindCalls(Prefs.savedDestinations, Prefs.activeDestinationId)
         content?.bindHero(connected = isHostConnected(), status = hostStatus())
-        content?.bindRoutingMode(Prefs.proxyOnly, isHostConnected() || isHostConnecting())
+        content?.bindRoutingMode(Prefs.routingMode, isHostConnected() || isHostConnecting())
         content?.resumeAnimations()
         if (isHostConnected()) {
             tickHandler.removeCallbacks(tickRunnable)
@@ -134,7 +139,7 @@ class MainFragment : Fragment(R.layout.fragment_main_screen) {
             pendingStatus = status
         }
         if (isHostConnected()) refreshStats()
-        container?.bindRoutingMode(Prefs.proxyOnly, isHostConnected() || isHostConnecting())
+        container?.bindRoutingMode(Prefs.routingMode, isHostConnected() || isHostConnecting())
     }
 
     fun onStatusTextChanged(text: String) {
@@ -149,7 +154,7 @@ class MainFragment : Fragment(R.layout.fragment_main_screen) {
         }
         if (!isResumed) return
         content?.bindHero(connected = connected, status = hostStatus())
-        content?.bindRoutingMode(Prefs.proxyOnly, connected || isHostConnecting())
+        content?.bindRoutingMode(Prefs.routingMode, connected || isHostConnecting())
         if (connected) {
             refreshStats()
             tickHandler.removeCallbacks(tickRunnable)
@@ -252,8 +257,16 @@ class MainFragment : Fragment(R.layout.fragment_main_screen) {
         val mode = if (active != null) Prefs.activeTunnelMode.forPlatform(active.platform) else Prefs.tunnelMode
         view.setStats(
             uptimeText = formatUptime(uptimeMs),
-            mode = if (Prefs.proxyOnly) getString(R.string.routing_mode_proxy) else mode.label,
+            mode = when (Prefs.routingMode) {
+                RoutingMode.DEVICE -> mode.label
+                RoutingMode.APPS -> "${getString(R.string.routing_mode_apps)} · ${mode.label}"
+                RoutingMode.SOCKS5 -> getString(R.string.routing_mode_proxy)
+            },
         )
+    }
+
+    private fun openAppSelector() {
+        (activity as? MainActivityHost)?.pushSubPage(SplitTunnelingScreenFragment())
     }
 
     private fun formatUptime(ms: Long): String {

@@ -25,12 +25,12 @@ Direct Creator находятся в одном контейнере. Отдел
 
 | Переменная | Значение |
 |---|---|
-| `WLB_IMAGE` | `ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.12` |
+| `WLB_IMAGE` | `ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.13` |
 | `PANEL_USERNAME` | `admin` или другой логин |
 | `PANEL_PASSWORD` | уникальный пароль длиной от 12 символов |
 | `WLB_SECRETS_DIR` | `/opt/whitelist-bypass/secrets` |
 | `VIDEO_RELIABILITY` | `auto` |
-| `KCP_PROFILE` | `balanced` |
+| `KCP_PROFILE` | `auto` |
 | `MAX_SESSIONS` | `4` (подберите под CPU/RAM сервера) |
 | `AUTO_START` | `false` |
 | `VK_PEER_ID` | ID личного VK для доставки обновлённых ссылок |
@@ -93,7 +93,8 @@ mount; кнопка **Отключить аккаунт** удаляет тол�
 Для matching server/client используйте:
 
 - reliability: `auto`;
-- KCP profile `balanced` — рекомендуемый;
+- KCP profile `auto` — рекомендуемый, сам держит окно в диапазоне 256–512;
+- `balanced` — ручной bounded override;
 - `stable` — при сильной потере и обвалах скорости;
 - `fast` — только для чистого carrier без заметных потерь;
 - `raw` — аварийный legacy rollback, не нормальный режим для web-трафика.

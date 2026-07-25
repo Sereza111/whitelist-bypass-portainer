@@ -112,10 +112,13 @@ CONNECT и интерактивный трафик.
 причину частично загружающихся сайтов в VK Video.
 
 Legacy WB KCP сохраняет быстрый профиль. Negotiated VK KCP по умолчанию
-использует balanced profile: `NoDelay(1,20,2,0)`, окна `512/512`, bounded
-output queue и WaitSnd backpressure. Stable использует `256/256`, fast —
-`2048/2048`. MTU adaptive-сегмента выровнен так, чтобы обычный relay frame
-помещался в один carrier frame.
+использует Auto: стартовое send window 256, диапазон 256–512 и корректировка
+раз в две секунды по подтверждённым ACK-сегментам и реальному заполнению.
+Balanced остаётся ручным окном `512/512`, Stable использует `256/256`, fast —
+`2048/2048`. Auto рекламируется отдельной capability: peer alpha.12 или более ранний
+получает совместимый Balanced, а не неизвестный wire-код. MTU
+adaptive-сегмента выровнен так, чтобы обычный relay frame помещался в один
+carrier frame.
 
 Над KCP работает DRR scheduler. После полевого alpha.11 теста его буферы
 ограничены `64 KiB` на logical flow и `512 KiB` суммарно. При удалённом CLOSE

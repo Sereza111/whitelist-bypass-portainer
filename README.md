@@ -6,12 +6,12 @@ Dion. Это уже не минимальная Docker-обёртка upstream: 
 клиенты, SOCKS5/TUN, автоматическое восстановление звонков, диагностику и
 multi-arch релизный pipeline.
 
-Текущий проверенный релиз: **[v0.5.0-alpha.12](https://github.com/Sereza111/whitelist-bypass-portainer/releases/tag/v0.5.0-alpha.12)**.
+Текущий релиз: **[v0.5.0-alpha.13](https://github.com/Sereza111/whitelist-bypass-portainer/releases/tag/v0.5.0-alpha.13)**.
 
 Docker image:
 
 ```text
-ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.12
+ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.13
 ```
 
 Проект основан на
@@ -133,14 +133,14 @@ ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.12
 
 | Переменная | Рекомендуемое значение |
 |---|---|
-| `WLB_IMAGE` | `ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.12` |
+| `WLB_IMAGE` | `ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.13` |
 | `PANEL_USERNAME` | новый логин, по умолчанию `admin` |
 | `PANEL_PASSWORD` | уникальный пароль длиной от 12 символов |
 | `WLB_SECRETS_DIR` | `/opt/whitelist-bypass/secrets` |
 | `MAX_SESSIONS` | `4` |
 | `AUTO_START` | `false` |
 | `VIDEO_RELIABILITY` | `auto` |
-| `KCP_PROFILE` | `balanced` |
+| `KCP_PROFILE` | `auto` |
 | `VK_PEER_ID` | необязательный legacy/global fallback получателя |
 
 5. Нажмите **Deploy the stack**.
@@ -177,7 +177,7 @@ Manager сохраняет cookies в `/data/managed-secrets/cookies-vk.json` с
 
 1. Откройте раздел **Клиенты**.
 2. Создайте профиль устройства/пользователя.
-3. Оставьте reliability `auto`, KCP `balanced`, auto recovery включённым.
+3. Оставьте reliability `auto`, KCP `auto`, auto recovery включённым.
 4. При необходимости укажите персональный VK recovery recipient.
 5. Нажмите **Запустить**.
 6. Дождитесь состояния «Ждёт устройство» и появления ссылки.
@@ -195,7 +195,7 @@ Recovery key является секретом устройства. Не пуб
 В логах клиента и сервера должны совпадать:
 
 ```text
-[build] version=0.5.0-alpha.12 commit=... built=...
+[build] version=0.5.0-alpha.13 commit=... built=...
 ```
 
 Если на телефоне осталась старая debug-signed `alpha.8`, её нужно удалить один
@@ -262,7 +262,8 @@ Android принимает только свежую подпись сопряж
 
 | Профиль | Назначение |
 |---|---|
-| `balanced` | рекомендуемый режим |
+| `auto` | рекомендуемый режим: окно 256–512 адаптируется по ACK и нагрузке |
+| `balanced` | ручной bounded override |
 | `stable` | сильная потеря/нестабильная мобильная сеть |
 | `fast` | эксперимент SOCKS-only на чистом carrier |
 | `raw` | legacy rollback, не нормальный режим для web |
@@ -282,6 +283,7 @@ METRICS mode=... tx_kbps=... rx_kbps=... fair_queue=... kcp_wait_snd=...
 
 - `tx_kbps`, `rx_kbps` — фактический трафик внутри relay;
 - `kcp_wait_snd` — неподтверждённые KCP-сегменты, не код ошибки;
+- `kcp_window`, `kcp_auto_changes` — текущее окно Auto и число его изменений;
 - `kcp_dropped`, `kcp_backpressure_ms`, `kcp_ack_stalls`;
 - `dns_reliable_queries`, `dns_reliable_replies`, `dns_avg_ms`;
 - `fair_queue`, `fair_avg_wait_ms`, `fair_max_wait_ms`;
@@ -369,11 +371,11 @@ docker compose --env-file .env.portainer -f portainer-stack-build.yml up -d --bu
 - reconnect race и directional ACK stall recovery;
 - bounded per-flow queues и DRR fairness;
 - полноценный panel control center;
-- first-class VPN/Proxy routing;
+- Android Device / Apps / SOCKS5 routing и Windows TUN / SOCKS5 routing;
 - peer health watchdog, KCP lifecycle cleanup и carrier DNS fallback.
 
 Подробные изменения последнего релиза:
-[docs/ALPHA12_RELEASE_NOTES.md](docs/ALPHA12_RELEASE_NOTES.md).
+[docs/ALPHA13_RELEASE_NOTES.md](docs/ALPHA13_RELEASE_NOTES.md).
 
 ## Дополнительная документация
 

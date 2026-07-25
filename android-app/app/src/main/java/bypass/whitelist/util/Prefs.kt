@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.core.content.edit
 import bypass.whitelist.tunnel.CallConfig
+import bypass.whitelist.tunnel.RoutingMode
 import bypass.whitelist.tunnel.SplitTunnelingMode
 import bypass.whitelist.tunnel.TunnelMode
 
@@ -102,6 +103,26 @@ object Prefs {
     var proxyOnly: Boolean
         get() = prefs.getBoolean(PrefsKeys.PROXY_ONLY, false)
         set(value) = prefs.edit { putBoolean(PrefsKeys.PROXY_ONLY, value) }
+
+    /**
+     * Derived from the legacy proxyOnly + split-tunneling settings so existing
+     * installations migrate without a one-off preference rewrite.
+     */
+    var routingMode: RoutingMode
+        get() = RoutingMode.fromLegacy(proxyOnly, splitTunnelingMode)
+        set(value) {
+            when (value) {
+                RoutingMode.DEVICE -> {
+                    proxyOnly = false
+                    splitTunnelingMode = SplitTunnelingMode.NONE
+                }
+                RoutingMode.APPS -> {
+                    proxyOnly = false
+                    splitTunnelingMode = SplitTunnelingMode.ONLY
+                }
+                RoutingMode.SOCKS5 -> proxyOnly = true
+            }
+        }
 
     var dnsMode: DnsMode
         get() {

@@ -90,7 +90,7 @@
                   <label>Провайдер<select id="mode"><option value="vk">VK Video</option><option value="telemost">Telemost</option><option value="wbstream">WB Stream</option><option value="dion">Dion</option></select></label>
                   <label>Лимит сессий<select id="maxSessions"><option>1</option><option>2</option><option>3</option><option>4</option></select></label>
                   <label>Ресурсы<select id="resources"><option value="moderate">Moderate</option><option value="default" selected>Default</option><option value="unlimited">Unlimited</option></select></label>
-                  <label>KCP-профиль<select id="kcpProfile"><option value="stable">Stable</option><option value="balanced" selected>Balanced</option><option value="fast">Fast</option></select></label>
+                  <label>KCP-профиль<select id="kcpProfile"><option value="auto" selected>Auto — рекомендуется</option><option value="stable">Stable — вручную</option><option value="balanced">Balanced — вручную</option><option value="fast">Fast — только диагностика</option></select></label>
                 </div>
                 <label>Имя в звонке<input id="displayName" value="Headless" maxlength="80"></label>
                 <label>Получатель VK для этого клиента <span class="optional">необязательно, заменяет глобальный</span><input id="profileRecoveryRecipient" inputmode="numeric" placeholder="ID или vk.com/id123"></label>
@@ -160,7 +160,7 @@
           <div class="settings-grid">
             <article class="panel"><div class="panel-head"><div><span class="kicker">Сервер</span><h2>Control Plane</h2></div><span class="status-badge good-badge">Online</span></div><dl class="settings-list"><div><dt>Публичный порт</dt><dd>9200 / TCP</dd></div><div><dt>Авторизация</dt><dd>Basic Auth</dd></div><div><dt>Текущая сборка</dt><dd id="settingsBuild">—</dd></div><div><dt>Лимит Creator</dt><dd id="settingsLimit">—</dd></div></dl></article>
             <article class="panel"><div class="panel-head"><div><span class="kicker">Безопасность</span><h2>Что хранится</h2></div></div><ul class="check-list"><li>Cookies VK находятся только в <code>/data/managed-secrets</code></li><li>Ссылки звонков скрыты из общего журнала</li><li>Токены и cookies не возвращаются через API</li><li>Изменения защищены проверкой Origin</li></ul></article>
-            <article class="panel span-all"><div class="panel-head"><div><span class="kicker">Рекомендуемая схема</span><h2>Стабильная эксплуатация</h2></div></div><div class="steps"><span>01<strong>Отдельный VK для сервера</strong></span><span>02<strong>Основной VK как получатель</strong></span><span>03<strong>Отдельный профиль на устройство</strong></span><span>04<strong>Balanced для обычной сети</strong></span></div></article>
+            <article class="panel span-all"><div class="panel-head"><div><span class="kicker">Рекомендуемая схема</span><h2>Стабильная эксплуатация</h2></div></div><div class="steps"><span>01<strong>Отдельный VK для сервера</strong></span><span>02<strong>Основной VK как получатель</strong></span><span>03<strong>Отдельный профиль на устройство</strong></span><span>04<strong>Auto для обычной сети</strong></span></div></article>
           </div>
         </section>
       </main>

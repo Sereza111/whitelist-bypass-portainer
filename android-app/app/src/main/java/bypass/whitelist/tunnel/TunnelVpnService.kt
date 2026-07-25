@@ -196,12 +196,24 @@ class TunnelVpnService : VpnService() {
                     }
                 }
                 SplitTunnelingMode.ONLY -> {
+                    var allowedApps = 0
                     Prefs.splitTunnelingPackages.forEach {
                         try {
                             builder.addAllowedApplication(it)
+                            allowedApps++
                         } catch (ignored: Exception) {
                         }
                     }
+                    if (allowedApps == 0) {
+                        val message = "App proxy requires at least one installed application"
+                        Log.e(TAG, message)
+                        startInProgress = false
+                        TunnelServiceState.logCallback?.invoke(message)
+                        TunnelServiceState.vpnStatusCallback?.invoke(VpnStatus.CALL_FAILED)
+                        stopSelf()
+                        return
+                    }
+                    TunnelServiceState.logCallback?.invoke("App proxy routing $allowedApps selected applications")
                 }
             }
         } catch (e: Exception) {

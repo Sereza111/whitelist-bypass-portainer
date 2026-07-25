@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pion/webrtc/v4"
@@ -794,7 +795,7 @@ func main() {
 	upstreamUser := flag.String("upstream-user", "", "upstream SOCKS5 username")
 	upstreamPass := flag.String("upstream-pass", "", "upstream SOCKS5 password")
 	videoReliability := flag.String("video-reliability", "auto", "VK Video reliability: auto or raw")
-	kcpProfile := flag.String("kcp-profile", tunnel.KCPProfileBalanced, "KCP profile: fast, balanced, or stable")
+	kcpProfile := flag.String("kcp-profile", tunnel.KCPProfileAuto, "KCP profile: auto, stable, balanced, or fast")
 	recoveryProfile := flag.String("recovery-profile", "", "profile id for signed VK recovery update")
 	recoveryName := flag.String("recovery-name", "", "profile display name for signed VK recovery update")
 	recoveryKey := flag.String("recovery-key", "", "HMAC key for signed VK recovery update")
@@ -905,6 +906,7 @@ func main() {
 			bridgeReadBuf := common.VP8BufSize
 			capabilities := tunnel.CapabilityMetricsV1
 			var adaptive *tunnel.AdaptiveKCPTunnel
+			var peerSupportsAuto atomic.Bool
 			if *videoReliability == "auto" {
 				adaptive = tunnel.NewAdaptiveKCPTunnel(tun, log.Printf)
 				adaptive.SetKCPProfile(*kcpProfile)
@@ -913,7 +915,7 @@ func main() {
 				})
 				dataTunnel = adaptive
 				bridgeReadBuf = tunnel.AdaptiveKCPRelayReadBuf
-				capabilities |= tunnel.CapabilityVideoKCP1 | tunnel.CapabilityPriorityControl | tunnel.CapabilityReliableDNS
+				capabilities |= tunnel.CapabilityVideoKCP1 | tunnel.CapabilityPriorityControl | tunnel.CapabilityReliableDNS | tunnel.CapabilityKCPAuto
 			}
 			rb := tunnel.NewRelayBridge(dataTunnel, "creator", bridgeReadBuf, log.Printf)
 			ur.SetSessionClose(func() {
@@ -925,20 +927,23 @@ func main() {
 			rb.SetUpstreamSocks(*upstreamSocks, *upstreamUser, *upstreamPass)
 			if adaptive != nil {
 				rb.SetOnPeerKCPProfile(func(profile string) {
-					effective := adaptive.SetKCPProfile(tunnel.PreferSaferKCPProfile(*kcpProfile, profile))
+					localProfile := tunnel.KCPProfileForPeer(*kcpProfile, peerSupportsAuto.Load())
+					effective := adaptive.SetKCPProfile(tunnel.PreferSaferKCPProfile(localProfile, profile))
 					log.Printf("[transport] negotiated bidirectional KCP profile=%s", effective)
 				})
 				rb.SetOnHandshake(func(result tunnel.HandshakeResult) {
 					if result.Supports(tunnel.CapabilityVideoKCP1) {
+						peerSupportsAuto.Store(result.Supports(tunnel.CapabilityKCPAuto))
+						compatibleProfile := tunnel.KCPProfileForPeer(*kcpProfile, peerSupportsAuto.Load())
 						if result.Supports(tunnel.CapabilityPriorityControl) {
 							adaptive.EnablePriorityControl()
 						} else {
-							effective := adaptive.SetKCPProfile(tunnel.PreferSaferKCPProfile(*kcpProfile, tunnel.KCPProfileBalanced))
+							effective := adaptive.SetKCPProfile(tunnel.PreferSaferKCPProfile(compatibleProfile, tunnel.KCPProfileBalanced))
 							log.Printf("[transport] peer lacks profile/control capability; compatibility profile=%s", effective)
 						}
 						adaptive.EnableKCP()
 						if result.Supports(tunnel.CapabilityPriorityControl) {
-							rb.SendKCPProfile(*kcpProfile)
+							rb.SendKCPProfile(compatibleProfile)
 						}
 					} else {
 						adaptive.EnableRawCompatibility()
