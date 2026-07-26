@@ -14,13 +14,13 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
-## Active handoff (2026-07-26, alpha.19 device-assisted WB candidate)
+## Active handoff (2026-07-26, alpha.19 device-assisted WB completion)
 
 - The user explicitly required mobile WB onboarding; do not regress to asking
   for phone/OTP in the server panel. The VPS independently returns `HTTP 498`,
   `server: wbaas`, `status-no-id: PG-13-XS` for `stream.wb.ru/login`. This
   proves server Chromium timeout/retry is not the primary solution.
-- Candidate replaces the panel's main WB flow with a 10-minute phone QR. The QR
+- Alpha.19 replaces the panel's main WB flow with a 10-minute phone QR. The QR
   contains an HTTPS `/wb-device#TOKEN` landing URL; fragments are not sent to
   Nginx. Manager stores only SHA-256(token), and the Android upload sends the
   token in the Authorization header rather than the request path.
@@ -32,9 +32,15 @@ Portainer and a headless Joiner in Video mode.
 - Panel QR generation is local (`go-qrcode`); no external QR service receives
   the bearer. Public `/wb-device`, JS and CSS contain no server credential and
   are served without Basic Auth so a scanned phone can open the app.
-- Manager tests/vet and panel JS syntax pass locally. Android cannot be built
-  locally because JDK/SDK/Gradle wrapper are absent; tagged/branch Android CI is
-  the required build gate before publishing `v0.5.0-alpha.19`.
+- Manager tests/vet/build, panel JS syntax and Windows TypeScript pass locally.
+  Relay tests passed but Windows antivirus denied cleanup of the already-passed
+  temporary `tunnel.test.exe`; standalone relay vet passed. Branch and immutable
+  tagged Android, Windows and Docker workflows all passed.
+- `v0.5.0-alpha.19` is published from immutable commit `61f5943`; do not move
+  the tag. Release APK SHA-256 is
+  `f0f711387e9ef376380e04ad910001b931347466d177340ff64e632799ffc494` and
+  EXE SHA-256 is
+  `37dacece8f8f0708b50e49667334d90a217f390d2bf8a37a044f3bcb3d2a03e4`.
 
 ## Active handoff (2026-07-26, alpha.16 completion)
 

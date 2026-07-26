@@ -37,8 +37,11 @@ status API или событиях. Pairing token хранится сервер�
 - Manager `go test ./...` и `go vet ./...` проходят.
 - Добавлены тесты HTTPS-only pairing, bearer authentication, локального QR,
   allowlist импорта и отсутствия секретов в status API.
-- Android release build остаётся обязательным CI gate: локально JDK/Android SDK
-  отсутствуют.
+- Branch и immutable-tag CI успешно собрали Android, Windows и Docker.
+- APK SHA-256:
+  `f0f711387e9ef376380e04ad910001b931347466d177340ff64e632799ffc494`.
+- EXE SHA-256:
+  `37dacece8f8f0708b50e49667334d90a217f390d2bf8a37a044f3bcb3d2a03e4`.
 
 ## Полевой gate
 

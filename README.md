@@ -6,7 +6,7 @@ Dion. Это уже не минимальная Docker-обёртка upstream: 
 клиенты, SOCKS5/TUN, автоматическое восстановление звонков, диагностику и
 multi-arch релизный pipeline.
 
-Текущий кандидат: **v0.5.0-alpha.19**. Последний опубликованный релиз: **[v0.5.0-alpha.18](https://github.com/Sereza111/whitelist-bypass-portainer/releases/tag/v0.5.0-alpha.18)**.
+Текущий релиз: **[v0.5.0-alpha.19](https://github.com/Sereza111/whitelist-bypass-portainer/releases/tag/v0.5.0-alpha.19)**.
 
 Docker image:
 
@@ -35,6 +35,7 @@ ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.19
 - несколько независимых Creator-процессов с общим лимитом `MAX_SESSIONS`;
 - отдельные каталоги, bounded logs и METRICS каждой сессии;
 - VK-вход серверного аккаунта через QR без передачи пароля панели;
+- WB-вход через QR на Android и сеть телефона вместо заблокированного VPS;
 - глобальный VK recovery recipient и override для отдельного профиля;
 - тестовое VK-сообщение с rate limit и безопасными ошибками;
 - bounded structured event log без cookies, токенов, ссылок и recovery keys;
@@ -68,6 +69,18 @@ ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.19
 - signed VK recovery с HMAC, generation и защитой от повторного сообщения;
 - постоянная Android release-подпись: подписанные `alpha.9+` обновляются поверх
   друг друга.
+- отдельный Android WB WebView и ручная вставка одноразовой pairing-ссылки.
+
+## Документация для разработчика
+
+- [Полный handoff состояния alpha.19](docs/PROJECT_HANDOFF_2026-07-26.md) —
+  архитектура, WB device pairing, API, безопасность, тесты и следующие задачи;
+- [Архитектура протокола](docs/PROTOCOL_ARCHITECTURE.md);
+- [Целевая архитектура](docs/TARGET_ARCHITECTURE.md);
+- [План производительности](docs/PERFORMANCE_ROADMAP.md);
+- [Панель и её API](docs/PANEL.md);
+- [Развёртывание в Portainer](PORTAINER.md);
+- [Примечания alpha.19](docs/ALPHA19_RELEASE_NOTES.md).
 
 ## Как проходит трафик
 

@@ -62,9 +62,9 @@ manager не теряет историю и корректно отмечает 
 - audit log.
 
 **Статус:** gothic multi-session UI, profiles, provider status, start/stop,
-скрытая join link и diagnostics реализованы. Session auth/CSRF, encrypted
-vault, SSE/QR и audit log ещё не реализованы; публичный доступ требует TLS
-reverse proxy.
+скрытая join link, diagnostics, VK identity QR, WB Android identity QR и
+provider-aware guest pairing реализованы. TLS reverse proxy развёрнут. Session
+auth/CSRF, encrypted vault, SSE и полноценный audit/history ещё не реализованы.
 
 **Gate:** panel не требует Docker socket, secrets отсутствуют в browser logs и
 API responses, security checklist пройден.
@@ -112,6 +112,11 @@ advanced options не мешают основному сценарию.
 - consistent profiles and split tunneling;
 - shared visual tokens where platform-appropriate;
 - battery/thermal pacing policy.
+
+**Статус:** capability transport, provider-aware deep link, VPN/Apps/SOCKS
+routing, split tunneling, matching metrics, signed recovery, gothic tokens и
+device-assisted WB WebView реализованы. Battery/thermal pacing, встроенный QR
+scanner и полноценный profile sync с Manager остаются открытыми.
 
 ## Первый практический спринт
 
