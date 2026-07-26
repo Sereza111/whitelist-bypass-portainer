@@ -69,9 +69,14 @@ Portainer and a headless Joiner in Video mode.
   `CallPlatformTest`. Manager `go test ./...` and `go vet ./...` passed with
   portable Go 1.26.5. Android Gradle/JDK are not installed locally; CI must run
   the Android unit tests and release build.
-- This change is not tagged or released yet. Do not move `v0.5.0-alpha.16`.
-  Before a release, build matching server/Android/Windows artifacts and field
-  test WB with actual `SOCKS CONNECT`, `tcp>0`, and nonzero `tunnel_tx/rx`.
+- `v0.5.0-alpha.17` is now published from commit `35dcab5`; do not move the
+  immutable tag. Branch Docker, Windows and Android workflows all passed.
+  Release APK SHA-256 is
+  `3d8c087c534c4f0158414d40b3142c008f5d9c72af61a9cebbc3a2bf557abed4` and
+  EXE SHA-256 is
+  `53fff074ec1b72947de28f9379dd01bcc7e5904dda3c86d201c8fe147be579d3`.
+  Before declaring WB transport faster, field-test the release with actual
+  `SOCKS CONNECT`, `tcp>0`, and nonzero `tunnel_tx/rx`.
 - Panel-managed WB onboarding is now implemented in the working tree. It opens
   `stream.wb.ru/login` in an isolated Chromium, advances to the phone form,
   accepts the phone and one-time code through same-origin authenticated API,

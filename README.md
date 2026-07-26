@@ -6,7 +6,7 @@ Dion. Это уже не минимальная Docker-обёртка upstream: 
 клиенты, SOCKS5/TUN, автоматическое восстановление звонков, диагностику и
 multi-arch релизный pipeline.
 
-Текущий релиз: **v0.5.0-alpha.17**.
+Текущий релиз: **[v0.5.0-alpha.17](https://github.com/Sereza111/whitelist-bypass-portainer/releases/tag/v0.5.0-alpha.17)**.
 
 Docker image:
 
