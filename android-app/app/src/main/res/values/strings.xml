@@ -198,6 +198,8 @@
     <string name="wb_login_title">WB Stream sign-in</string>
     <string name="wb_login_opening">Opening WB on this phone…</string>
     <string name="wb_login_waiting">Sign in to the technical WB account. The panel will update automatically.</string>
+    <string name="wb_login_preparing">WB account detected. Preparing the Stream session…</string>
+    <string name="wb_login_cookie_progress">Account is signed in. Preparing secure session %1$d/%2$d…</string>
     <string name="wb_login_page_error">WB could not load. Check the phone network and retry.</string>
     <string name="wb_login_uploading">Securely transferring the verified WB session…</string>
     <string name="wb_login_success">WB Stream is connected to the server. You can return to the panel.</string>

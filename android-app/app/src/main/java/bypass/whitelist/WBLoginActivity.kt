@@ -37,6 +37,8 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
     private var deviceId = ""
     private var finished = false
     private var nextUploadAt = 0L
+    private var accountDetected = false
+    private var streamPrimed = false
 
     private val cookieProbe = object : Runnable {
         override fun run() {
@@ -79,12 +81,15 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
         webView.webViewClient = object : WebViewClient() {
             override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
-                status.setText(R.string.wb_login_waiting)
+                status.setText(if (accountDetected) R.string.wb_login_preparing else R.string.wb_login_waiting)
             }
 
             override fun onPageFinished(view: WebView, url: String) {
-                val host = Uri.parse(url).host.orEmpty().lowercase()
+                val parsed = Uri.parse(url)
+                val host = parsed.host.orEmpty().lowercase()
                 if (host == "wb.ru" || host.endsWith(".wb.ru")) ensureDeviceId()
+                if (parsed.path.orEmpty().startsWith("/profile")) onAccountDetected()
+                detectAccountPage()
                 probeCredentials()
             }
 
@@ -92,6 +97,25 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
                 if (request.isForMainFrame) status.setText(R.string.wb_login_page_error)
             }
         }
+    }
+
+    private fun detectAccountPage() {
+        webView.evaluateJavascript(
+            """(() => /(^|\s)Выйти(\s|$)/i.test(document.body?.innerText || '') || location.pathname.startsWith('/profile'))()""",
+        ) { result ->
+            if (result == "true") onAccountDetected()
+        }
+    }
+
+    private fun onAccountDetected() {
+        accountDetected = true
+        status.setText(R.string.wb_login_preparing)
+        CookieManager.getInstance().flush()
+        if (streamPrimed) return
+        streamPrimed = true
+        mainHandler.postDelayed({
+            if (!finished && !isFinishing && !isDestroyed) webView.loadUrl(WB_STREAM_URL)
+        }, 700)
     }
 
     private fun ensureDeviceId() {
@@ -108,7 +132,11 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
     private fun probeCredentials() {
         if (finished || uploadRunning.get() || System.currentTimeMillis() < nextUploadAt) return
         val cookies = linkedMapOf<String, String>()
-        COOKIE_URLS.forEach { url ->
+        val urls = buildList {
+            webView.url?.takeIf { it.startsWith("https://") }?.let(::add)
+            addAll(COOKIE_URLS)
+        }
+        urls.forEach { url ->
             CookieManager.getInstance().getCookie(url)?.split(';')?.forEach cookie@{ part ->
                 val index = part.indexOf('=')
                 if (index <= 0) return@cookie
@@ -117,7 +145,11 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
                 if (name in ALLOWED_COOKIES && value.isNotEmpty()) cookies[name] = value
             }
         }
-        if (!REQUIRED_COOKIES.all(cookies::containsKey)) return
+        val readyCount = REQUIRED_COOKIES.count(cookies::containsKey)
+        if (readyCount < REQUIRED_COOKIES.size) {
+            if (accountDetected) status.text = getString(R.string.wb_login_cookie_progress, readyCount, REQUIRED_COOKIES.size)
+            return
+        }
         if (deviceId.isEmpty()) {
             ensureDeviceId()
             return
@@ -183,12 +215,17 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 
     companion object {
         private const val WB_LOGIN_URL = "https://stream.wb.ru/login"
+        private const val WB_STREAM_URL = "https://stream.wb.ru/"
         private val TOKEN_RE = Regex("^[A-Za-z0-9_-]{32,128}$")
         private val DEVICE_RE = Regex("^[A-Za-z0-9._-]{8,128}$")
         private val COOKIE_URLS = listOf(
             "https://stream.wb.ru/",
+            "https://stream.wb.ru/login",
+            "https://stream.wb.ru/profile",
             "https://auth-stream.wb.ru/",
+            "https://auth-stream.wb.ru/v2/auth/slide-v3",
             "https://www.wildberries.ru/",
+            "https://www.wildberries.ru/lk",
             "https://wb.ru/",
         )
         private val REQUIRED_COOKIES = setOf("wbx-refresh", "x_wbaas_token", "wbx-validation-key")

@@ -1,7 +1,8 @@
 # Project handoff · 2026-07-26
 
-Этот документ — точка входа для следующего разработчика или AI-агента. Он
-описывает фактическое состояние `v0.5.0-alpha.19`, а не первоначальный upstream.
+Этот документ — точка входа для следующего разработчика или AI-агента. Основная
+архитектура относится к `v0.5.0-alpha.19`; текущий alpha.20 candidate исправляет
+post-login завершение Android WB и описан в `ALPHA20_RELEASE_NOTES.md`.
 
 ## 1. Репозиторий и происхождение
 
@@ -124,10 +125,11 @@ writes `/data/managed-secrets/cookies-wbstream.json` atomically with mode `0600`
 - `SettingsScreenFragment.kt`: optional manual paste of a one-time pairing link.
 
 The WebView path still needs a real field test against current WB protection.
-The build and API are verified, but external platform behavior cannot be proven
-without completing a real account login. If the client gets an HTTP error after
-cookies appear, inspect only safe Manager state and response class; never request
-raw cookies, phone, OTP or pairing URL from the user.
+Alpha.19 field test completed a real account login and reached WB Profile, but
+root-only cookie probing did not start the upload. Alpha.20 detects the profile,
+primes WB Stream and probes current/exact cookie paths while showing only `N/3`.
+If the client gets an HTTP error after cookies appear, inspect only safe Manager
+state and response class; never request raw cookies, phone, OTP or pairing URL.
 
 ## 6. Transport state
 
@@ -212,4 +214,3 @@ new version.
 5. Improve provider failover only after each provider identity and guest flow is
    independently stable; never treat a provider switch as a transparent packet
    migration without a new call/session handshake.
-
