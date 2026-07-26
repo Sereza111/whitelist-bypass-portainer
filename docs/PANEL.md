@@ -21,7 +21,7 @@ Compose path: portainer-stack-panel.yml
 | `PANEL_PASSWORD` | уникальный пароль длиной от 12 символов |
 | `PANEL_USERNAME` | по умолчанию `admin` |
 | `WLB_SECRETS_DIR` | `/opt/whitelist-bypass/secrets` |
-| `WLB_IMAGE` | `ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.17` |
+| `WLB_IMAGE` | `ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.18` |
 | `MAX_SESSIONS` | общий предел Creator, по умолчанию `4` |
 | `VK_PEER_ID` | цифровой ID VK-получателя новых ссылок |
 
@@ -29,16 +29,17 @@ Compose path: portainer-stack-panel.yml
 переменных Portainer:
 
 ```text
-0.0.0.0:9200 -> container:8080
+127.0.0.1:9200 -> container:8080
 ```
 
-После Deploy зайдите на `http://SERVER_IP:9200`. Браузер запросит
-`PANEL_USERNAME` и `PANEL_PASSWORD`. Разрешите входящий TCP/9200 в firewall
-VPS.
+После Deploy Nginx проксирует `https://panel.yozik.ru` на loopback-порт 9200.
+Браузер запросит `PANEL_USERNAME` и `PANEL_PASSWORD`. Во внешнем firewall
+нужны TCP/80 и TCP/443; TCP/9200 открывать не нужно.
 
-Basic Auth без HTTPS передаёт пароль без транспортного шифрования. Для
-постоянного публичного доступа поставьте перед портом 9200 TLS reverse proxy и
-ограничьте доступ firewall.
+Начальный Nginx-конфиг находится в `docs/nginx-panel.yozik.ru.conf`. После его
+установки команда `certbot --nginx -d panel.yozik.ru` получает сертификат
+Let's Encrypt, добавляет HTTPS и HTTP→HTTPS redirect. Номер/код WB и пароль
+Basic Auth нельзя вводить через HTTP.
 
 ## Cookies
 

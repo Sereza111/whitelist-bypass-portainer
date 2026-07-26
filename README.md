@@ -6,12 +6,12 @@ Dion. Это уже не минимальная Docker-обёртка upstream: 
 клиенты, SOCKS5/TUN, автоматическое восстановление звонков, диагностику и
 multi-arch релизный pipeline.
 
-Текущий релиз: **[v0.5.0-alpha.17](https://github.com/Sereza111/whitelist-bypass-portainer/releases/tag/v0.5.0-alpha.17)**.
+Текущий релиз: **v0.5.0-alpha.18**.
 
 Docker image:
 
 ```text
-ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.17
+ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.18
 ```
 
 Проект основан на
@@ -119,7 +119,7 @@ ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.17
 - Linux VPS/сервер с Docker и Portainer;
 - минимум 1 vCPU и 1 GB RAM для небольшого числа сессий;
 - доступ к GitHub Container Registry;
-- TCP/9200 до панели либо TLS reverse proxy;
+- TCP/80 и TCP/443 до Nginx; manager слушает только `127.0.0.1:9200`;
 - отдельный аккаунт выбранной платформы.
 
 ### Stack
@@ -133,7 +133,7 @@ ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.17
 
 | Переменная | Рекомендуемое значение |
 |---|---|
-| `WLB_IMAGE` | `ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.17` |
+| `WLB_IMAGE` | `ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.18` |
 | `PANEL_USERNAME` | новый логин, по умолчанию `admin` |
 | `PANEL_PASSWORD` | уникальный пароль длиной от 12 символов |
 | `WLB_SECRETS_DIR` | `/opt/whitelist-bypass/secrets` |
@@ -144,7 +144,7 @@ ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.17
 | `VK_PEER_ID` | необязательный legacy/global fallback получателя |
 
 5. Нажмите **Deploy the stack**.
-6. Откройте `http://SERVER_IP:9200`.
+6. Настройте Nginx/Certbot и откройте `https://panel.yozik.ru`.
 7. В разделе **Провайдеры** выполните VK QR-вход или подключите cookies.
 
 Не удаляйте volume `whitelist-bypass-manager-data` при обновлении: там лежат
@@ -207,7 +207,7 @@ WB Stream и Dion; тип провайдера связан с проверен�
 В логах клиента и сервера должны совпадать:
 
 ```text
-[build] version=0.5.0-alpha.17 commit=... built=...
+[build] version=0.5.0-alpha.18 commit=... built=...
 ```
 
 Если на телефоне осталась старая debug-signed `alpha.8`, её нужно удалить один
@@ -371,8 +371,8 @@ docker compose --env-file .env.portainer -f portainer-stack-build.yml up -d --bu
 - не коммитьте `.env`, cookies, access tokens, call links и pairing blocks;
 - полная join link является секретом подключения;
 - не публикуйте SOCKS5 password и recovery key в issue/log;
-- Basic Auth на TCP/9200 требует TLS reverse proxy для публичного доступа;
-- ограничьте 9200 firewall или VPN администрирования;
+- Basic Auth доступен только через TLS reverse proxy Nginx;
+- порт 9200 привязан к `127.0.0.1`, наружу открыты только 80/443;
 - используйте отдельный технический аккаунт платформы;
 - учитывайте местное законодательство и правила VK/Telemost/WB/Dion.
 
@@ -393,7 +393,7 @@ docker compose --env-file .env.portainer -f portainer-stack-build.yml up -d --bu
 - peer health watchdog, KCP lifecycle cleanup и carrier DNS fallback.
 
 Подробные изменения последнего релиза:
-[docs/ALPHA17_RELEASE_NOTES.md](docs/ALPHA17_RELEASE_NOTES.md).
+[docs/ALPHA18_RELEASE_NOTES.md](docs/ALPHA18_RELEASE_NOTES.md).
 
 ## Дополнительная документация
 

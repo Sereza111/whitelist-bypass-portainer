@@ -662,6 +662,8 @@ async function refreshWBLogin() {
   byId('wbLoginForget').hidden = !status.managed || active;
   byId('wbPhoneForm').hidden = status.state !== 'phone';
   byId('wbCodeForm').hidden = status.state !== 'code';
+  byId('wbLoginScreen').hidden = !status.screenshotReady;
+  if (status.screenshotReady && !byId('wbLoginModal').hidden) byId('wbLoginScreenshot').src = `/api/wb-login/screenshot?t=${Date.now()}`;
   if (status.state === 'phone') byId('wbPhone').focus();
   if (status.state === 'code') byId('wbCode').focus();
 }

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -35,6 +36,7 @@ type wbLoginStatus struct {
 	BrowserAvailable bool       `json:"browserAvailable"`
 	Managed          bool       `json:"managed"`
 	Mounted          bool       `json:"mounted"`
+	ScreenshotReady  bool       `json:"screenshotReady"`
 }
 
 type wbLoginManager struct {
@@ -50,6 +52,7 @@ type wbLoginManager struct {
 	cancel     context.CancelFunc
 	browserCtx context.Context
 	deviceID   string
+	screenshot []byte
 	generation uint64
 }
 
@@ -89,6 +92,7 @@ func (login *wbLoginManager) statusLocked() wbLoginStatus {
 	return wbLoginStatus{
 		State: state, Message: message, ExpiresAt: login.expiresAt,
 		BrowserAvailable: login.browser != "", Managed: managed, Mounted: mounted,
+		ScreenshotReady: len(login.screenshot) > 0,
 	}
 }
 
@@ -114,6 +118,7 @@ func (login *wbLoginManager) start() (wbLoginStatus, error) {
 	login.expiresAt = &expires
 	login.browserCtx = nil
 	login.deviceID = ""
+	login.screenshot = nil
 	go login.run(ctx, generation)
 	return login.statusLocked(), nil
 }
@@ -146,18 +151,22 @@ func (login *wbLoginManager) run(ctx context.Context, generation uint64) {
 	browserCtx, browserCancel := chromedp.NewContext(allocatorCtx)
 	defer browserCancel()
 
-	startupCtx, startupCancel := context.WithTimeout(browserCtx, 45*time.Second)
+	startupCtx, startupCancel := context.WithTimeout(browserCtx, 2*time.Minute)
 	defer startupCancel()
 	if err := chromedp.Run(startupCtx,
 		network.Enable(),
 		chromedp.Navigate(wbLoginURL),
 		chromedp.WaitReady("body", chromedp.ByQuery),
-		chromedp.WaitVisible("button", chromedp.ByQuery),
-		chromedp.Sleep(2*time.Second),
-		chromedp.Evaluate(`(() => { const b = [...document.querySelectorAll('button')].find(x => x.textContent.trim() === 'Войти'); if (b) b.click(); })()`, nil),
-		chromedp.WaitVisible(`input[placeholder="000 000 00 00"]`, chromedp.ByQuery),
 	); err != nil {
+		log.Printf("[wb-login] navigation failed: %v", err)
+		login.captureFailure(browserCtx, generation)
 		login.failFromContext(ctx, generation, "WB Stream не открыл форму входа")
+		return
+	}
+	if err := waitForWBPhoneForm(startupCtx); err != nil {
+		log.Printf("[wb-login] phone form timeout: %v", err)
+		login.captureFailure(browserCtx, generation)
+		login.failFromContext(ctx, generation, "WB Stream не открыл форму входа — открой диагностику и повтори")
 		return
 	}
 
@@ -189,6 +198,49 @@ func (login *wbLoginManager) run(ctx context.Context, generation uint64) {
 	login.mu.Unlock()
 }
 
+func waitForWBPhoneForm(ctx context.Context) error {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		var state string
+		err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
+			const visible = (e) => !!e && e.offsetParent !== null;
+			const phone = [...document.querySelectorAll('input')].find(e => visible(e) && (e.type === 'tel' || /000\s*000/.test(e.placeholder || '')));
+			if (phone) return 'phone';
+			const login = [...document.querySelectorAll('button')].find(e => visible(e) && e.textContent.trim() === 'Войти' && !e.disabled);
+			if (login) { login.click(); return 'clicked'; }
+			return 'waiting';
+		})()`, &state))
+		if err == nil && state == "phone" {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func (login *wbLoginManager) captureFailure(ctx context.Context, generation uint64) {
+	var screenshot []byte
+	captureCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if chromedp.Run(captureCtx, chromedp.FullScreenshot(&screenshot, 85)) != nil || len(screenshot) == 0 {
+		return
+	}
+	login.update(generation, func() { login.screenshot = screenshot })
+}
+
+func (login *wbLoginManager) screenshotPNG() ([]byte, bool) {
+	login.mu.Lock()
+	defer login.mu.Unlock()
+	if len(login.screenshot) == 0 {
+		return nil, false
+	}
+	return append([]byte(nil), login.screenshot...), true
+}
+
 func (login *wbLoginManager) submitPhone(phone string) (wbLoginStatus, error) {
 	digits := digitsOnly.ReplaceAllString(phone, "")
 	if len(digits) == 11 && (digits[0] == '7' || digits[0] == '8') {
@@ -204,7 +256,7 @@ func (login *wbLoginManager) submitPhone(phone string) (wbLoginStatus, error) {
 		return login.status(), err
 	}
 	encodedPhone, _ := json.Marshal(digits)
-	setPhoneScript := fmt.Sprintf(`(phone => { const i = document.querySelector('input[placeholder="000 000 00 00"]'); if (!i) throw new Error('phone input unavailable'); const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; i.focus(); setter.call(i, phone); i.dispatchEvent(new InputEvent('input', {bubbles:true, data: phone, inputType:'insertText'})); i.dispatchEvent(new Event('change', {bubbles:true})); })(%s)`, encodedPhone)
+	setPhoneScript := fmt.Sprintf(`(phone => { const i = [...document.querySelectorAll('input')].find(e => e.offsetParent !== null && (e.type === 'tel' || /000\s*000/.test(e.placeholder || ''))); if (!i) throw new Error('phone input unavailable'); const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; i.focus(); setter.call(i, phone); i.dispatchEvent(new InputEvent('input', {bubbles:true, data: phone, inputType:'insertText'})); i.dispatchEvent(new Event('change', {bubbles:true})); })(%s)`, encodedPhone)
 	if err := chromedp.Run(ctx,
 		chromedp.Evaluate(setPhoneScript, nil),
 		chromedp.Click(`input[type="checkbox"]`, chromedp.ByQuery),
@@ -479,6 +531,7 @@ func (login *wbLoginManager) cancelLogin(message string) wbLoginStatus {
 	login.cancel = nil
 	login.browserCtx = nil
 	login.deviceID = ""
+	login.screenshot = nil
 	login.state = "idle"
 	login.message = message
 	login.expiresAt = nil
@@ -527,6 +580,7 @@ func (login *wbLoginManager) fail(generation uint64, message string) {
 		login.expiresAt = nil
 		login.browserCtx = nil
 		login.deviceID = ""
+		login.screenshot = nil
 		login.cancel = nil
 	})
 }
@@ -547,6 +601,17 @@ func registerWBLoginRoutes(mux *http.ServeMux, login *wbLoginManager, username, 
 	}
 	mux.Handle("GET /api/wb-login", protect(func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, login.status())
+	}))
+	mux.Handle("GET /api/wb-login/screenshot", protect(func(w http.ResponseWriter, _ *http.Request) {
+		body, ok := login.screenshotPNG()
+		if !ok {
+			http.Error(w, "WB diagnostic screenshot is not ready", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Content-Length", fmt.Sprint(len(body)))
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write(body)
 	}))
 	mux.Handle("POST /api/wb-login/start", mutate(func(w http.ResponseWriter, _ *http.Request) {
 		status, err := login.start()

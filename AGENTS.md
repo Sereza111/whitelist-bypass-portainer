@@ -90,6 +90,26 @@ Portainer and a headless Joiner in Video mode.
   an empty `[]` JSON file as configured. Local API/browser smoke testing reached
   WB state `phone`; no real phone or OTP was submitted during development.
 
+## Active handoff (2026-07-26, alpha.18 HTTPS/WB hardening candidate)
+
+- User created `panel.yozik.ru` with A `93.189.230.198`; external DNS resolves
+  correctly. The VPS already runs Nginx on TCP/80 and TCP/443. HTTPS currently
+  presents a certificate for the wrong principal and returns Nginx 502, while
+  HTTP returns Nginx 404. Do not add Caddy or bind another service to 80/443.
+- Candidate Stack binds manager only to `127.0.0.1:9200:8080`. The included
+  `docs/nginx-panel.yozik.ru.conf` is an HTTP bootstrap proxy to loopback; on
+  the VPS install it, validate/reload Nginx, then run
+  `certbot --nginx -d panel.yozik.ru` so Certbot adds the correct certificate
+  and redirect. Keep `/data` volume.
+- Field alpha.17 WB login failed before any phone input with the generic phone
+  form timeout. Candidate raises startup wait from 45s to 2m, repeatedly looks
+  for the visible login action/phone input without depending on one placeholder,
+  and captures a pre-credential diagnostic screenshot on failure. Screenshot
+  API remains Basic-Auth protected and no screenshot is taken after phone/code.
+- Version defaults are staged at alpha.18. Manager, relay and desktop tests/vet,
+  panel JS syntax, TypeScript and `git diff --check` pass locally. This candidate
+  is not yet committed, tagged or released.
+
 ## Active handoff (2026-07-25, alpha.15 completion)
 
 - Matching Android alpha.14 field log `relay (15).log` is external-only and

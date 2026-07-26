@@ -28,7 +28,7 @@ services:
       UPSTREAM_USER: ${UPSTREAM_USER:-}
       UPSTREAM_PASS: ${UPSTREAM_PASS:-}
     ports:
-      - "0.0.0.0:9200:8080"
+      - "127.0.0.1:9200:8080"
     volumes:
       - whitelist-bypass-manager-data:/data
       - type: bind

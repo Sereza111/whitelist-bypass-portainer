@@ -194,6 +194,7 @@
       <p class="vk-login-lede">Введи номер технического WB-аккаунта, затем одноразовый код. Данные используются только текущим изолированным Chromium на сервере и не сохраняются панелью.</p>
       <p id="wbTransportWarning" class="inline-warning" hidden>Панель открыта по HTTP: номер и одноразовый код передаются без TLS. Настрой HTTPS reverse proxy перед входом в WB.</p>
       <div class="vk-login-state"><span id="wbLoginRune" class="status-rune"></span><div><strong id="wbLoginState">Ожидание</strong><small id="wbLoginMessage">Нажми «Начать вход»</small></div></div>
+      <div id="wbLoginScreen" class="vk-login-screen" hidden><img id="wbLoginScreenshot" alt="Диагностика страницы входа WB Stream"><div class="scan-corners"></div></div>
       <form id="wbPhoneForm" class="provider-login-form" hidden>
         <label>Номер телефона<div class="phone-field"><span>+7</span><input id="wbPhone" inputmode="tel" autocomplete="tel" placeholder="900 000 00 00" maxlength="16" required></div><small class="field-help">Номер не записывается в control-plane.json и не выводится в события.</small></label>
         <button class="primary" type="submit">Получить код</button>

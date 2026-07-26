@@ -14,7 +14,8 @@ Direct Creator находятся в одном контейнере. Отдел
 - публичный образ GHCR;
 - каталог `/opt/whitelist-bypass/secrets` с cookies нужной платформы;
 - минимум 1 vCPU и 1 ГБ RAM;
-- открытый TCP/9200 для текущей HTTP-панели.
+- свободные TCP/80 и TCP/443 на Nginx; Docker-порт 9200 доступен только через
+  loopback сервера.
 
 ## Рекомендуемый Stack
 
@@ -25,7 +26,7 @@ Direct Creator находятся в одном контейнере. Отдел
 
 | Переменная | Значение |
 |---|---|
-| `WLB_IMAGE` | `ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.17` |
+| `WLB_IMAGE` | `ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.18` |
 | `PANEL_USERNAME` | `admin` или другой логин |
 | `PANEL_PASSWORD` | уникальный пароль длиной от 12 символов |
 | `WLB_SECRETS_DIR` | `/opt/whitelist-bypass/secrets` |
@@ -39,8 +40,9 @@ Direct Creator находятся в одном контейнере. Отдел
 [`.env.manager.example`](.env.manager.example).
 
 5. Deploy stack.
-6. Проверьте Published Ports: `9200:8080`.
-7. Откройте `http://SERVER_IP:9200`.
+6. Проверьте Published Ports: `127.0.0.1:9200:8080`.
+7. Настройте Nginx/Certbot по разделу ниже и откройте
+   `https://panel.yozik.ru`.
 
 В разделе **Клиенты** создайте отдельный профиль устройства или пользователя.
 `Лимит сессий` ограничивает только этот профиль, а `MAX_SESSIONS` — весь
@@ -125,6 +127,9 @@ manager/client запрашивает ограниченное переподк�
 
 ## Безопасность панели
 
-Порт 9200 сейчас использует HTTP Basic Auth. Для постоянного публичного
-развёртывания поставьте TLS reverse proxy (Caddy/Nginx), ограничьте порт
+Порт 9200 использует HTTP Basic Auth и привязан только к loopback VPS. Для
+публичного доступа используйте TLS reverse proxy Nginx на 443. Готовый первый
+конфиг находится в `docs/nginx-panel.yozik.ru.conf`; после его установки
+выполните `certbot --nginx -d panel.yozik.ru`, чтобы Certbot добавил HTTPS и
+перенаправление. Не публикуйте 9200 на `0.0.0.0`; ограничьте административный доступ
 firewall и смените любой пароль, попавший в скриншот или переписку.
