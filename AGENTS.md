@@ -106,9 +106,12 @@ Portainer and a headless Joiner in Video mode.
   for the visible login action/phone input without depending on one placeholder,
   and captures a pre-credential diagnostic screenshot on failure. Screenshot
   API remains Basic-Auth protected and no screenshot is taken after phone/code.
-- Version defaults are staged at alpha.18. Manager, relay and desktop tests/vet,
-  panel JS syntax, TypeScript and `git diff --check` pass locally. This candidate
-  is not yet committed, tagged or released.
+- `v0.5.0-alpha.18` is published from immutable commit `a48b1d3`; do not move
+  the tag. Branch and tag Docker, Windows and Android workflows passed. Release
+  APK SHA-256 is
+  `b620ef68a312839e7e3844c4862c4e8eb9a85c32e4a753da2dde218d862c69ef` and
+  EXE SHA-256 is
+  `285abcf9f244d7751f82220d28914fa3cf00c5f30da768727eb9af26449fd781`.
 
 ## Active handoff (2026-07-25, alpha.15 completion)
 
