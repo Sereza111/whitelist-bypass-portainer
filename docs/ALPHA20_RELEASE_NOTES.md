@@ -18,3 +18,10 @@ Alpha.20:
 
 Manager по-прежнему проверяет полученную сессию через `slide-v3` до сохранения.
 Pairing bearer, cookie values, телефон и OTP не попадают в UI, события и логи.
+
+Branch и immutable-tag CI успешно собрали Android, Windows и Docker.
+
+- APK SHA-256:
+  `cdde5180216e9c85bee71d7d0199f300035e4edc7f75d99387180dfb32e7a5c9`.
+- EXE SHA-256:
+  `2e30a4e653ba698eff4a89fe47a90e29ba58c898b9573304da7488289bfd589f`.

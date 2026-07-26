@@ -14,13 +14,13 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
-## Active handoff (2026-07-26, alpha.20 WB post-login candidate)
+## Active handoff (2026-07-26, alpha.20 WB post-login completion)
 
 - Alpha.19 field test proves the new device-assisted path opens on Android and
   WB login succeeds: the WebView reached the authenticated Profile page. It did
   not upload because the client queried only cookie-root URLs and required all
   three legacy cookie names before any progress transition.
-- Alpha.20 candidate detects `/profile` or visible `Выйти`, flushes the Android
+- Alpha.20 detects `/profile` or visible `Выйти`, flushes the Android
   cookie store, loads the WB Stream root once to initialise Stream auth, probes
   the current page plus exact login/profile/`slide-v3` paths (cookie Path can
   exclude root queries), and shows only a safe required-cookie count. It never
@@ -29,6 +29,12 @@ Portainer and a headless Joiner in Video mode.
   unchanged. Field gate: matching alpha.20 Android + Docker, create a fresh QR,
   login, then report whether the phone reaches upload/success or which safe
   `N/3` count remains.
+- `v0.5.0-alpha.20` is published from immutable commit `438706b`; do not move
+  the tag. Branch and tagged Android, Windows and Docker workflows passed. APK
+  SHA-256 is
+  `cdde5180216e9c85bee71d7d0199f300035e4edc7f75d99387180dfb32e7a5c9`;
+  EXE SHA-256 is
+  `2e30a4e653ba698eff4a89fe47a90e29ba58c898b9573304da7488289bfd589f`.
 
 ## Active handoff (2026-07-26, alpha.19 device-assisted WB completion)
 
