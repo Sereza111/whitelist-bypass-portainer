@@ -126,6 +126,10 @@
 
     <string name="paste_from_clipboard">Paste from clipboard</string>
     <string name="clipboard_empty">Clipboard is empty</string>
+	<string name="mobile_invite_title">Add connection</string>
+	<string name="mobile_invite_message">Import “%1$s” and connect in Video mode? Android will request VPN permission if needed.</string>
+	<string name="mobile_invite_connect">Import and connect</string>
+	<string name="mobile_invite_invalid">This Whitelist Bypass invite is invalid or damaged</string>
 	<string name="recovery_pairing_label">AUTO RECOVERY · paste the mobile block from the server panel</string>
 	<string name="recovery_profile_hint">Profile ID</string>
 	<string name="recovery_key_hint">Recovery key</string>

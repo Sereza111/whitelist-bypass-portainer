@@ -1,7 +1,7 @@
 package bypass.whitelist.tunnel
 
 enum class TunnelMode(val label: String, val relayArg: String, val isPion: Boolean) {
-    DC("DC", "dc", false),
+    DC("DC · experimental", "dc", false),
     VIDEO("Video", "video", true);
 
     fun relayMode(platform: CallPlatform): String {
@@ -16,4 +16,3 @@ enum class TunnelMode(val label: String, val relayArg: String, val isPion: Boole
         return this
     }
 }
-

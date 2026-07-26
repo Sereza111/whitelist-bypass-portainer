@@ -14,6 +14,31 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
+## Active handoff (2026-07-26, alpha.16 candidate)
+
+- Matching alpha.15 Android field logs `relay (17).log` and `relay (18).log`
+  are external-only and must never be committed. Captcha completion is fixed.
+- DC control ran at only 20–51 kbps and proved the exact compatibility split:
+  `mode=dc`, handshake timeout, `wire=0 caps=0x0 legacy=true`, no KCP and empty
+  scheduler queues. Creator DC still used its standalone manual mux instead of
+  RelayBridge, so it ignored `MsgHello` and modern capabilities.
+- Video control negotiated matching server `0.5.0-alpha.15+e6f7bc7`, `wire=1`,
+  `caps=0x3b`, reliable DNS/control KCP and reached 668.5 kbps. `WaitSnd` was
+  only 16/256 with zero queue drops, ACK stalls or carrier stalls. The measured
+  ~0.8 Mbps limit is currently the VK VP8 carrier, not a saturated KCP window.
+- Alpha.16 removes the separate Creator DC mux and passes DC through DCTunnel
+  plus RelayBridge. Do not wrap reliable SCTP in KCP. DC output observes the
+  configured DataChannel buffered-amount bound. Video remains the default and
+  DC remains experimental pending matching field verification.
+- Panel Android onboarding now creates a random in-memory 15-minute
+  `/join/<token>` bearer link. The unauthenticated no-cache landing page opens
+  `wlb://import`; Android validates a VK call invite, asks for confirmation,
+  imports it in Video mode, then uses the existing VpnService permission flow.
+  No client VK cookies are collected. Recommend HTTPS before sharing invites
+  over untrusted networks; never log or publish the invite URL.
+- Relay, Creator and Manager tests/vet plus panel JS syntax pass locally.
+  Android requires CI before an immutable alpha.16 tag may be published.
+
 ## Active handoff (2026-07-25, alpha.15 completion)
 
 - Matching Android alpha.14 field log `relay (15).log` is external-only and

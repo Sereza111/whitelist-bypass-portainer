@@ -903,11 +903,12 @@ func main() {
 		ur.SetObfuscator(obf)
 		ur.OnConnected = func(tun tunnel.DataTunnel) {
 			dataTunnel := tun
-			bridgeReadBuf := common.VP8BufSize
+			bridgeReadBuf := readBuf
 			capabilities := tunnel.CapabilityMetricsV1
 			var adaptive *tunnel.AdaptiveKCPTunnel
 			var peerSupportsAuto atomic.Bool
-			if *videoReliability == "auto" {
+			_, dataChannelMode := tun.(*tunnel.DCTunnel)
+			if *videoReliability == "auto" && !dataChannelMode {
 				adaptive = tunnel.NewAdaptiveKCPTunnel(tun, log.Printf)
 				adaptive.SetKCPProfile(*kcpProfile)
 				adaptive.SetOnStall(func() {
@@ -916,6 +917,8 @@ func main() {
 				dataTunnel = adaptive
 				bridgeReadBuf = tunnel.AdaptiveKCPRelayReadBuf
 				capabilities |= tunnel.CapabilityVideoKCP1 | tunnel.CapabilityPriorityControl | tunnel.CapabilityReliableDNS | tunnel.CapabilityKCPAuto
+			} else if !dataChannelMode {
+				bridgeReadBuf = common.VP8BufSize
 			}
 			rb := tunnel.NewRelayBridge(dataTunnel, "creator", bridgeReadBuf, log.Printf)
 			ur.SetSessionClose(func() {
@@ -950,12 +953,13 @@ func main() {
 					}
 				})
 			}
-			rb.ConfigureHandshake(
-				capabilities,
-				common.VP8BufSize,
-				tunnel.ReliabilityRawVP8,
-				1,
-			)
+			reliability := tunnel.ReliabilityRawVP8
+			maxPayload := common.VP8BufSize
+			if dataChannelMode {
+				reliability = tunnel.ReliabilityDataChannel
+				maxPayload = readBuf
+			}
+			rb.ConfigureHandshake(capabilities, maxPayload, reliability, 1)
 			if st, ok := tun.(*tunnel.SymmetricScreenTunnel); ok {
 				rb.SetOnPeerConfig(func(fps, batch, trackCount int) {
 					st.SetTrackCount(trackCount)

@@ -6,12 +6,12 @@ Dion. Это уже не минимальная Docker-обёртка upstream: 
 клиенты, SOCKS5/TUN, автоматическое восстановление звонков, диагностику и
 multi-arch релизный pipeline.
 
-Текущий релиз: **[v0.5.0-alpha.15](https://github.com/Sereza111/whitelist-bypass-portainer/releases/tag/v0.5.0-alpha.15)**.
+Текущий релиз: **[v0.5.0-alpha.16](https://github.com/Sereza111/whitelist-bypass-portainer/releases/tag/v0.5.0-alpha.16)**.
 
 Docker image:
 
 ```text
-ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.15
+ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.16
 ```
 
 Проект основан на
@@ -133,7 +133,7 @@ ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.15
 
 | Переменная | Рекомендуемое значение |
 |---|---|
-| `WLB_IMAGE` | `ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.15` |
+| `WLB_IMAGE` | `ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.16` |
 | `PANEL_USERNAME` | новый логин, по умолчанию `admin` |
 | `PANEL_PASSWORD` | уникальный пароль длиной от 12 символов |
 | `WLB_SECRETS_DIR` | `/opt/whitelist-bypass/secrets` |
@@ -181,10 +181,13 @@ Manager сохраняет cookies в `/data/managed-secrets/cookies-vk.json` с
 4. При необходимости укажите персональный VK recovery recipient.
 5. Нажмите **Запустить**.
 6. Дождитесь состояния «Ждёт устройство» и появления ссылки.
-7. Передайте ссылку Windows-клиенту или блок **В телефон** Android-клиенту.
+7. Для Android нажмите **В телефон** и отправьте созданную временную ссылку.
+   Для Windows скопируйте обычную ссылку сессии.
 
-Recovery key является секретом устройства. Не публикуйте pairing block и не
-прикладывайте его к логам.
+Android-ссылка действует 15 минут. После нажатия браузер предлагает открыть
+Whitelist Bypass, клиент показывает имя профиля, импортирует его в Video mode
+и запрашивает системное VPN-разрешение. Recovery key и временная ссылка
+являются секретами устройства: не публикуйте их и не прикладывайте к логам.
 
 ## Windows и Android
 
@@ -195,7 +198,7 @@ Recovery key является секретом устройства. Не пуб
 В логах клиента и сервера должны совпадать:
 
 ```text
-[build] version=0.5.0-alpha.15 commit=... built=...
+[build] version=0.5.0-alpha.16 commit=... built=...
 ```
 
 Если на телефоне осталась старая debug-signed `alpha.8`, её нужно удалить один
@@ -375,7 +378,7 @@ docker compose --env-file .env.portainer -f portainer-stack-build.yml up -d --bu
 - peer health watchdog, KCP lifecycle cleanup и carrier DNS fallback.
 
 Подробные изменения последнего релиза:
-[docs/ALPHA15_RELEASE_NOTES.md](docs/ALPHA15_RELEASE_NOTES.md).
+[docs/ALPHA16_RELEASE_NOTES.md](docs/ALPHA16_RELEASE_NOTES.md).
 
 ## Дополнительная документация
 

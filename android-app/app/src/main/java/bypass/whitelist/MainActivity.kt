@@ -9,9 +9,11 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
+import android.util.Base64
 import android.view.View
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.ImageView
@@ -31,6 +33,7 @@ import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentManager
 import androidx.viewpager2.adapter.FragmentStateAdapter
 import androidx.viewpager2.widget.ViewPager2
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import bypass.whitelist.recovery.RecoveryNotificationListener
 import bypass.whitelist.tunnel.CallConfig
 import bypass.whitelist.tunnel.CallPlatform
@@ -58,6 +61,7 @@ import bypass.whitelist.util.Net
 import bypass.whitelist.util.Prefs
 import bypass.whitelist.util.SocksAuth
 import bypass.whitelist.util.maskUrl
+import org.json.JSONObject
 import java.net.InetSocketAddress
 import java.net.Socket
 import kotlin.concurrent.thread
@@ -323,6 +327,7 @@ class MainActivity :
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        setIntent(intent)
         handleIntent(intent)
     }
 
@@ -513,6 +518,11 @@ class MainActivity :
     }
 
     private fun handleIntent(intent: Intent?) {
+		if (intent?.action == Intent.ACTION_VIEW && intent.data?.scheme == MOBILE_INVITE_SCHEME) {
+			intent.action = null
+			handleMobileInvite(intent.data)
+			return
+		}
 		if (intent?.action == ACTION_RECOVERY_UPDATE) {
 			intent.action = null
 			handleRecoveryUpdate(intent.getStringExtra(RecoveryNotificationListener.EXTRA_DESTINATION_ID))
@@ -529,6 +539,75 @@ class MainActivity :
             onDisconnectPressed()
         }
     }
+
+	private fun handleMobileInvite(uri: Uri?) {
+		val invite = parseMobileInvite(uri)
+		if (invite == null) {
+			Toast.makeText(this, R.string.mobile_invite_invalid, Toast.LENGTH_LONG).show()
+			return
+		}
+		val existing = Prefs.savedDestinations.firstOrNull { it.recoveryProfile == invite.profile }
+		val config = (existing ?: CallConfig.newWith(invite.name, invite.link)).copy(
+			name = invite.name,
+			url = invite.link,
+			tunnelMode = TunnelMode.VIDEO,
+			recoveryProfile = invite.profile,
+			recoveryKey = invite.key,
+			recoveryGeneration = invite.generation,
+			recoveryPending = false,
+		)
+		MaterialAlertDialogBuilder(this)
+			.setTitle(R.string.mobile_invite_title)
+			.setMessage(getString(R.string.mobile_invite_message, invite.name))
+			.setNegativeButton(android.R.string.cancel, null)
+			.setPositiveButton(R.string.mobile_invite_connect) { _, _ ->
+				Prefs.addDestination(config)
+				onDestinationSelected(config)
+				onConnectPressed(config)
+			}
+			.show()
+	}
+
+	private fun parseMobileInvite(uri: Uri?): MobileInvite? {
+		if (uri?.scheme != MOBILE_INVITE_SCHEME || uri.host != MOBILE_INVITE_HOST) return null
+		val encoded = uri.getQueryParameter("data")?.takeIf { it.length in 1..8192 } ?: return null
+		return runCatching {
+			val decoded = String(
+				Base64.decode(encoded, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP),
+				Charsets.UTF_8,
+			)
+			val payload = JSONObject(decoded)
+			if (payload.optInt("v") != 1) return@runCatching null
+			val name = payload.optString("name").trim().takeIf { it.isNotEmpty() && it.length <= 80 }
+				?: return@runCatching null
+			val profile = payload.optString("profile").trim()
+				.takeIf { it.length in 8..128 && it.all { char -> char.isLetterOrDigit() || char == '-' || char == '_' } }
+				?: return@runCatching null
+			val key = payload.optString("key").trim()
+				.takeIf { it.length in 24..256 && it.all { char -> char.isLetterOrDigit() || char == '-' || char == '_' } }
+				?: return@runCatching null
+			val link = payload.optString("link").trim().takeIf { isSafeVKCallLink(it) }
+				?: return@runCatching null
+			val generation = payload.optInt("generation", 0).takeIf { it >= 0 } ?: return@runCatching null
+			MobileInvite(name, profile, key, generation, link)
+		}.getOrNull()
+	}
+
+	private fun isSafeVKCallLink(value: String): Boolean {
+		if (value.length !in 1..2048) return false
+		val parsed = Uri.parse(value)
+		val host = parsed.host?.lowercase() ?: return false
+		return parsed.scheme == "https" && (host == "vk.com" || host.endsWith(".vk.com")) &&
+			parsed.path.orEmpty().startsWith("/call")
+	}
+
+	private data class MobileInvite(
+		val name: String,
+		val profile: String,
+		val key: String,
+		val generation: Int,
+		val link: String,
+	)
 
 	private fun handleRecoveryUpdate(destinationId: String?) {
 		val config = Prefs.savedDestinations.firstOrNull { it.id == destinationId } ?: return
@@ -939,6 +1018,8 @@ class MainActivity :
     }
 
     companion object {
+		private const val MOBILE_INVITE_SCHEME = "wlb"
+		private const val MOBILE_INVITE_HOST = "import"
         const val ACTION_AUTO_START = "bypass.whitelist.AUTO_START"
 		const val ACTION_RECOVERY_UPDATE = "bypass.whitelist.OPEN_RECOVERY"
         private const val SUB_PAGE_TAG = "sub_page"

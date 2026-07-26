@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -30,6 +31,33 @@ func TestNormalizeRequest(t *testing.T) {
 	}
 	if _, err := m.normalizeRequest(sessionRequest{Mode: "unknown"}); err == nil {
 		t.Fatal("unsupported mode accepted")
+	}
+}
+
+func TestEncodeMobileInvite(t *testing.T) {
+	profile := clientProfile{
+		ID: "client-mobile-1", Name: "Телефон", RecoveryKey: "abcdefghijklmnopqrstuvwxyz012345",
+	}
+	status := sessionStatus{SessionLink: "https://vk.com/call/join/example", Generation: 7}
+	invite, err := encodeMobileInvite(profile, status)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, ok := strings.CutPrefix(invite, "wlb://import?data=")
+	if !ok {
+		t.Fatalf("unexpected invite URI: %q", invite)
+	}
+	body, err := base64.RawURLEncoding.DecodeString(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload mobileInvitePayload
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Version != 1 || payload.Name != profile.Name || payload.Profile != profile.ID ||
+		payload.Key != profile.RecoveryKey || payload.Generation != 7 || payload.Link != status.SessionLink {
+		t.Fatalf("unexpected payload: %#v", payload)
 	}
 }
 
@@ -114,6 +142,40 @@ func TestControlAPIProfileLifecycle(t *testing.T) {
 	if duplicate.ID == created.ID || duplicate.RecoveryKey == created.RecoveryKey || !strings.Contains(duplicate.Name, "copy") {
 		t.Fatalf("duplicate did not receive an independent identity: %#v", duplicate)
 	}
+
+	fakeManager := newManagerAt(t.TempDir())
+	fakeManager.state = "waiting-for-client"
+	fakeManager.link = "https://vk.com/call/join/example"
+	fakeSession := &managedSession{
+		ID: "session-mobile", ClientID: created.ID, ClientName: created.Name,
+		CreatedAt: time.Now().UTC(), Manager: fakeManager, Generation: 3,
+	}
+	cp.mu.Lock()
+	cp.sessions[fakeSession.ID] = fakeSession
+	cp.mu.Unlock()
+	response = controlAPIRequest(t, mux, http.MethodPost, "/api/profiles/"+created.ID+"/mobile-invite", "{}")
+	if response.Code != http.StatusCreated {
+		t.Fatalf("mobile invite status=%d body=%s", response.Code, response.Body.String())
+	}
+	var invite mobileInviteResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &invite); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(invite.URL, "/join/") || !invite.ExpiresAt.After(time.Now()) {
+		t.Fatalf("unexpected mobile invite: %#v", invite)
+	}
+	landingRequest := httptest.NewRequest(http.MethodGet, invite.URL, nil)
+	landingResponse := httptest.NewRecorder()
+	mux.ServeHTTP(landingResponse, landingRequest)
+	if landingResponse.Code != http.StatusOK || !strings.Contains(landingResponse.Body.String(), "wlb://import?data=") {
+		t.Fatalf("mobile landing status=%d body=%s", landingResponse.Code, landingResponse.Body.String())
+	}
+	if strings.Contains(landingResponse.Body.String(), created.RecoveryKey) || strings.Contains(landingResponse.Body.String(), fakeManager.link) {
+		t.Fatal("mobile landing exposed unencoded profile secrets")
+	}
+	cp.mu.Lock()
+	delete(cp.sessions, fakeSession.ID)
+	cp.mu.Unlock()
 
 	response = controlAPIRequest(t, mux, http.MethodDelete, "/api/profiles/"+created.ID, "")
 	if response.Code != http.StatusNoContent {

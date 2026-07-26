@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -45,6 +47,25 @@ type recoverySettingsInput struct {
 	Recipient string `json:"recipient"`
 }
 
+type mobileInvitePayload struct {
+	Version    int    `json:"v"`
+	Name       string `json:"name"`
+	Profile    string `json:"profile"`
+	Key        string `json:"key"`
+	Generation int    `json:"generation"`
+	Link       string `json:"link"`
+}
+
+type mobileInviteResponse struct {
+	URL       string    `json:"url"`
+	ExpiresAt time.Time `json:"expiresAt"`
+}
+
+type mobileInviteRecord struct {
+	URI       string
+	ExpiresAt time.Time
+}
+
 var recoveryMessageSender = sendVKTestMessage
 
 func registerControlAPIRoutes(mux *http.ServeMux, cp *controlPlane, vkLogin *vkLoginManager, username, password, secretsDir string) {
@@ -56,6 +77,8 @@ func registerControlAPIRoutes(mux *http.ServeMux, cp *controlPlane, vkLogin *vkL
 	}
 	var recoveryTestMu sync.Mutex
 	recoveryTests := make(map[string]time.Time)
+	var mobileInviteMu sync.Mutex
+	mobileInvites := make(map[string]mobileInviteRecord)
 	recoveryView := func(profileID string) recoverySettingsResponse {
 		recipient, source := cp.effectiveRecoveryRecipient(profileID)
 		cp.mu.Lock()
@@ -147,6 +170,62 @@ func registerControlAPIRoutes(mux *http.ServeMux, cp *controlPlane, vkLogin *vkL
 	mux.Handle("GET /api/profiles", protect(func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, cp.listProfiles())
 	}))
+	mobileInvite := func(profileID string) (string, error) {
+		profile, ok := cp.profile(profileID)
+		if !ok {
+			return "", os.ErrNotExist
+		}
+		if profile.Config.Mode != "vk" {
+			return "", errors.New("Android invite currently supports VK profiles only")
+		}
+		for _, session := range cp.listSessions() {
+			if session.ClientID == profileID && session.Status.SessionLink != "" {
+				return encodeMobileInvite(profile, session.Status)
+			}
+		}
+		return "", errors.New("start the profile and wait for its call link first")
+	}
+	mux.Handle("POST /api/profiles/{id}/mobile-invite", mutate(func(w http.ResponseWriter, r *http.Request) {
+		invite, err := mobileInvite(r.PathValue("id"))
+		if errors.Is(err, os.ErrNotExist) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "client profile not found"})
+			return
+		}
+		if err != nil {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+			return
+		}
+		now := time.Now().UTC()
+		expiresAt := now.Add(15 * time.Minute)
+		token := randomSecret()
+		mobileInviteMu.Lock()
+		for candidate, record := range mobileInvites {
+			if !record.ExpiresAt.After(now) {
+				delete(mobileInvites, candidate)
+			}
+		}
+		mobileInvites[token] = mobileInviteRecord{URI: invite, ExpiresAt: expiresAt}
+		mobileInviteMu.Unlock()
+		writeJSON(w, http.StatusCreated, mobileInviteResponse{URL: "/join/" + token, ExpiresAt: expiresAt})
+	}))
+	mux.HandleFunc("GET /join/{token}", func(w http.ResponseWriter, r *http.Request) {
+		now := time.Now().UTC()
+		mobileInviteMu.Lock()
+		record, ok := mobileInvites[r.PathValue("token")]
+		if ok && !record.ExpiresAt.After(now) {
+			delete(mobileInvites, r.PathValue("token"))
+			ok = false
+		}
+		mobileInviteMu.Unlock()
+		if !ok {
+			http.Error(w, "Ссылка подключения недействительна или истекла", http.StatusGone)
+			return
+		}
+		escapedURI := html.EscapeString(record.URI)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = fmt.Fprintf(w, `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="0;url=%s"><title>Whitelist Bypass</title></head><body><main><h1>Whitelist Bypass</h1><p>Открываю профиль в Android-приложении.</p><p><a href="%s">Открыть в Whitelist Bypass</a></p><p>Ссылка действует до %s.</p></main></body></html>`,
+			escapedURI, escapedURI, record.ExpiresAt.Format(time.RFC3339))
+	})
 	mux.Handle("POST /api/profiles/{id}/duplicate", mutate(func(w http.ResponseWriter, r *http.Request) {
 		profile, err := cp.duplicateProfile(r.PathValue("id"))
 		if errors.Is(err, os.ErrNotExist) {
@@ -279,6 +358,20 @@ func registerControlAPIRoutes(mux *http.ServeMux, cp *controlPlane, vkLogin *vkL
 		}
 		writeJSON(w, http.StatusOK, cp.events.list(limit))
 	}))
+}
+
+func encodeMobileInvite(profile clientProfile, status sessionStatus) (string, error) {
+	if profile.ID == "" || profile.RecoveryKey == "" || status.SessionLink == "" {
+		return "", errors.New("mobile invite is incomplete")
+	}
+	payload, err := json.Marshal(mobileInvitePayload{
+		Version: 1, Name: profile.Name, Profile: profile.ID, Key: profile.RecoveryKey,
+		Generation: status.Generation, Link: status.SessionLink,
+	})
+	if err != nil {
+		return "", err
+	}
+	return "wlb://import?data=" + base64.RawURLEncoding.EncodeToString(payload), nil
 }
 
 func decodeRequest(w http.ResponseWriter, r *http.Request, value any) bool {

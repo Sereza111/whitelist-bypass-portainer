@@ -33,6 +33,8 @@ type DCTunnel struct {
 	obf      *TunnelObfuscator
 	chunked  bool
 	readBuf  int
+	maxBuf   uint64
+	sendMu   sync.Mutex
 
 	recvBufs  sync.Map
 	sendMsgID uint32
@@ -208,6 +210,13 @@ func (t *DCTunnel) sendChunked(data []byte) {
 }
 
 func (t *DCTunnel) sendRaw(data []byte) {
+	t.sendMu.Lock()
+	defer t.sendMu.Unlock()
+	if t.dc != nil && t.maxBuf > 0 {
+		for t.dc.ReadyState() == webrtc.DataChannelStateOpen && t.dc.BufferedAmount() > t.maxBuf {
+			time.Sleep(2 * time.Millisecond)
+		}
+	}
 	w := t.writeRaw
 	if w == nil {
 		w = t.raw
@@ -247,10 +256,11 @@ func (t *DCTunnel) SendData(data []byte) {
 	})
 }
 
-func (t *DCTunnel) SetOnData(fn func([]byte))   { t.onData = fn }
-func (t *DCTunnel) OnData() func([]byte)        { return t.onData }
-func (t *DCTunnel) SetOnClose(fn func())         { t.onClose = fn }
-func (t *DCTunnel) Reconfigure(fps, batch int)   {}
+func (t *DCTunnel) SetOnData(fn func([]byte))         { t.onData = fn }
+func (t *DCTunnel) OnData() func([]byte)              { return t.onData }
+func (t *DCTunnel) SetOnClose(fn func())              { t.onClose = fn }
+func (t *DCTunnel) SetMaxBufferedAmount(value uint64) { t.maxBuf = value }
+func (t *DCTunnel) Reconfigure(fps, batch int)        {}
 
 func (t *DCTunnel) TunnelMetrics() TunnelMetrics {
 	return TunnelMetrics{

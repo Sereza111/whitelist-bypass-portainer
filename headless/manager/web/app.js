@@ -228,7 +228,7 @@ function contextActions(kind, id) {
     if (!profile) return [];
     return [
       { action: 'start', label: 'Запустить сессию', disabled: !profile.enabled },
-      { action: 'mobile', label: 'Скопировать в телефон' },
+      { action: 'mobile', label: 'Ссылка для Android' },
       { action: 'duplicate', label: 'Создать независимую копию' },
       { action: 'test-recovery', label: 'Проверить доставку VK' },
       { action: 'edit', label: 'Изменить профиль' },
@@ -332,19 +332,24 @@ function renderDashboard() {
 async function copyMobileProfile(id) {
 	const profile = app.profiles.find((item) => item.id === id);
 	if (!profile) return;
-	const session = app.sessions
-		.filter((item) => item.clientId === id && item.status?.sessionLink)
-		.sort((a, b) => (b.status.generation || 0) - (a.status.generation || 0))[0];
-	const block = [
-		'WLB Recovery Profile',
-		`Name: ${profile.name}`,
-		`Profile: ${profile.id}`,
-		`Key: ${profile.recoveryKey}`,
-		`Generation: ${session?.status?.generation || 0}`,
-		`Link: ${session?.status?.sessionLink || '<start profile first>'}`,
-	].join('\n');
-	await copyText(block);
-	showError('Профиль восстановления скопирован — вставь его в Android-клиент.');
+	const response = await api(`/api/profiles/${encodeURIComponent(id)}/mobile-invite`, { method: 'POST', body: '{}' });
+	const invite = new URL(response.url, window.location.href).href;
+	if (/Android/i.test(navigator.userAgent)) {
+		window.location.href = invite;
+		showError('Открываю профиль в Android-клиенте…');
+		return;
+	}
+	if (navigator.share) {
+		try {
+			await navigator.share({ title: `Whitelist Bypass · ${profile.name}`, text: 'Открыть профиль Whitelist Bypass', url: invite });
+			showError('Ссылка подключения отправлена.');
+			return;
+		} catch (error) {
+			if (error.name === 'AbortError') return;
+		}
+	}
+	await copyText(invite);
+	showError('Временная Android-ссылка скопирована — отправь её пользователю в течение 15 минут.');
 }
 
 function friendlyState(status) {
