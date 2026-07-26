@@ -32,10 +32,11 @@ Portainer and a headless Joiner in Video mode.
   DC remains experimental pending matching field verification.
 - Panel Android onboarding now creates a random in-memory 15-minute
   `/join/<token>` bearer link. The unauthenticated no-cache landing page opens
-  `wlb://import`; Android validates a VK call invite, asks for confirmation,
-  imports it in Video mode, then uses the existing VpnService permission flow.
-  No client VK cookies are collected. Recommend HTTPS before sharing invites
-  over untrusted networks; never log or publish the invite URL.
+  `wlb://import`; Android validates the provider-bound VK/WB/Telemost/Dion call
+  invite, asks for confirmation, imports it in Video mode, then uses the
+  existing VpnService permission flow. No client VK cookies are collected.
+  Recommend HTTPS before sharing invites over untrusted networks; never log or
+  publish the invite URL.
 - Relay, Creator and Manager tests/vet plus panel JS syntax pass locally.
   Desktop tests/vet and TypeScript build passed; a Windows antivirus briefly
   delayed deletion of already-passed temporary test binaries.
@@ -46,6 +47,43 @@ Portainer and a headless Joiner in Video mode.
   `71dba811e3a010f0aab1a0d3dcba00517d559ae541277a4274563ef5faebf73a`.
   Both checksum files match GitHub asset digests. GHCR contains `linux/amd64`,
   `linux/arm64` and `linux/386`. Do not move or replace the published tag.
+
+## Active handoff (2026-07-26, provider-aware Android pairing in progress)
+
+- The field result from `relay (20).log` is not a valid 1.2 Mbps tunnel result:
+  Proxy-only used a loopback SOCKS listener but the log contained no `SOCKS
+  CONNECT`, `tcp=0`, `tunnel_tx=0` and `tunnel_rx=0`. Use Tunnel for phone
+  system traffic, or enable Android **Share SOCKS5 over LAN** and configure the
+  PC explicitly. Never commit that external log.
+- Provider choice can change the carrier ceiling. Current preferred A/B order is
+  VK Video/DC, WB Stream DC/Video/dual-track, then Telemost/Dion. WB Stream has
+  reliable ordered DataChannel and Video+KCP in the current implementation;
+  Telemost and Dion Video remain raw VP8 without extra ARQ.
+- The panel previously rejected **В телефон** for every non-VK profile even
+  though manager, Windows and Android already supported WB Stream/Telemost/Dion.
+  The working tree now removes that restriction. Mobile payloads remain `v=1`
+  for compatibility and add optional `provider`; manager and Android bind each
+  provider to an allowlisted scheme/host before importing. Old VK payloads with
+  no provider still work. Automatic VK recovery messages remain VK-only.
+- Added `docs/PROVIDER_COMPARISON.md`, provider invite Go tests and Android
+  `CallPlatformTest`. Manager `go test ./...` and `go vet ./...` passed with
+  portable Go 1.26.5. Android Gradle/JDK are not installed locally; CI must run
+  the Android unit tests and release build.
+- This change is not tagged or released yet. Do not move `v0.5.0-alpha.16`.
+  Before a release, build matching server/Android/Windows artifacts and field
+  test WB with actual `SOCKS CONNECT`, `tcp>0`, and nonzero `tunnel_tx/rx`.
+- Panel-managed WB onboarding is now implemented in the working tree. It opens
+  `stream.wb.ru/login` in an isolated Chromium, advances to the phone form,
+  accepts the phone and one-time code through same-origin authenticated API,
+  validates the resulting allowlisted cookies against WB `slide-v3`, adds the
+  browser `wb_auth_api_device_id` as `__wb_device_id`, and atomically stores
+  `/data/managed-secrets/cookies-wbstream.json` with mode `0600`. Phone/code are
+  transient and never enter status, events, logs or control-plane JSON.
+- The Providers page has a WB card and phone/code wizard. Starting a profile
+  whose provider credentials are missing redirects to Providers with a clear
+  error. Provider readiness now parses required cookie names instead of treating
+  an empty `[]` JSON file as configured. Local API/browser smoke testing reached
+  WB state `phone`; no real phone or OTP was submitted during development.
 
 ## Active handoff (2026-07-25, alpha.15 completion)
 

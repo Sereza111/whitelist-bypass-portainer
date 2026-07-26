@@ -136,6 +136,12 @@
               <div class="identity-row"><span>Аккаунт</span><strong id="providerAccountID">Не подключён</strong></div>
               <button id="vkLoginOpen" class="primary full" type="button">Подключить / сменить через QR</button>
             </article>
+            <article class="panel provider-card">
+              <div class="provider-brand"><span class="provider-logo wb-logo">WB</span><div><span class="kicker">Альтернативный carrier</span><h2>WB Stream</h2></div><span id="wbAccountBadge" class="status-badge">Проверка</span></div>
+              <p>Встроенный мастер входит в технический WB-аккаунт через номер и одноразовый код. Номер, код и cookies не попадают в журнал; сохранённая сессия остаётся в закрытом каталоге сервера.</p>
+              <div class="identity-row"><span>Аккаунт</span><strong id="wbAccountState">Не подключён</strong></div>
+              <button id="wbLoginOpen" class="primary full" type="button">Подключить / сменить WB</button>
+            </article>
             <article class="panel recovery-panel">
               <div class="panel-head"><div><span class="kicker">Доставка новой ссылки</span><h2>VK Recovery</h2></div><span id="recoverySource" class="status-badge">Не настроено</span></div>
               <p>Укажи свой основной VK. После пересоздания звонка сервер отправит туда новую ссылку, а мобильный клиент сможет её перехватить.</p>
@@ -160,7 +166,7 @@
         <section class="page" data-page="settings">
           <div class="settings-grid">
             <article class="panel"><div class="panel-head"><div><span class="kicker">Сервер</span><h2>Control Plane</h2></div><span class="status-badge good-badge">Online</span></div><dl class="settings-list"><div><dt>Публичный порт</dt><dd>9200 / TCP</dd></div><div><dt>Авторизация</dt><dd>Basic Auth</dd></div><div><dt>Текущая сборка</dt><dd id="settingsBuild">—</dd></div><div><dt>Лимит Creator</dt><dd id="settingsLimit">—</dd></div></dl></article>
-            <article class="panel"><div class="panel-head"><div><span class="kicker">Безопасность</span><h2>Что хранится</h2></div></div><ul class="check-list"><li>Cookies VK находятся только в <code>/data/managed-secrets</code></li><li>Ссылки звонков скрыты из общего журнала</li><li>Токены и cookies не возвращаются через API</li><li>Изменения защищены проверкой Origin</li></ul></article>
+            <article class="panel"><div class="panel-head"><div><span class="kicker">Безопасность</span><h2>Что хранится</h2></div></div><ul class="check-list"><li>Cookies VK/WB находятся только в <code>/data/managed-secrets</code></li><li>Номер и одноразовый код WB не сохраняются</li><li>Ссылки звонков скрыты из общего журнала</li><li>Токены и cookies не возвращаются через API</li><li>Изменения защищены проверкой Origin</li></ul></article>
             <article class="panel span-all"><div class="panel-head"><div><span class="kicker">Рекомендуемая схема</span><h2>Стабильная эксплуатация</h2></div></div><div class="steps"><span>01<strong>Отдельный VK для сервера</strong></span><span>02<strong>Основной VK как получатель</strong></span><span>03<strong>Отдельный профиль на устройство</strong></span><span>04<strong>Auto для обычной сети</strong></span></div></article>
           </div>
         </section>
@@ -179,6 +185,25 @@
       <p id="vkLoginWarning" class="inline-warning" hidden></p>
       <div class="vk-login-help"><span>1</span><p>Открой VK на телефоне под вторым аккаунтом</p><span>2</span><p>Отсканируй QR и подтверди вход</p><span>3</span><p>Панель сама сохранит серверную сессию</p></div>
       <div class="actions vk-login-actions"><button id="vkLoginStart" class="primary" type="button">Создать QR</button><button id="vkLoginCancel" class="ghost" type="button" hidden>Отмена</button><button id="vkLoginForget" class="ghost danger" type="button" hidden>Отключить аккаунт</button></div>
+    </section>
+  </div>
+  <div id="wbLoginModal" class="modal-backdrop" hidden>
+    <section class="vk-login-modal" role="dialog" aria-modal="true" aria-labelledby="wbLoginTitle">
+      <button id="wbLoginClose" class="modal-close" type="button" aria-label="Закрыть">×</button>
+      <p class="eyebrow">Server identity · one-time code</p><h2 id="wbLoginTitle">Вход серверного WB Stream</h2>
+      <p class="vk-login-lede">Введи номер технического WB-аккаунта, затем одноразовый код. Данные используются только текущим изолированным Chromium на сервере и не сохраняются панелью.</p>
+      <p id="wbTransportWarning" class="inline-warning" hidden>Панель открыта по HTTP: номер и одноразовый код передаются без TLS. Настрой HTTPS reverse proxy перед входом в WB.</p>
+      <div class="vk-login-state"><span id="wbLoginRune" class="status-rune"></span><div><strong id="wbLoginState">Ожидание</strong><small id="wbLoginMessage">Нажми «Начать вход»</small></div></div>
+      <form id="wbPhoneForm" class="provider-login-form" hidden>
+        <label>Номер телефона<div class="phone-field"><span>+7</span><input id="wbPhone" inputmode="tel" autocomplete="tel" placeholder="900 000 00 00" maxlength="16" required></div><small class="field-help">Номер не записывается в control-plane.json и не выводится в события.</small></label>
+        <button class="primary" type="submit">Получить код</button>
+      </form>
+      <form id="wbCodeForm" class="provider-login-form" hidden>
+        <label>Одноразовый код<input id="wbCode" inputmode="numeric" autocomplete="one-time-code" placeholder="Код из SMS / Wildberries" maxlength="8" required></label>
+        <button class="primary" type="submit">Подтвердить вход</button>
+      </form>
+      <div class="vk-login-help"><span>1</span><p>Панель открывает WB Stream в изолированной сессии</p><span>2</span><p>Ты вводишь номер и одноразовый код</p><span>3</span><p>Панель проверяет cookies через WB API и сохраняет их с правами 0600</p></div>
+      <div class="actions vk-login-actions"><button id="wbLoginStart" class="primary" type="button">Начать вход</button><button id="wbLoginCancel" class="ghost" type="button" hidden>Отмена</button><button id="wbLoginForget" class="ghost danger" type="button" hidden>Отключить WB</button></div>
     </section>
   </div>
   <script src="/app.js"></script>

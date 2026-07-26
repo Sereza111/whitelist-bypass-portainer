@@ -586,19 +586,17 @@ class MainActivity :
 			val key = payload.optString("key").trim()
 				.takeIf { it.length in 24..256 && it.all { char -> char.isLetterOrDigit() || char == '-' || char == '_' } }
 				?: return@runCatching null
-			val link = payload.optString("link").trim().takeIf { isSafeVKCallLink(it) }
-				?: return@runCatching null
+			val link = payload.optString("link").trim()
+			val declaredProvider = payload.optString("provider").trim()
+			val platform = if (declaredProvider.isEmpty()) {
+				CallPlatform.fromUrl(link)
+			} else {
+				CallPlatform.fromId(declaredProvider) ?: return@runCatching null
+			}
+			if (!CallPlatform.isSafeInviteLink(platform, link)) return@runCatching null
 			val generation = payload.optInt("generation", 0).takeIf { it >= 0 } ?: return@runCatching null
 			MobileInvite(name, profile, key, generation, link)
 		}.getOrNull()
-	}
-
-	private fun isSafeVKCallLink(value: String): Boolean {
-		if (value.length !in 1..2048) return false
-		val parsed = Uri.parse(value)
-		val host = parsed.host?.lowercase() ?: return false
-		return parsed.scheme == "https" && (host == "vk.com" || host.endsWith(".vk.com")) &&
-			parsed.path.orEmpty().startsWith("/call")
 	}
 
 	private data class MobileInvite(

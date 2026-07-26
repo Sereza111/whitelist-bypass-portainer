@@ -56,8 +56,63 @@ func TestEncodeMobileInvite(t *testing.T) {
 		t.Fatal(err)
 	}
 	if payload.Version != 1 || payload.Name != profile.Name || payload.Profile != profile.ID ||
-		payload.Key != profile.RecoveryKey || payload.Generation != 7 || payload.Link != status.SessionLink {
+		payload.Provider != "vk" || payload.Key != profile.RecoveryKey || payload.Generation != 7 || payload.Link != status.SessionLink {
 		t.Fatalf("unexpected payload: %#v", payload)
+	}
+}
+
+func TestValidMobileInviteLink(t *testing.T) {
+	tests := []struct {
+		provider string
+		link     string
+		want     bool
+	}{
+		{"vk", "https://vk.com/call/join/example", true},
+		{"telemost", "https://telemost.yandex.ru/j/123456789", true},
+		{"wbstream", "wbstream://2c9fd4f0-7d64-4d25-a9a2-111111111111", true},
+		{"dion", "dion://demo-room_42", true},
+		{"dion", "https://dion.vc/event/demo-room_42", true},
+		{"vk", "http://vk.com/call/join/example", false},
+		{"telemost", "https://evil.example/j/123456789", false},
+		{"wbstream", "wbstream://room/path", false},
+		{"dion", "dion://room?token=secret", false},
+		{"unknown", "https://vk.com/call/join/example", false},
+	}
+	for _, test := range tests {
+		if got := validMobileInviteLink(test.provider, test.link); got != test.want {
+			t.Errorf("validMobileInviteLink(%q, %q)=%v want %v", test.provider, test.link, got, test.want)
+		}
+	}
+}
+
+func TestEncodeMobileInviteForEveryProvider(t *testing.T) {
+	tests := map[string]string{
+		"vk":       "https://vk.com/call/join/example",
+		"telemost": "https://telemost.yandex.ru/j/123456789",
+		"wbstream": "wbstream://2c9fd4f0-7d64-4d25-a9a2-111111111111",
+		"dion":     "dion://demo-room_42",
+	}
+	for provider, link := range tests {
+		profile := clientProfile{
+			ID: "client-" + provider, Name: provider, RecoveryKey: "abcdefghijklmnopqrstuvwxyz012345",
+			Config: sessionRequest{Mode: provider},
+		}
+		invite, err := encodeMobileInvite(profile, sessionStatus{SessionLink: link})
+		if err != nil {
+			t.Fatalf("%s invite: %v", provider, err)
+		}
+		encoded, _ := strings.CutPrefix(invite, "wlb://import?data=")
+		body, err := base64.RawURLEncoding.DecodeString(encoded)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var payload mobileInvitePayload
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.Provider != provider || payload.Link != link {
+			t.Fatalf("unexpected %s payload: %#v", provider, payload)
+		}
 	}
 }
 
@@ -593,5 +648,76 @@ func TestVKLoginAPINeverReturnsCookies(t *testing.T) {
 	mux.ServeHTTP(response, request)
 	if response.Code != http.StatusForbidden {
 		t.Fatalf("cross-origin QR start status=%d", response.Code)
+	}
+}
+
+func TestWBLoginCookieExportAndManagedPrecedence(t *testing.T) {
+	managedDir := t.TempDir()
+	mountedDir := t.TempDir()
+	login := newWBLoginManager(managedDir, mountedDir, "")
+	cookies := []*network.Cookie{
+		{Name: "wbx-refresh", Value: "refresh-secret", Domain: ".wb.ru", Path: "/", Secure: true, HTTPOnly: true},
+		{Name: "x_wbaas_token", Value: "token-secret", Domain: ".wb.ru", Path: "/"},
+		{Name: "wbx-validation-key", Value: "validation-secret", Domain: ".wb.ru", Path: "/"},
+	}
+	if !hasWBCredentials(cookies) {
+		t.Fatal("WB credentials were not detected")
+	}
+	if err := login.saveCookies(cookies, "11111111-2222-4333-8444-555555555555"); err != nil {
+		t.Fatal(err)
+	}
+	if !wbCookieFileReady(filepath.Join(managedDir, "cookies-wbstream.json")) {
+		t.Fatal("managed WB cookies were not written or are incomplete")
+	}
+
+	binsDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(binsDir, "headless-wbstream-creator"), []byte("test"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	mgr := newManagerAt(t.TempDir())
+	mgr.binsDir = binsDir
+	mgr.secretsDir = mountedDir
+	mgr.managedSecretsDir = managedDir
+	cmd, err := mgr.commandFor(sessionRequest{Mode: "wbstream", Resources: "default", VideoReliability: "auto", KCPProfile: "auto"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(cmd.Args, " "), filepath.Join(managedDir, "cookies-wbstream.json")) {
+		t.Fatalf("Creator did not prefer panel-managed WB cookies: %v", cmd.Args)
+	}
+}
+
+func TestWBLoginAPINeverReturnsPhoneCodeOrCookies(t *testing.T) {
+	managedDir := t.TempDir()
+	mountedDir := t.TempDir()
+	secret := `[
+		{"name":"wbx-refresh","value":"refresh-must-not-leak"},
+		{"name":"x_wbaas_token","value":"token-must-not-leak"},
+		{"name":"wbx-validation-key","value":"validation-must-not-leak"},
+		{"name":"__wb_device_id","value":"device-must-not-leak"}
+	]`
+	if err := os.WriteFile(filepath.Join(managedDir, "cookies-wbstream.json"), []byte(secret), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	login := newWBLoginManager(managedDir, mountedDir, "")
+	mux := http.NewServeMux()
+	registerWBLoginRoutes(mux, login, "admin", testPanelPassword)
+	response := controlAPIRequest(t, mux, http.MethodGet, "/api/wb-login", "")
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"managed":true`) {
+		t.Fatalf("unexpected WB status: code=%d body=%s", response.Code, response.Body.String())
+	}
+	for _, forbidden := range []string{"must-not-leak", "wbx-refresh", "x_wbaas_token", "__wb_device_id", "phone", "code"} {
+		if strings.Contains(response.Body.String(), forbidden) {
+			t.Fatalf("WB secret or input field leaked through status API: %s", response.Body.String())
+		}
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/api/wb-login/phone", strings.NewReader(`{"phone":"9000000000"}`))
+	request.SetBasicAuth("admin", testPanelPassword)
+	request.Header.Set("Origin", "https://attacker.example")
+	response = httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("cross-origin WB phone status=%d", response.Code)
 	}
 }

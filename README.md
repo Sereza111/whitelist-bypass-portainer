@@ -6,12 +6,12 @@ Dion. Это уже не минимальная Docker-обёртка upstream: 
 клиенты, SOCKS5/TUN, автоматическое восстановление звонков, диагностику и
 multi-arch релизный pipeline.
 
-Текущий релиз: **[v0.5.0-alpha.16](https://github.com/Sereza111/whitelist-bypass-portainer/releases/tag/v0.5.0-alpha.16)**.
+Текущий релиз: **v0.5.0-alpha.17**.
 
 Docker image:
 
 ```text
-ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.16
+ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.17
 ```
 
 Проект основан на
@@ -133,7 +133,7 @@ ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.16
 
 | Переменная | Рекомендуемое значение |
 |---|---|
-| `WLB_IMAGE` | `ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.16` |
+| `WLB_IMAGE` | `ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.17` |
 | `PANEL_USERNAME` | новый логин, по умолчанию `admin` |
 | `PANEL_PASSWORD` | уникальный пароль длиной от 12 символов |
 | `WLB_SECRETS_DIR` | `/opt/whitelist-bypass/secrets` |
@@ -173,6 +173,12 @@ ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.16
 Manager сохраняет cookies в `/data/managed-secrets/cookies-vk.json` с правами
 `0600` и удаляет временный Chromium profile. Пароль VK в панель не вводится.
 
+Для WB Stream используй **Провайдеры → Подключить / сменить WB**. Панель сама
+открывает изолированный вход WB, принимает номер и одноразовый код, проверяет
+сессию и сохраняет нужные cookies вместе с `__wb_device_id` в `/data` с правами
+`0600`. Старую Creator-версию и ручной `cookies.zip` для WB устанавливать не
+нужно. Номер и код не сохраняются и не попадают в логи.
+
 ## Создание клиента
 
 1. Откройте раздел **Клиенты**.
@@ -186,7 +192,10 @@ Manager сохраняет cookies в `/data/managed-secrets/cookies-vk.json` с
 
 Android-ссылка действует 15 минут. После нажатия браузер предлагает открыть
 Whitelist Bypass, клиент показывает имя профиля, импортирует его в Video mode
-и запрашивает системное VPN-разрешение. Recovery key и временная ссылка
+и запрашивает системное VPN-разрешение. Импорт поддерживает VK, Telemost,
+WB Stream и Dion; тип провайдера связан с проверенной схемой/доменом ссылки.
+Автоматическая доставка новой ссылки через VK пока относится только к VK-
+профилям. Recovery key и временная ссылка
 являются секретами устройства: не публикуйте их и не прикладывайте к логам.
 
 ## Windows и Android
@@ -198,7 +207,7 @@ Whitelist Bypass, клиент показывает имя профиля, им�
 В логах клиента и сервера должны совпадать:
 
 ```text
-[build] version=0.5.0-alpha.16 commit=... built=...
+[build] version=0.5.0-alpha.17 commit=... built=...
 ```
 
 Если на телефоне осталась старая debug-signed `alpha.8`, её нужно удалить один
@@ -273,6 +282,12 @@ Android принимает только свежую подпись сопряж
 
 Matching peers согласуют более безопасный профиль. Full TUN не должен
 использовать `fast`: Windows ограничивает его до `balanced`.
+
+Провайдер звонка также является частью транспорта и может менять реальную
+полосу сильнее KCP-профиля. WB Stream — первый кандидат для честного A/B с VK:
+у него доступны reliable DataChannel и Video+KCP. Telemost и Dion Video пока
+не имеют дополнительной ARQ и менее предпочтительны для TCP. Методика и
+критерии сравнения: [docs/PROVIDER_COMPARISON.md](docs/PROVIDER_COMPARISON.md).
 
 ## Диагностика
 
@@ -378,7 +393,7 @@ docker compose --env-file .env.portainer -f portainer-stack-build.yml up -d --bu
 - peer health watchdog, KCP lifecycle cleanup и carrier DNS fallback.
 
 Подробные изменения последнего релиза:
-[docs/ALPHA16_RELEASE_NOTES.md](docs/ALPHA16_RELEASE_NOTES.md).
+[docs/ALPHA17_RELEASE_NOTES.md](docs/ALPHA17_RELEASE_NOTES.md).
 
 ## Дополнительная документация
 
@@ -387,6 +402,7 @@ docker compose --env-file .env.portainer -f portainer-stack-build.yml up -d --bu
 - [Android](docs/ANDROID.md)
 - [Архитектура протокола](docs/PROTOCOL_ARCHITECTURE.md)
 - [План стабильности и скорости](docs/PERFORMANCE_ROADMAP.md)
+- [Сравнение провайдеров звонка](docs/PROVIDER_COMPARISON.md)
 - [Целевая архитектура](docs/TARGET_ARCHITECTURE.md)
 - [Product roadmap](docs/PRODUCT_ROADMAP.md)
 - [Полный проектный отчёт](docs/PROJECT_REPORT_2026-07-21.md)

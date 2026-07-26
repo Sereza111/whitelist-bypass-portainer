@@ -1,7 +1,7 @@
 const byId = (id) => document.getElementById(id);
 const app = {
   profiles: [], sessions: [], selected: null, refreshing: false,
-  profileSignature: '', sessionSignature: '', vkLoginStatus: null,
+  profileSignature: '', sessionSignature: '', vkLoginStatus: null, wbLoginStatus: null,
   overview: null, recoverySettings: null, events: [], eventFilter: 'all', section: 'dashboard',
 };
 
@@ -9,7 +9,7 @@ const pageMeta = {
   dashboard: ['Обзор', 'Состояние сервера и быстрые действия'],
   clients: ['Клиенты', 'Профили доступа, ограничения и восстановление'],
   sessions: ['Сессии', 'Активные звонки и живая диагностика транспорта'],
-  providers: ['Провайдеры', 'Серверный VK и доставка новых ссылок'],
+  providers: ['Провайдеры', 'Серверные аккаунты звонков и доставка новых ссылок'],
   events: ['События', 'Безопасный аудит действий панели'],
   settings: ['Настройки', 'Состояние и рекомендации по эксплуатации'],
 };
@@ -173,6 +173,12 @@ async function toggleProfile(id) {
 async function startProfile(id) {
   const profile = app.profiles.find((item) => item.id === id);
   if (!profile) return;
+  const provider = app.overview?.providers?.find((item) => item.id === profile.config.mode);
+  if (provider && !provider.configured) {
+    setSection('providers');
+    if (profile.config.mode === 'wbstream') await openWBLogin();
+    throw new Error(`Сначала подключи серверный аккаунт ${profile.config.mode.toUpperCase()} в разделе «Провайдеры».`);
+  }
   const config = { ...profile.config, existingLink: byId('launchExistingLink').value.trim() };
   await api('/api/sessions', { method: 'POST', body: JSON.stringify({ clientId: id, config }) });
   byId('launchExistingLink').value = '';
@@ -526,6 +532,14 @@ function renderVKSummary(status) {
   byId('dashVKState').textContent = ready ? (status.accountId ? `подключён · ID ${status.accountId}` : 'учётные данные готовы') : 'нужно подключить аккаунт';
 }
 
+function renderWBSummary(status) {
+  app.wbLoginStatus = status;
+  const ready = status.managed || status.mounted;
+  byId('wbAccountBadge').textContent = ready ? 'Подключён' : 'Не подключён';
+  byId('wbAccountBadge').classList.toggle('good-badge', ready);
+  byId('wbAccountState').textContent = status.managed ? 'Подключён через панель' : (status.mounted ? 'Файл cookies' : 'Не подключён');
+}
+
 async function refresh() {
   if (app.refreshing) return;
   app.refreshing = true;
@@ -567,8 +581,9 @@ async function refresh() {
     }).catch(() => {});
     const recoveryP = api('/api/settings/recovery').then(renderRecoverySettings).catch(() => {});
     const vkP = api('/api/vk-login').then(renderVKSummary).catch(() => {});
+    const wbP = api('/api/wb-login').then(renderWBSummary).catch(() => {});
     const eventsP = app.section === 'events' ? refreshEvents().catch(() => {}) : Promise.resolve();
-    await Promise.allSettled([overviewP, profilesP, sessionsP, recoveryP, vkP, eventsP]);
+    await Promise.allSettled([overviewP, profilesP, sessionsP, recoveryP, vkP, wbP, eventsP]);
   } finally {
     app.refreshing = false;
   }
@@ -629,6 +644,67 @@ function closeVKLogin() {
 	document.body.classList.remove('modal-open');
 }
 
+function wbLoginStateLabel(state) {
+  return { idle:'Не подключён', mounted:'Импортированный файл', starting:'Открываю WB', phone:'Нужен номер', code:'Нужен код', authorizing:'Проверяю вход', ready:'Серверный WB готов', failed:'Нужна новая попытка' }[state] || state;
+}
+
+async function refreshWBLogin() {
+  const status = await api('/api/wb-login');
+  renderWBSummary(status);
+  byId('wbLoginState').textContent = wbLoginStateLabel(status.state);
+  byId('wbLoginMessage').textContent = status.message;
+  byId('wbLoginRune').dataset.state = status.state;
+  const active = ['starting','phone','code','authorizing'].includes(status.state);
+  byId('wbLoginStart').hidden = active;
+  byId('wbLoginStart').textContent = status.state === 'failed' ? 'Начать заново' : (status.managed ? 'Сменить аккаунт' : 'Начать вход');
+  byId('wbLoginStart').disabled = !status.browserAvailable;
+  byId('wbLoginCancel').hidden = !active;
+  byId('wbLoginForget').hidden = !status.managed || active;
+  byId('wbPhoneForm').hidden = status.state !== 'phone';
+  byId('wbCodeForm').hidden = status.state !== 'code';
+  if (status.state === 'phone') byId('wbPhone').focus();
+  if (status.state === 'code') byId('wbCode').focus();
+}
+
+async function openWBLogin() {
+  byId('wbLoginModal').hidden = false;
+  byId('wbTransportWarning').hidden = location.protocol === 'https:' || ['127.0.0.1','localhost','::1'].includes(location.hostname);
+  document.body.classList.add('modal-open');
+  await refreshWBLogin();
+}
+
+function closeWBLogin() {
+  byId('wbLoginModal').hidden = true;
+  if (byId('vkLoginModal').hidden) document.body.classList.remove('modal-open');
+}
+
+async function startWBLogin() {
+  byId('wbPhone').value = '';
+  byId('wbCode').value = '';
+  await api('/api/wb-login/start', {method:'POST',body:'{}'});
+  await refreshWBLogin();
+}
+
+async function submitWBPhone() {
+  await api('/api/wb-login/phone', {method:'POST',body:JSON.stringify({phone:byId('wbPhone').value})});
+  byId('wbPhone').value = '';
+  await refreshWBLogin();
+}
+
+async function submitWBCode() {
+  const code = byId('wbCode').value;
+  byId('wbCode').value = '';
+  await api('/api/wb-login/code', {method:'POST',body:JSON.stringify({code}),timeout:50000});
+  await refreshWBLogin();
+  await refresh();
+}
+
+async function cancelWBLogin() { await api('/api/wb-login/cancel',{method:'POST',body:'{}'}); await refreshWBLogin(); }
+async function forgetWBLogin() {
+  if (!confirm('Отключить серверный WB Stream? Активная сессия продолжит работать до перезапуска.')) return;
+  await api('/api/wb-login/credentials',{method:'DELETE'}); await refreshWBLogin(); await refresh();
+}
+
 async function startVKLogin() {
 	await api('/api/vk-login/start', { method: 'POST', body: '{}' });
 	await refreshVKLogin();
@@ -687,10 +763,19 @@ byId('vkLoginForget').addEventListener('click', () => run(forgetVKLogin));
 byId('vkLoginModal').addEventListener('click', (event) => {
 	if (event.target === byId('vkLoginModal')) closeVKLogin();
 });
+byId('wbLoginOpen').addEventListener('click', () => run(openWBLogin));
+byId('wbLoginClose').addEventListener('click', closeWBLogin);
+byId('wbLoginStart').addEventListener('click', () => run(startWBLogin));
+byId('wbLoginCancel').addEventListener('click', () => run(cancelWBLogin));
+byId('wbLoginForget').addEventListener('click', () => run(forgetWBLogin));
+byId('wbPhoneForm').addEventListener('submit', (event) => { event.preventDefault(); run(submitWBPhone); });
+byId('wbCodeForm').addEventListener('submit', (event) => { event.preventDefault(); run(submitWBCode); });
+byId('wbLoginModal').addEventListener('click', (event) => { if (event.target === byId('wbLoginModal')) closeWBLogin(); });
 document.addEventListener('keydown', (event) => {
 	if (event.key !== 'Escape') return;
 	closeContextMenu();
 	if (!byId('vkLoginModal').hidden) closeVKLogin();
+	if (!byId('wbLoginModal').hidden) closeWBLogin();
 });
 byId('contextMenu').addEventListener('click', (event) => {
 	const button = event.target.closest('[data-menu-action]');
@@ -729,4 +814,7 @@ run(refresh);
 setInterval(() => run(refresh), 2000);
 setInterval(() => {
 	if (!byId('vkLoginModal').hidden) run(refreshVKLogin);
+}, 1700);
+setInterval(() => {
+  if (!byId('wbLoginModal').hidden) run(refreshWBLogin);
 }, 1700);

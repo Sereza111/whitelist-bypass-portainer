@@ -25,7 +25,7 @@ import (
 )
 
 var (
-	Version     = "0.5.0-alpha.16"
+	Version     = "0.5.0-alpha.17"
 	BuildCommit = "unknown"
 	BuildTime   = "unknown"
 )
@@ -205,14 +205,15 @@ func (m *manager) commandFor(req sessionRequest) (*exec.Cmd, error) {
 	}
 	binaryPath := filepath.Join(m.binsDir, binaryNames[req.Mode])
 	cookiePath := filepath.Join(m.managedSecretsDir, cookieNames[req.Mode])
-	if !fileReady(cookiePath) {
+	if !providerCredentialFileReady(req.Mode, cookiePath) {
 		cookiePath = filepath.Join(m.secretsDir, cookieNames[req.Mode])
 	}
 	if info, err := os.Stat(binaryPath); err != nil || info.IsDir() {
 		return nil, fmt.Errorf("creator binary unavailable: %s", binaryPath)
 	}
-	if info, err := os.Stat(cookiePath); err != nil || info.Size() == 0 {
-		return nil, fmt.Errorf("cookie file unavailable or empty: %s", cookiePath)
+	if !providerCredentialFileReady(req.Mode, cookiePath) {
+		providerNames := map[string]string{"vk": "VK", "telemost": "Telemost", "wbstream": "WB Stream", "dion": "Dion"}
+		return nil, fmt.Errorf("%s provider is not connected; open Providers in the panel", providerNames[req.Mode])
 	}
 
 	args := []string{"--cookies", cookiePath, "--resources", req.Resources, "--write-file", m.linkFile}
@@ -469,8 +470,10 @@ func main() {
 		_, _ = w.Write([]byte("ok\n"))
 	})
 	vkLogin := newVKLoginManager(cp.managedSecretsDir, envOr("SECRETS_DIR", "/run/secrets/wlb"))
+	wbLogin := newWBLoginManager(cp.managedSecretsDir, envOr("SECRETS_DIR", "/run/secrets/wlb"), findVKLoginBrowser())
 	registerControlAPIRoutes(mux, cp, vkLogin, username, password, envOr("SECRETS_DIR", "/run/secrets/wlb"))
 	registerVKLoginRoutes(mux, vkLogin, username, password)
+	registerWBLoginRoutes(mux, wbLogin, username, password)
 	mux.Handle("/", requireAuth(username, password, http.FileServer(http.FS(webRoot))))
 
 	handler := securityHeaders(mux)
@@ -521,6 +524,7 @@ func main() {
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 	<-sig
 	vkLogin.cancelLogin("Manager остановлен")
+	wbLogin.cancelLogin("Manager остановлен")
 	cp.stopAll()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"html"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -50,6 +51,7 @@ type recoverySettingsInput struct {
 type mobileInvitePayload struct {
 	Version    int    `json:"v"`
 	Name       string `json:"name"`
+	Provider   string `json:"provider,omitempty"`
 	Profile    string `json:"profile"`
 	Key        string `json:"key"`
 	Generation int    `json:"generation"`
@@ -174,9 +176,6 @@ func registerControlAPIRoutes(mux *http.ServeMux, cp *controlPlane, vkLogin *vkL
 		profile, ok := cp.profile(profileID)
 		if !ok {
 			return "", os.ErrNotExist
-		}
-		if profile.Config.Mode != "vk" {
-			return "", errors.New("Android invite currently supports VK profiles only")
 		}
 		for _, session := range cp.listSessions() {
 			if session.ClientID == profileID && session.Status.SessionLink != "" {
@@ -364,14 +363,70 @@ func encodeMobileInvite(profile clientProfile, status sessionStatus) (string, er
 	if profile.ID == "" || profile.RecoveryKey == "" || status.SessionLink == "" {
 		return "", errors.New("mobile invite is incomplete")
 	}
+	provider := strings.ToLower(strings.TrimSpace(profile.Config.Mode))
+	if provider == "" {
+		provider = "vk"
+	}
+	if !validMobileInviteLink(provider, status.SessionLink) {
+		return "", fmt.Errorf("session link does not match provider %q", provider)
+	}
 	payload, err := json.Marshal(mobileInvitePayload{
-		Version: 1, Name: profile.Name, Profile: profile.ID, Key: profile.RecoveryKey,
+		Version: 1, Name: profile.Name, Provider: provider, Profile: profile.ID, Key: profile.RecoveryKey,
 		Generation: status.Generation, Link: status.SessionLink,
 	})
 	if err != nil {
 		return "", err
 	}
 	return "wlb://import?data=" + base64.RawURLEncoding.EncodeToString(payload), nil
+}
+
+func validMobileInviteLink(provider, raw string) bool {
+	if len(raw) < 1 || len(raw) > 2048 {
+		return false
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.User != nil || parsed.Port() != "" {
+		return false
+	}
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	scheme := strings.ToLower(parsed.Scheme)
+	host := strings.ToLower(parsed.Hostname())
+	switch provider {
+	case "vk":
+		return scheme == "https" && (host == "vk.com" || strings.HasSuffix(host, ".vk.com")) &&
+			strings.HasPrefix(parsed.EscapedPath(), "/call")
+	case "telemost":
+		return scheme == "https" && host == "telemost.yandex.ru" &&
+			strings.HasPrefix(parsed.EscapedPath(), "/j/")
+	case "wbstream":
+		return scheme == "wbstream" && parsed.RawQuery == "" && parsed.Fragment == "" &&
+			parsed.Path == "" && safeInviteID(parsed.Host)
+	case "dion":
+		if scheme == "dion" {
+			return parsed.RawQuery == "" && parsed.Fragment == "" && parsed.Path == "" && safeInviteID(parsed.Host)
+		}
+		if scheme != "https" || host != "dion.vc" {
+			return false
+		}
+		return safeInviteID(strings.TrimPrefix(strings.Trim(parsed.EscapedPath(), "/"), "event/")) &&
+			strings.HasPrefix(parsed.EscapedPath(), "/event/")
+	default:
+		return false
+	}
+}
+
+func safeInviteID(value string) bool {
+	if len(value) < 3 || len(value) > 256 {
+		return false
+	}
+	for _, char := range value {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') || char == '-' || char == '_' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func decodeRequest(w http.ResponseWriter, r *http.Request, value any) bool {
@@ -397,8 +452,8 @@ func inspectProviders(secretsDir, managedSecretsDir string) []providerStatus {
 		"wbstream": "cookies-wbstream.json", "dion": "cookies-dion.json",
 	}
 	for index := range providers {
-		providers[index].Configured = fileReady(filepath.Join(managedSecretsDir, files[providers[index].ID])) ||
-			fileReady(filepath.Join(secretsDir, files[providers[index].ID]))
+		providers[index].Configured = providerCredentialFileReady(providers[index].ID, filepath.Join(managedSecretsDir, files[providers[index].ID])) ||
+			providerCredentialFileReady(providers[index].ID, filepath.Join(secretsDir, files[providers[index].ID]))
 	}
 	return providers
 }
