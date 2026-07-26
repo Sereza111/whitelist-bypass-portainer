@@ -14,7 +14,7 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
-## Active handoff (2026-07-26, alpha.16 candidate)
+## Active handoff (2026-07-26, alpha.16 completion)
 
 - Matching alpha.15 Android field logs `relay (17).log` and `relay (18).log`
   are external-only and must never be committed. Captcha completion is fixed.
@@ -37,7 +37,15 @@ Portainer and a headless Joiner in Video mode.
   No client VK cookies are collected. Recommend HTTPS before sharing invites
   over untrusted networks; never log or publish the invite URL.
 - Relay, Creator and Manager tests/vet plus panel JS syntax pass locally.
-  Android requires CI before an immutable alpha.16 tag may be published.
+  Desktop tests/vet and TypeScript build passed; a Windows antivirus briefly
+  delayed deletion of already-passed temporary test binaries.
+- `v0.5.0-alpha.16` is published at immutable commit `c0db283`. Branch and tag
+  Android, Windows and Docker workflows passed. APK SHA-256 is
+  `e812349458843e52b31c9f16070c4bad3e9d114e1b4163ae35a961c654398936`;
+  EXE SHA-256 is
+  `71dba811e3a010f0aab1a0d3dcba00517d559ae541277a4274563ef5faebf73a`.
+  Both checksum files match GitHub asset digests. GHCR contains `linux/amd64`,
+  `linux/arm64` and `linux/386`. Do not move or replace the published tag.
 
 ## Active handoff (2026-07-25, alpha.15 completion)
 
