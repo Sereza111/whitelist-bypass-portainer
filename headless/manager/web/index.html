@@ -138,7 +138,7 @@
             </article>
             <article class="panel provider-card">
               <div class="provider-brand"><span class="provider-logo wb-logo">WB</span><div><span class="kicker">Альтернативный carrier</span><h2>WB Stream</h2></div><span id="wbAccountBadge" class="status-badge">Проверка</span></div>
-              <p>Встроенный мастер входит в технический WB-аккаунт через номер и одноразовый код. Номер, код и cookies не попадают в журнал; сохранённая сессия остаётся в закрытом каталоге сервера.</p>
+              <p>Вход выполняется на телефоне через обычную мобильную сеть, поэтому защита WB не видит IP дата-центра. Панель получает только разрешённую серверную сессию по одноразовой HTTPS-привязке.</p>
               <div class="identity-row"><span>Аккаунт</span><strong id="wbAccountState">Не подключён</strong></div>
               <button id="wbLoginOpen" class="primary full" type="button">Подключить / сменить WB</button>
             </article>
@@ -190,21 +190,15 @@
   <div id="wbLoginModal" class="modal-backdrop" hidden>
     <section class="vk-login-modal" role="dialog" aria-modal="true" aria-labelledby="wbLoginTitle">
       <button id="wbLoginClose" class="modal-close" type="button" aria-label="Закрыть">×</button>
-      <p class="eyebrow">Server identity · one-time code</p><h2 id="wbLoginTitle">Вход серверного WB Stream</h2>
-      <p class="vk-login-lede">Введи номер технического WB-аккаунта, затем одноразовый код. Данные используются только текущим изолированным Chromium на сервере и не сохраняются панелью.</p>
-      <p id="wbTransportWarning" class="inline-warning" hidden>Панель открыта по HTTP: номер и одноразовый код передаются без TLS. Настрой HTTPS reverse proxy перед входом в WB.</p>
+      <p class="eyebrow">Device assisted · one-time pairing</p><h2 id="wbLoginTitle">Вход WB через телефон</h2>
+      <p class="vk-login-lede">Отсканируй QR телефоном. WB откроется внутри клиента на сети телефона; после входа приложение безопасно передаст серверу только разрешённую WB-сессию.</p>
+      <p id="wbTransportWarning" class="inline-warning" hidden>Привязка телефона работает только через публичный HTTPS-адрес панели.</p>
       <div class="vk-login-state"><span id="wbLoginRune" class="status-rune"></span><div><strong id="wbLoginState">Ожидание</strong><small id="wbLoginMessage">Нажми «Начать вход»</small></div></div>
-      <div id="wbLoginScreen" class="vk-login-screen" hidden><img id="wbLoginScreenshot" alt="Диагностика страницы входа WB Stream"><div class="scan-corners"></div></div>
-      <form id="wbPhoneForm" class="provider-login-form" hidden>
-        <label>Номер телефона<div class="phone-field"><span>+7</span><input id="wbPhone" inputmode="tel" autocomplete="tel" placeholder="900 000 00 00" maxlength="16" required></div><small class="field-help">Номер не записывается в control-plane.json и не выводится в события.</small></label>
-        <button class="primary" type="submit">Получить код</button>
-      </form>
-      <form id="wbCodeForm" class="provider-login-form" hidden>
-        <label>Одноразовый код<input id="wbCode" inputmode="numeric" autocomplete="one-time-code" placeholder="Код из SMS / Wildberries" maxlength="8" required></label>
-        <button class="primary" type="submit">Подтвердить вход</button>
-      </form>
-      <div class="vk-login-help"><span>1</span><p>Панель открывает WB Stream в изолированной сессии</p><span>2</span><p>Ты вводишь номер и одноразовый код</p><span>3</span><p>Панель проверяет cookies через WB API и сохраняет их с правами 0600</p></div>
-      <div class="actions vk-login-actions"><button id="wbLoginStart" class="primary" type="button">Начать вход</button><button id="wbLoginCancel" class="ghost" type="button" hidden>Отмена</button><button id="wbLoginForget" class="ghost danger" type="button" hidden>Отключить WB</button></div>
+      <div id="wbLoginScreen" class="vk-login-screen wb-pairing-screen" hidden><img id="wbLoginScreenshot" alt="QR-код привязки WB к телефону"><div class="scan-corners"></div></div>
+      <a id="wbLoginOpenPhone" class="primary wb-phone-link" href="#" hidden>Открыть на этом телефоне</a>
+      <div class="vk-login-help"><span>1</span><p>Установи актуальный Android-клиент и отсканируй QR</p><span>2</span><p>Войди в технический WB-аккаунт внутри приложения</p><span>3</span><p>Панель проверит сессию и сохранит её с правами 0600</p></div>
+      <p class="field-help">QR действует 10 минут. Пароля панели, номера телефона, кода и cookies в QR нет.</p>
+      <div class="actions vk-login-actions"><button id="wbLoginStart" class="primary" type="button">Создать QR для телефона</button><button id="wbLoginCancel" class="ghost" type="button" hidden>Отмена</button><button id="wbLoginForget" class="ghost danger" type="button" hidden>Отключить WB</button></div>
     </section>
   </div>
   <script src="/app.js"></script>

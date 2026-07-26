@@ -645,7 +645,7 @@ function closeVKLogin() {
 }
 
 function wbLoginStateLabel(state) {
-  return { idle:'Не подключён', mounted:'Импортированный файл', starting:'Открываю WB', phone:'Нужен номер', code:'Нужен код', authorizing:'Проверяю вход', ready:'Серверный WB готов', failed:'Нужна новая попытка' }[state] || state;
+  return { idle:'Не подключён', mounted:'Импортированный файл', device:'Жду телефон', authorizing:'Проверяю сессию', ready:'Серверный WB готов', failed:'Нужна новая привязка' }[state] || state;
 }
 
 async function refreshWBLogin() {
@@ -654,18 +654,15 @@ async function refreshWBLogin() {
   byId('wbLoginState').textContent = wbLoginStateLabel(status.state);
   byId('wbLoginMessage').textContent = status.message;
   byId('wbLoginRune').dataset.state = status.state;
-  const active = ['starting','phone','code','authorizing'].includes(status.state);
+  const active = ['device','authorizing'].includes(status.state);
   byId('wbLoginStart').hidden = active;
-  byId('wbLoginStart').textContent = status.state === 'failed' ? 'Начать заново' : (status.managed ? 'Сменить аккаунт' : 'Начать вход');
-  byId('wbLoginStart').disabled = !status.browserAvailable;
+  byId('wbLoginStart').textContent = status.state === 'failed' ? 'Создать новый QR' : (status.managed ? 'Сменить аккаунт' : 'Создать QR для телефона');
+  byId('wbLoginStart').disabled = location.protocol !== 'https:';
   byId('wbLoginCancel').hidden = !active;
   byId('wbLoginForget').hidden = !status.managed || active;
-  byId('wbPhoneForm').hidden = status.state !== 'phone';
-  byId('wbCodeForm').hidden = status.state !== 'code';
-  byId('wbLoginScreen').hidden = !status.screenshotReady;
-  if (status.screenshotReady && !byId('wbLoginModal').hidden) byId('wbLoginScreenshot').src = `/api/wb-login/screenshot?t=${Date.now()}`;
-  if (status.state === 'phone') byId('wbPhone').focus();
-  if (status.state === 'code') byId('wbCode').focus();
+  byId('wbLoginScreen').hidden = !status.devicePairing;
+  if (status.devicePairing && !byId('wbLoginModal').hidden) byId('wbLoginScreenshot').src = `/api/wb-login/device/qr?t=${Date.now()}`;
+  if (!status.devicePairing) byId('wbLoginOpenPhone').hidden = true;
 }
 
 async function openWBLogin() {
@@ -681,24 +678,10 @@ function closeWBLogin() {
 }
 
 async function startWBLogin() {
-  byId('wbPhone').value = '';
-  byId('wbCode').value = '';
-  await api('/api/wb-login/start', {method:'POST',body:'{}'});
+  const result = await api('/api/wb-login/device/start', {method:'POST',body:'{}'});
+  byId('wbLoginOpenPhone').href = result.url;
+  byId('wbLoginOpenPhone').hidden = false;
   await refreshWBLogin();
-}
-
-async function submitWBPhone() {
-  await api('/api/wb-login/phone', {method:'POST',body:JSON.stringify({phone:byId('wbPhone').value})});
-  byId('wbPhone').value = '';
-  await refreshWBLogin();
-}
-
-async function submitWBCode() {
-  const code = byId('wbCode').value;
-  byId('wbCode').value = '';
-  await api('/api/wb-login/code', {method:'POST',body:JSON.stringify({code}),timeout:50000});
-  await refreshWBLogin();
-  await refresh();
 }
 
 async function cancelWBLogin() { await api('/api/wb-login/cancel',{method:'POST',body:'{}'}); await refreshWBLogin(); }
@@ -770,8 +753,6 @@ byId('wbLoginClose').addEventListener('click', closeWBLogin);
 byId('wbLoginStart').addEventListener('click', () => run(startWBLogin));
 byId('wbLoginCancel').addEventListener('click', () => run(cancelWBLogin));
 byId('wbLoginForget').addEventListener('click', () => run(forgetWBLogin));
-byId('wbPhoneForm').addEventListener('submit', (event) => { event.preventDefault(); run(submitWBPhone); });
-byId('wbCodeForm').addEventListener('submit', (event) => { event.preventDefault(); run(submitWBCode); });
 byId('wbLoginModal').addEventListener('click', (event) => { if (event.target === byId('wbLoginModal')) closeWBLogin(); });
 document.addEventListener('keydown', (event) => {
 	if (event.key !== 'Escape') return;

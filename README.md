@@ -6,12 +6,12 @@ Dion. Это уже не минимальная Docker-обёртка upstream: 
 клиенты, SOCKS5/TUN, автоматическое восстановление звонков, диагностику и
 multi-arch релизный pipeline.
 
-Текущий релиз: **[v0.5.0-alpha.18](https://github.com/Sereza111/whitelist-bypass-portainer/releases/tag/v0.5.0-alpha.18)**.
+Текущий кандидат: **v0.5.0-alpha.19**. Последний опубликованный релиз: **[v0.5.0-alpha.18](https://github.com/Sereza111/whitelist-bypass-portainer/releases/tag/v0.5.0-alpha.18)**.
 
 Docker image:
 
 ```text
-ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.18
+ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.19
 ```
 
 Проект основан на
@@ -133,7 +133,7 @@ ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.18
 
 | Переменная | Рекомендуемое значение |
 |---|---|
-| `WLB_IMAGE` | `ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.18` |
+| `WLB_IMAGE` | `ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.19` |
 | `PANEL_USERNAME` | новый логин, по умолчанию `admin` |
 | `PANEL_PASSWORD` | уникальный пароль длиной от 12 символов |
 | `WLB_SECRETS_DIR` | `/opt/whitelist-bypass/secrets` |
@@ -173,11 +173,13 @@ ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.18
 Manager сохраняет cookies в `/data/managed-secrets/cookies-vk.json` с правами
 `0600` и удаляет временный Chromium profile. Пароль VK в панель не вводится.
 
-Для WB Stream используй **Провайдеры → Подключить / сменить WB**. Панель сама
-открывает изолированный вход WB, принимает номер и одноразовый код, проверяет
-сессию и сохраняет нужные cookies вместе с `__wb_device_id` в `/data` с правами
-`0600`. Старую Creator-версию и ручной `cookies.zip` для WB устанавливать не
-нужно. Номер и код не сохраняются и не попадают в логи.
+Для WB Stream используй **Провайдеры → Подключить / сменить WB → Создать QR для
+телефона**. Серверный IP WB блокирует кодом 498, поэтому вход выполняется в
+Android-клиенте через сеть телефона. QR открывает публичную HTTPS-страницу, но
+одноразовый токен остаётся во фрагменте `#` и не попадает в access-log Nginx.
+Клиент передаёт панели только allowlisted WB cookies и device ID; Manager
+проверяет их через WB API и атомарно сохраняет в `/data/managed-secrets` с
+правами `0600`. Номер, код, pairing token и cookies не попадают в события.
 
 ## Создание клиента
 
@@ -207,7 +209,7 @@ WB Stream и Dion; тип провайдера связан с проверен�
 В логах клиента и сервера должны совпадать:
 
 ```text
-[build] version=0.5.0-alpha.18 commit=... built=...
+[build] version=0.5.0-alpha.19 commit=... built=...
 ```
 
 Если на телефоне осталась старая debug-signed `alpha.8`, её нужно удалить один

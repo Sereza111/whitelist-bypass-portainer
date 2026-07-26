@@ -21,7 +21,7 @@ Compose path: portainer-stack-panel.yml
 | `PANEL_PASSWORD` | уникальный пароль длиной от 12 символов |
 | `PANEL_USERNAME` | по умолчанию `admin` |
 | `WLB_SECRETS_DIR` | `/opt/whitelist-bypass/secrets` |
-| `WLB_IMAGE` | `ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.18` |
+| `WLB_IMAGE` | `ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.19` |
 | `MAX_SESSIONS` | общий предел Creator, по умолчанию `4` |
 | `VK_PEER_ID` | цифровой ID VK-получателя новых ссылок |
 
@@ -70,12 +70,13 @@ Basic Auth нельзя вводить через HTTP.
 Chromium включён в `amd64`/`arm64`; на `386` оставлен только файловый импорт.
 
 Для WB Stream больше не требуется старая Creator-программа и ручной экспорт
-архива. Нажми **Провайдеры → Подключить / сменить WB**, введи номер технического
-WB-аккаунта и одноразовый код. Панель использует отдельный Chromium, проверяет
-сессию запросом `slide-v3`, добавляет `__wb_device_id` и сохраняет только
-необходимые cookies в `/data/managed-secrets/cookies-wbstream.json` с правами
-`0600`. Номер и код не сохраняются, не попадают в JSON control-plane и не
-выводятся в события. На `386` доступен только ручной импорт, как и для QR VK.
+архива. Нажми **Провайдеры → Подключить / сменить WB → Создать QR для телефона**,
+отсканируй код актуальным Android-клиентом и войди в технический WB-аккаунт на
+сети телефона. Это обязательный путь: WB возвращает `HTTP 498` для IP VPS.
+Клиент передаёт по HTTPS только allowlisted cookies и `__wb_device_id` с
+одноразовым bearer token. Manager проверяет сессию запросом `slide-v3` и
+сохраняет `/data/managed-secrets/cookies-wbstream.json` с правами `0600`.
+Pairing token находится после `#` публичной ссылки и не отправляется Nginx.
 
 ## Клиенты и хранение
 

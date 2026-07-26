@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -719,5 +720,102 @@ func TestWBLoginAPINeverReturnsPhoneCodeOrCookies(t *testing.T) {
 	mux.ServeHTTP(response, request)
 	if response.Code != http.StatusForbidden {
 		t.Fatalf("cross-origin WB phone status=%d", response.Code)
+	}
+}
+
+func TestWBDevicePairingImportsAllowlistedSession(t *testing.T) {
+	managedDir := t.TempDir()
+	login := newWBLoginManager(managedDir, t.TempDir(), "")
+	mux := http.NewServeMux()
+	registerWBLoginRoutes(mux, login, "admin", testPanelPassword)
+
+	start := httptest.NewRequest(http.MethodPost, "/api/wb-login/device/start", strings.NewReader(`{}`))
+	start.Host = "panel.example.test"
+	start.Header.Set("Origin", "https://panel.example.test")
+	start.Header.Set("X-Forwarded-Proto", "https")
+	start.SetBasicAuth("admin", testPanelPassword)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, start)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("device pairing start=%d body=%s", response.Code, response.Body.String())
+	}
+	var started struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &started); err != nil {
+		t.Fatal(err)
+	}
+	landing, err := url.Parse(started.URL)
+	if err != nil || landing.Scheme != "https" || landing.Host != "panel.example.test" || landing.Path != "/wb-device" || landing.Fragment == "" {
+		t.Fatalf("unexpected device landing URL %q", started.URL)
+	}
+	landingPage := httptest.NewRequest(http.MethodGet, "/wb-device", nil)
+	response = httptest.NewRecorder()
+	mux.ServeHTTP(response, landingPage)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "/wb-device.js") || strings.Contains(response.Body.String(), "Bearer ") {
+		t.Fatalf("public device landing=%d body=%s", response.Code, response.Body.String())
+	}
+
+	qr := httptest.NewRequest(http.MethodGet, "/api/wb-login/device/qr", nil)
+	qr.SetBasicAuth("admin", testPanelPassword)
+	response = httptest.NewRecorder()
+	mux.ServeHTTP(response, qr)
+	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "image/png" || response.Body.Len() < 100 {
+		t.Fatalf("device QR=%d type=%q size=%d", response.Code, response.Header().Get("Content-Type"), response.Body.Len())
+	}
+
+	previousValidator := wbCookieValidator
+	wbCookieValidator = func(_ context.Context, cookies []*network.Cookie, deviceID string) error {
+		if !hasWBCredentials(cookies) || deviceID != "11111111-2222-4333-8444-555555555555" {
+			t.Fatalf("unexpected mobile WB credentials")
+		}
+		return nil
+	}
+	defer func() { wbCookieValidator = previousValidator }()
+
+	body := `{"deviceId":"11111111-2222-4333-8444-555555555555","cookies":{"wbx-refresh":"refresh-secret","x_wbaas_token":"wbaas-secret","wbx-validation-key":"validation-secret","ignored":"must-not-save"}}`
+	upload := httptest.NewRequest(http.MethodPost, "/api/wb-login/device/credentials", strings.NewReader(body))
+	upload.Header.Set("Authorization", "Bearer "+landing.Fragment)
+	upload.Header.Set("Content-Type", "application/json")
+	response = httptest.NewRecorder()
+	mux.ServeHTTP(response, upload)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"state":"ready"`) {
+		t.Fatalf("device upload=%d body=%s", response.Code, response.Body.String())
+	}
+	stored, err := os.ReadFile(filepath.Join(managedDir, "cookies-wbstream.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(stored), "ignored") || !wbCookieFileReady(filepath.Join(managedDir, "cookies-wbstream.json")) {
+		t.Fatalf("unexpected stored mobile WB session")
+	}
+	status := controlAPIRequest(t, mux, http.MethodGet, "/api/wb-login", "")
+	for _, secret := range []string{landing.Fragment, "refresh-secret", "wbaas-secret", "validation-secret"} {
+		if strings.Contains(status.Body.String(), secret) {
+			t.Fatalf("device pairing secret leaked through status API")
+		}
+	}
+}
+
+func TestWBDevicePairingRequiresHTTPSAndBearer(t *testing.T) {
+	login := newWBLoginManager(t.TempDir(), t.TempDir(), "")
+	mux := http.NewServeMux()
+	registerWBLoginRoutes(mux, login, "admin", testPanelPassword)
+
+	start := httptest.NewRequest(http.MethodPost, "/api/wb-login/device/start", strings.NewReader(`{}`))
+	start.Host = "panel.example.test"
+	start.Header.Set("Origin", "http://panel.example.test")
+	start.SetBasicAuth("admin", testPanelPassword)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, start)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("HTTP device pairing start=%d", response.Code)
+	}
+
+	upload := httptest.NewRequest(http.MethodPost, "/api/wb-login/device/credentials", strings.NewReader(`{}`))
+	response = httptest.NewRecorder()
+	mux.ServeHTTP(response, upload)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated device upload=%d", response.Code)
 	}
 }

@@ -41,6 +41,17 @@
                 <data android:scheme="wlb" android:host="import" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".WBLoginActivity"
+            android:exported="true"
+            android:screenOrientation="portrait">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="wlb" android:host="wb-login" />
+            </intent-filter>
+        </activity>
         <service
             android:name=".tunnel.TunnelVpnService"
             android:permission="android.permission.BIND_VPN_SERVICE"

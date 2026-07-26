@@ -158,7 +158,11 @@
 	<string name="settings_row_recovery">Automatic recovery</string>
 	<string name="settings_row_recovery_sub">Allow signed VK updates to renew an expired call</string>
 	<string name="settings_row_recovery_on">Ready</string>
-	<string name="settings_row_recovery_off">Grant access</string>
+    <string name="settings_row_recovery_off">Grant access</string>
+	<string name="settings_row_wb_pairing">Connect server WB</string>
+	<string name="settings_row_wb_pairing_sub">Open a one-time link from the server panel</string>
+	<string name="settings_row_wb_pairing_help">Create a phone QR in Providers → WB Stream, then scan it or paste its link here.</string>
+	<string name="settings_row_wb_pairing_field">One-time pairing link</string>
 
     <string name="settings_toast_destinations_cleared">All calls removed</string>
     <string name="settings_toast_reset_done">Settings reset</string>
@@ -190,6 +194,17 @@
     <string name="settings_row_theme">Theme</string>
     <string name="settings_row_theme_sub">Light, dark, or follow system</string>
     <string name="settings_section_danger">Danger zone</string>
+    <string name="wb_login_kicker">Device assisted identity</string>
+    <string name="wb_login_title">WB Stream sign-in</string>
+    <string name="wb_login_opening">Opening WB on this phone…</string>
+    <string name="wb_login_waiting">Sign in to the technical WB account. The panel will update automatically.</string>
+    <string name="wb_login_page_error">WB could not load. Check the phone network and retry.</string>
+    <string name="wb_login_uploading">Securely transferring the verified WB session…</string>
+    <string name="wb_login_success">WB Stream is connected to the server. You can return to the panel.</string>
+    <string name="wb_login_upload_failed">The server rejected the session (HTTP %1$d). Keep this screen open and retry.</string>
+    <string name="wb_login_invalid_pairing">This WB pairing link is invalid or expired. Create a new QR in the panel.</string>
+    <string name="wb_login_cancel">Cancel</string>
+    <string name="wb_login_done">Done</string>
     <string name="settings_forget_all_destinations">Forget all calls</string>
     <string name="settings_forget_all_destinations_sub">Removes saved call links. Settings stay.</string>
     <string name="settings_reset_all">Reset all settings</string>

@@ -2,12 +2,14 @@ package bypass.whitelist.ui
 
 import android.os.Bundle
 import android.content.Intent
+import android.net.Uri
 import android.provider.Settings
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 import androidx.core.view.isNotEmpty
 import androidx.core.app.NotificationManagerCompat
 import androidx.fragment.app.Fragment
@@ -145,6 +147,19 @@ class SettingsScreenFragment : Fragment(R.layout.fragment_settings_screen) {
         val section = newSection(R.string.settings_section_behavior)
         val card = section.findViewById<LinearLayout>(R.id.sectionCard)
 
+		addRow(
+			card, R.drawable.ic_setting_headless, getString(R.string.settings_row_wb_pairing),
+			getString(R.string.settings_row_wb_pairing_sub), null,
+		) {
+			InputActionSheet.show(
+				manager = parentFragmentManager,
+				title = getString(R.string.settings_row_wb_pairing),
+				subtitle = getString(R.string.settings_row_wb_pairing_help),
+				fieldLabel = getString(R.string.settings_row_wb_pairing_field),
+				initialValue = "",
+			) { value -> openWBPairing(value) }
+		}
+
         addSwitchRow(card, R.drawable.ic_setting_headless, getString(R.string.settings_row_headless), getString(R.string.settings_row_headless_sub), Prefs.headless) { checked ->
             Prefs.headless = checked
         }
@@ -161,6 +176,17 @@ class SettingsScreenFragment : Fragment(R.layout.fragment_settings_screen) {
 		}
         return section
     }
+
+	private fun openWBPairing(value: String) {
+		val uri = runCatching { Uri.parse(value.trim()) }.getOrNull()
+		val custom = uri?.scheme == "wlb" && uri.host == "wb-login"
+		val landing = uri?.scheme == "https" && uri.path == "/wb-device" && !uri.fragment.isNullOrBlank()
+		if (!custom && !landing) {
+			Toast.makeText(requireContext(), R.string.wb_login_invalid_pairing, Toast.LENGTH_LONG).show()
+			return
+		}
+		startActivity(Intent(Intent.ACTION_VIEW, requireNotNull(uri)))
+	}
 
     private fun buildDangerSection(): View {
         val section = newSection(R.string.settings_section_danger)

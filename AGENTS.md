@@ -14,6 +14,28 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
+## Active handoff (2026-07-26, alpha.19 device-assisted WB candidate)
+
+- The user explicitly required mobile WB onboarding; do not regress to asking
+  for phone/OTP in the server panel. The VPS independently returns `HTTP 498`,
+  `server: wbaas`, `status-no-id: PG-13-XS` for `stream.wb.ru/login`. This
+  proves server Chromium timeout/retry is not the primary solution.
+- Candidate replaces the panel's main WB flow with a 10-minute phone QR. The QR
+  contains an HTTPS `/wb-device#TOKEN` landing URL; fragments are not sent to
+  Nginx. Manager stores only SHA-256(token), and the Android upload sends the
+  token in the Authorization header rather than the request path.
+- Android handles `wlb://wb-login`, opens WB in an in-app WebView on the phone
+  network, reads only the WB allowlist plus device id and uploads it over HTTPS.
+  Manager still validates `slide-v3` before atomically saving mode-0600 managed
+  cookies. Never log the pairing URL, Authorization header, cookies, phone or
+  OTP. The regular guest client onboarding remains separate and cookie-free.
+- Panel QR generation is local (`go-qrcode`); no external QR service receives
+  the bearer. Public `/wb-device`, JS and CSS contain no server credential and
+  are served without Basic Auth so a scanned phone can open the app.
+- Manager tests/vet and panel JS syntax pass locally. Android cannot be built
+  locally because JDK/SDK/Gradle wrapper are absent; tagged/branch Android CI is
+  the required build gate before publishing `v0.5.0-alpha.19`.
+
 ## Active handoff (2026-07-26, alpha.16 completion)
 
 - Matching alpha.15 Android field logs `relay (17).log` and `relay (18).log`

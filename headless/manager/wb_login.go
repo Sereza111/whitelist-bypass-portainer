@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -19,6 +22,7 @@ import (
 
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
+	qrcode "github.com/skip2/go-qrcode"
 )
 
 const (
@@ -37,7 +41,21 @@ type wbLoginStatus struct {
 	Managed          bool       `json:"managed"`
 	Mounted          bool       `json:"mounted"`
 	ScreenshotReady  bool       `json:"screenshotReady"`
+	DevicePairing    bool       `json:"devicePairing"`
 }
+
+type wbDevicePairing struct {
+	tokenHash  [32]byte
+	landingURL string
+	expiresAt  time.Time
+}
+
+type wbDeviceCredentials struct {
+	DeviceID string            `json:"deviceId"`
+	Cookies  map[string]string `json:"cookies"`
+}
+
+var wbCookieValidator = validateWBCookies
 
 type wbLoginManager struct {
 	mu       sync.Mutex
@@ -54,6 +72,7 @@ type wbLoginManager struct {
 	deviceID   string
 	screenshot []byte
 	generation uint64
+	pairing    *wbDevicePairing
 }
 
 func newWBLoginManager(managedDir, mountedDir, browser string) *wbLoginManager {
@@ -82,6 +101,13 @@ func (login *wbLoginManager) status() wbLoginStatus {
 }
 
 func (login *wbLoginManager) statusLocked() wbLoginStatus {
+	pairingActive := login.pairing != nil && login.pairing.expiresAt.After(time.Now().UTC())
+	if login.state == "device" && !pairingActive {
+		login.pairing = nil
+		login.state = "failed"
+		login.message = "QR-код истёк — создай новую привязку"
+		login.expiresAt = nil
+	}
 	managed := wbCookieFileReady(login.managedCookiePath())
 	mounted := wbCookieFileReady(filepath.Join(login.mountedDir, "cookies-wbstream.json"))
 	state, message := login.state, login.message
@@ -92,8 +118,129 @@ func (login *wbLoginManager) statusLocked() wbLoginStatus {
 	return wbLoginStatus{
 		State: state, Message: message, ExpiresAt: login.expiresAt,
 		BrowserAvailable: login.browser != "", Managed: managed, Mounted: mounted,
-		ScreenshotReady: len(login.screenshot) > 0,
+		ScreenshotReady: len(login.screenshot) > 0, DevicePairing: pairingActive,
 	}
+}
+
+func (login *wbLoginManager) startDevicePairing(origin string) (wbLoginStatus, string, error) {
+	parsed, err := url.Parse(origin)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.Path != "" {
+		return login.status(), "", errors.New("WB phone pairing requires the public HTTPS panel URL")
+	}
+	token := randomSecret()
+	expires := time.Now().UTC().Add(10 * time.Minute)
+	landingURL := strings.TrimRight(origin, "/") + "/wb-device#" + token
+	login.mu.Lock()
+	if login.cancel != nil {
+		login.cancel()
+	}
+	login.generation++
+	login.cancel = nil
+	login.browserCtx = nil
+	login.deviceID = ""
+	login.screenshot = nil
+	login.pairing = nil
+	login.pairing = &wbDevicePairing{
+		tokenHash: sha256.Sum256([]byte(token)), landingURL: landingURL, expiresAt: expires,
+	}
+	login.state = "device"
+	login.message = "Отсканируй QR телефоном и войди в WB на мобильной сети"
+	login.expiresAt = &expires
+	status := login.statusLocked()
+	login.mu.Unlock()
+	return status, landingURL, nil
+}
+
+func (login *wbLoginManager) pairingQRCode() ([]byte, bool) {
+	login.mu.Lock()
+	defer login.mu.Unlock()
+	if login.pairing == nil || !login.pairing.expiresAt.After(time.Now().UTC()) {
+		return nil, false
+	}
+	body, err := qrcode.Encode(login.pairing.landingURL, qrcode.Medium, 360)
+	return body, err == nil && len(body) > 0
+}
+
+func (login *wbLoginManager) submitDeviceCredentials(ctx context.Context, bearer string, input wbDeviceCredentials) (wbLoginStatus, error) {
+	login.actionMu.Lock()
+	defer login.actionMu.Unlock()
+
+	presented := sha256.Sum256([]byte(strings.TrimSpace(bearer)))
+	login.mu.Lock()
+	pairing := login.pairing
+	generation := login.generation
+	validPairing := pairing != nil && pairing.expiresAt.After(time.Now().UTC()) &&
+		subtle.ConstantTimeCompare(presented[:], pairing.tokenHash[:]) == 1
+	if validPairing {
+		login.state = "authorizing"
+		login.message = "Проверяю WB-сессию, полученную с телефона…"
+	}
+	login.mu.Unlock()
+	if !validPairing {
+		return login.status(), errors.New("WB phone pairing token is invalid or expired")
+	}
+
+	cookies, err := wbDeviceCookieSet(input)
+	if err != nil {
+		login.returnToDevice(generation, "Телефон не передал полную WB-сессию — продолжи вход и повтори")
+		return login.status(), err
+	}
+	if err := wbCookieValidator(ctx, cookies, input.DeviceID); err != nil {
+		login.returnToDevice(generation, "WB не принял мобильную сессию на сервере — повтори вход")
+		return login.status(), errors.New("WB rejected the mobile session")
+	}
+	if err := login.saveCookies(cookies, input.DeviceID); err != nil {
+		login.fail(generation, "Не удалось сохранить WB-сессию с телефона")
+		return login.status(), err
+	}
+	login.succeed(generation)
+	return login.status(), nil
+}
+
+func wbDeviceCookieSet(input wbDeviceCredentials) ([]*network.Cookie, error) {
+	if !validWBDeviceID(input.DeviceID) {
+		return nil, errors.New("invalid WB device id")
+	}
+	allowed := []string{"wbx-refresh", "x_wbaas_token", "_wbauid", "wbx-validation-key"}
+	cookies := make([]*network.Cookie, 0, len(allowed))
+	for _, name := range allowed {
+		value := strings.TrimSpace(input.Cookies[name])
+		if value == "" {
+			if name == "_wbauid" {
+				continue
+			}
+			return nil, errors.New("incomplete WB cookie set")
+		}
+		if len(value) > 8192 || strings.ContainsAny(value, ";\r\n\x00") {
+			return nil, errors.New("invalid WB cookie value")
+		}
+		cookies = append(cookies, &network.Cookie{
+			Name: name, Value: value, Domain: ".wb.ru", Path: "/", Secure: true,
+			HTTPOnly: name == "wbx-refresh",
+		})
+	}
+	return cookies, nil
+}
+
+func validWBDeviceID(value string) bool {
+	if len(value) < 8 || len(value) > 128 {
+		return false
+	}
+	for _, char := range value {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') || char == '-' || char == '_' || char == '.' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func (login *wbLoginManager) returnToDevice(generation uint64, message string) {
+	login.update(generation, func() {
+		login.state = "device"
+		login.message = message
+	})
 }
 
 func (login *wbLoginManager) start() (wbLoginStatus, error) {
@@ -119,6 +266,7 @@ func (login *wbLoginManager) start() (wbLoginStatus, error) {
 	login.browserCtx = nil
 	login.deviceID = ""
 	login.screenshot = nil
+	login.pairing = nil
 	go login.run(ctx, generation)
 	return login.statusLocked(), nil
 }
@@ -532,6 +680,7 @@ func (login *wbLoginManager) cancelLogin(message string) wbLoginStatus {
 	login.browserCtx = nil
 	login.deviceID = ""
 	login.screenshot = nil
+	login.pairing = nil
 	login.state = "idle"
 	login.message = message
 	login.expiresAt = nil
@@ -559,6 +708,7 @@ func (login *wbLoginManager) succeed(generation uint64) {
 	login.expiresAt = nil
 	login.browserCtx = nil
 	login.deviceID = ""
+	login.pairing = nil
 	login.cancel = nil
 	login.mu.Unlock()
 	if cancel != nil {
@@ -580,6 +730,7 @@ func (login *wbLoginManager) fail(generation uint64, message string) {
 		login.expiresAt = nil
 		login.browserCtx = nil
 		login.deviceID = ""
+		login.pairing = nil
 		login.screenshot = nil
 		login.cancel = nil
 	})
@@ -621,6 +772,48 @@ func registerWBLoginRoutes(mux *http.ServeMux, login *wbLoginManager, username, 
 		}
 		writeJSON(w, http.StatusAccepted, status)
 	}))
+	mux.Handle("POST /api/wb-login/device/start", mutate(func(w http.ResponseWriter, r *http.Request) {
+		origin, err := wbPublicPanelOrigin(r)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		status, landingURL, err := login.startDevicePairing(origin)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error(), "status": status})
+			return
+		}
+		writeJSON(w, http.StatusCreated, map[string]any{
+			"url": landingURL, "expiresAt": status.ExpiresAt, "status": status,
+		})
+	}))
+	mux.Handle("GET /api/wb-login/device/qr", protect(func(w http.ResponseWriter, _ *http.Request) {
+		body, ok := login.pairingQRCode()
+		if !ok {
+			http.Error(w, "WB phone pairing is not active", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Content-Length", fmt.Sprint(len(body)))
+		_, _ = w.Write(body)
+	}))
+	mux.HandleFunc("POST /api/wb-login/device/credentials", func(w http.ResponseWriter, r *http.Request) {
+		bearer, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if !ok || strings.TrimSpace(bearer) == "" {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "pairing token required"})
+			return
+		}
+		var input wbDeviceCredentials
+		if !decodeRequest(w, r, &input) {
+			return
+		}
+		status, err := login.submitDeviceCredentials(r.Context(), bearer, input)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error(), "status": status})
+			return
+		}
+		writeJSON(w, http.StatusOK, status)
+	})
 	mux.Handle("POST /api/wb-login/phone", mutate(func(w http.ResponseWriter, r *http.Request) {
 		var input struct {
 			Phone string `json:"phone"`
@@ -660,4 +853,37 @@ func registerWBLoginRoutes(mux *http.ServeMux, login *wbLoginManager, username, 
 		}
 		writeJSON(w, http.StatusOK, status)
 	}))
+	registerWBDeviceLandingRoutes(mux)
+}
+
+func wbPublicPanelOrigin(r *http.Request) (string, error) {
+	proto := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Proto"), ",")[0])
+	if proto == "" && r.TLS != nil {
+		proto = "https"
+	}
+	if proto != "https" {
+		return "", errors.New("open the panel through HTTPS before pairing a phone")
+	}
+	host := strings.TrimSpace(r.Host)
+	parsed, err := url.Parse("https://" + host)
+	if err != nil || parsed.Host == "" || parsed.User != nil || parsed.Path != "" ||
+		strings.ContainsAny(host, "\\/\r\n\x00") {
+		return "", errors.New("invalid public panel host")
+	}
+	return parsed.String(), nil
+}
+
+func registerWBDeviceLandingRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /wb-device", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = io.WriteString(w, `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>WB · Whitelist Bypass</title><link rel="stylesheet" href="/wb-device.css"></head><body><main><p class="eyebrow">DEVICE ASSISTED LOGIN</p><h1>Вход WB через телефон</h1><p id="status">Проверяю одноразовую привязку…</p><a id="open" hidden>Открыть в Whitelist Bypass</a><small>Пароль панели и cookies не находятся в QR-коде. Код действует 10 минут.</small></main><script src="/wb-device.js"></script></body></html>`)
+	})
+	mux.HandleFunc("GET /wb-device.js", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+		_, _ = io.WriteString(w, `'use strict';(()=>{const token=location.hash.slice(1);const status=document.getElementById('status');const open=document.getElementById('open');if(!/^[A-Za-z0-9_-]{32,128}$/.test(token)){status.textContent='QR-код повреждён или уже недействителен.';return;}const target='wlb://wb-login?server='+encodeURIComponent(location.origin)+'&token='+encodeURIComponent(token);open.href=target;open.hidden=false;status.textContent='Открываю защищённый вход в приложении…';setTimeout(()=>{location.href=target;},300);})();`)
+	})
+	mux.HandleFunc("GET /wb-device.css", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/css; charset=utf-8")
+		_, _ = io.WriteString(w, `:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#09080b;color:#e9e2d8;font:16px system-ui,sans-serif}main{width:min(560px,calc(100% - 32px));padding:36px;border:1px solid #8f6b28;background:#141116}h1{font:500 34px Georgia,serif;margin:8px 0 18px}.eyebrow,small{color:#b3945a;font:11px ui-monospace,monospace;letter-spacing:.13em}a{display:block;margin:24px 0;padding:15px;text-align:center;background:#d7a547;color:#17100a;text-decoration:none;font-weight:700}small{display:block;line-height:1.6}`)
+	})
 }
