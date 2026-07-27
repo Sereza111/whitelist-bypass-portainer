@@ -162,6 +162,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
         status.setText(R.string.wb_login_uploading)
         val body = JSONObject().apply {
             put("deviceId", deviceId)
+            put("userAgent", webView.settings.userAgentString.orEmpty())
             put("cookies", JSONObject(cookies))
         }.toString()
         executor.execute {
@@ -175,12 +176,16 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
                 connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
                 connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
                 val code = connection.responseCode
+                val responseText = (if (code >= 400) connection.errorStream else connection.inputStream)
+                    ?.bufferedReader()?.use { it.readLine().orEmpty().take(2048) }.orEmpty()
+                val message = runCatching { JSONObject(responseText).optString("error") }
+                    .getOrDefault("").take(160)
                 connection.disconnect()
-                code
-            }.getOrDefault(0)
+                UploadResult(code, message)
+            }.getOrDefault(UploadResult(0, ""))
             mainHandler.post {
                 uploadRunning.set(false)
-                if (result in 200..299) {
+                if (result.code in 200..299) {
                     finished = true
                     mainHandler.removeCallbacks(cookieProbe)
                     CookieManager.getInstance().flush()
@@ -189,7 +194,11 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
                     close.setText(R.string.wb_login_done)
                 } else {
                     nextUploadAt = System.currentTimeMillis() + 10_000
-                    status.text = getString(R.string.wb_login_upload_failed, result)
+                    status.text = if (result.message.isBlank()) {
+                        getString(R.string.wb_login_upload_failed, result.code)
+                    } else {
+                        getString(R.string.wb_login_upload_failed_detail, result.code, result.message)
+                    }
                 }
             }
         }
@@ -240,4 +249,6 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 
         private fun validDeviceId(value: String): Boolean = DEVICE_RE.matches(value)
     }
+
+    private data class UploadResult(val code: Int, val message: String)
 }

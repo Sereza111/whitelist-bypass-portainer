@@ -204,6 +204,7 @@
     <string name="wb_login_uploading">Securely transferring the verified WB session…</string>
     <string name="wb_login_success">WB Stream is connected to the server. You can return to the panel.</string>
     <string name="wb_login_upload_failed">The server rejected the session (HTTP %1$d). Keep this screen open and retry.</string>
+    <string name="wb_login_upload_failed_detail">The server rejected the session (HTTP %1$d): %2$s</string>
     <string name="wb_login_invalid_pairing">This WB pairing link is invalid or expired. Create a new QR in the panel.</string>
     <string name="wb_login_cancel">Cancel</string>
     <string name="wb_login_done">Done</string>

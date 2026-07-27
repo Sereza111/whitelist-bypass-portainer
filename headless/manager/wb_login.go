@@ -51,11 +51,18 @@ type wbDevicePairing struct {
 }
 
 type wbDeviceCredentials struct {
-	DeviceID string            `json:"deviceId"`
-	Cookies  map[string]string `json:"cookies"`
+	DeviceID  string            `json:"deviceId"`
+	UserAgent string            `json:"userAgent"`
+	Cookies   map[string]string `json:"cookies"`
 }
 
-var wbCookieValidator = validateWBCookies
+type wbValidationStatusError struct{ Status int }
+
+func (err *wbValidationStatusError) Error() string {
+	return fmt.Sprintf("WB validation status %d", err.Status)
+}
+
+var wbCookieValidator = validateWBCookiesWithUserAgent
 
 type wbLoginManager struct {
 	mu       sync.Mutex
@@ -180,16 +187,26 @@ func (login *wbLoginManager) submitDeviceCredentials(ctx context.Context, bearer
 		return login.status(), errors.New("WB phone pairing token is invalid or expired")
 	}
 
+	userAgent := strings.TrimSpace(input.UserAgent)
+	if !validWBUserAgent(userAgent) {
+		login.returnToDevice(generation, "Телефон передал неподдерживаемый браузерный профиль — создай новый QR")
+		return login.status(), errors.New("invalid WB browser profile")
+	}
 	cookies, err := wbDeviceCookieSet(input)
 	if err != nil {
 		login.returnToDevice(generation, "Телефон не передал полную WB-сессию — продолжи вход и повтори")
 		return login.status(), err
 	}
-	if err := wbCookieValidator(ctx, cookies, input.DeviceID); err != nil {
+	if err := wbCookieValidator(ctx, cookies, input.DeviceID, userAgent); err != nil {
+		log.Printf("[wb-login] mobile session validation rejected: %v", err)
 		login.returnToDevice(generation, "WB не принял мобильную сессию на сервере — повтори вход")
-		return login.status(), errors.New("WB rejected the mobile session")
+		var statusErr *wbValidationStatusError
+		if errors.As(err, &statusErr) {
+			return login.status(), fmt.Errorf("WB rejected the mobile session (upstream status %d)", statusErr.Status)
+		}
+		return login.status(), errors.New("WB rejected the mobile session before an upstream response")
 	}
-	if err := login.saveCookies(cookies, input.DeviceID); err != nil {
+	if err := login.saveCookiesWithUserAgent(cookies, input.DeviceID, userAgent); err != nil {
 		login.fail(generation, "Не удалось сохранить WB-сессию с телефона")
 		return login.status(), err
 	}
@@ -234,6 +251,13 @@ func validWBDeviceID(value string) bool {
 		return false
 	}
 	return true
+}
+
+func validWBUserAgent(value string) bool {
+	if len(value) < 20 || len(value) > 1024 {
+		return false
+	}
+	return !strings.ContainsAny(value, "\r\n\x00")
 }
 
 func (login *wbLoginManager) returnToDevice(generation uint64, message string) {
@@ -525,6 +549,10 @@ func hasWBCredentials(cookies []*network.Cookie) bool {
 }
 
 func validateWBCookies(parent context.Context, cookies []*network.Cookie, deviceID string) error {
+	return validateWBCookiesWithUserAgent(parent, cookies, deviceID, vkLoginUserAgent)
+}
+
+func validateWBCookiesWithUserAgent(parent context.Context, cookies []*network.Cookie, deviceID, userAgent string) error {
 	ctx, cancel := context.WithTimeout(parent, 15*time.Second)
 	defer cancel()
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://auth-stream.wb.ru/v2/auth/slide-v3", bytes.NewReader(nil))
@@ -537,7 +565,7 @@ func validateWBCookies(parent context.Context, cookies []*network.Cookie, device
 	request.Header.Set("Origin", wbStreamOrigin)
 	request.Header.Set("Referer", wbStreamOrigin+"/")
 	request.Header.Set("Cookie", wbCookieHeader(cookies))
-	request.Header.Set("User-Agent", vkLoginUserAgent)
+	request.Header.Set("User-Agent", userAgent)
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		return err
@@ -545,7 +573,7 @@ func validateWBCookies(parent context.Context, cookies []*network.Cookie, device
 	defer response.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(response.Body, 64*1024))
 	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("WB validation status %d", response.StatusCode)
+		return &wbValidationStatusError{Status: response.StatusCode}
 	}
 	var result struct {
 		Payload struct {
@@ -572,6 +600,10 @@ func wbCookieHeader(cookies []*network.Cookie) string {
 }
 
 func (login *wbLoginManager) saveCookies(cookies []*network.Cookie, deviceID string) error {
+	return login.saveCookiesWithUserAgent(cookies, deviceID, vkLoginUserAgent)
+}
+
+func (login *wbLoginManager) saveCookiesWithUserAgent(cookies []*network.Cookie, deviceID, userAgent string) error {
 	if err := os.MkdirAll(login.managedDir, 0o700); err != nil {
 		return err
 	}
@@ -589,6 +621,7 @@ func (login *wbLoginManager) saveCookies(cookies []*network.Cookie, deviceID str
 		})
 	}
 	stored = append(stored, vkStoredCookie{Name: "__wb_device_id", Value: deviceID, Domain: "stream.wb.ru", Path: "/", Secure: true})
+	stored = append(stored, vkStoredCookie{Name: "__wb_user_agent", Value: userAgent, Domain: "stream.wb.ru", Path: "/", Secure: true})
 	body, err := json.MarshalIndent(stored, "", "  ")
 	if err != nil {
 		return err

@@ -66,7 +66,8 @@ func main() {
 		log.Fatalf("[auth] cookies file is missing __wb_device_id; re-export via creator-app's 'Export Cookies' button")
 	}
 	cookieHeader := common.FilterCookies(rawCookies, wbstream.WBStreamCookieAllowlist)
-	bearer, err := wbstream.RefreshAccessToken(nil, cookieHeader, deviceID)
+	userAgent := common.CookieValue(rawCookies, "__wb_user_agent")
+	bearer, err := wbstream.RefreshAccessTokenWithUserAgent(nil, cookieHeader, deviceID, userAgent)
 	if err != nil {
 		log.Fatalf("[auth] slide-v3 refresh: %v", err)
 	}
@@ -157,7 +158,7 @@ func main() {
 		}
 		time.Sleep(3 * time.Second)
 
-		newBearer, refreshErr := wbstream.RefreshAccessToken(nil, cookieHeader, deviceID)
+		newBearer, refreshErr := wbstream.RefreshAccessTokenWithUserAgent(nil, cookieHeader, deviceID, userAgent)
 		if refreshErr != nil {
 			log.Printf("[rejoin] slide-v3 refresh failed: %v, retrying in 5s", refreshErr)
 			time.Sleep(5 * time.Second)

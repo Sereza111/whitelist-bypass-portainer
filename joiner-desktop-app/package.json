@@ -1,6 +1,6 @@
 {
   "name": "whitelist-bypass-joiner",
-  "version": "0.5.0-alpha.20",
+  "version": "0.5.0-alpha.21",
   "main": "dist/main/index.js",
   "scripts": {
     "build": "tsc",

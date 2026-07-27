@@ -268,6 +268,10 @@ func newRequestID() string {
 }
 
 func RefreshAccessToken(client *http.Client, cookieHeader, deviceID string) (string, error) {
+	return RefreshAccessTokenWithUserAgent(client, cookieHeader, deviceID, common.UserAgent)
+}
+
+func RefreshAccessTokenWithUserAgent(client *http.Client, cookieHeader, deviceID, userAgent string) (string, error) {
 	req, err := http.NewRequest(http.MethodPost, "https://auth-stream.wb.ru/v2/auth/slide-v3", bytes.NewReader(nil))
 	if err != nil {
 		return "", err
@@ -282,7 +286,10 @@ func RefreshAccessToken(client *http.Client, cookieHeader, deviceID string) (str
 	req.Header.Set("Origin", Origin)
 	req.Header.Set("Referer", Origin+"/")
 	req.Header.Set("Cookie", cookieHeader)
-	req.Header.Set("User-Agent", common.UserAgent)
+	if strings.TrimSpace(userAgent) == "" {
+		userAgent = common.UserAgent
+	}
+	req.Header.Set("User-Agent", userAgent)
 
 	if client == nil {
 		client = http.DefaultClient

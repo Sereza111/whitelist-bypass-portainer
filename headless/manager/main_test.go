@@ -765,15 +765,15 @@ func TestWBDevicePairingImportsAllowlistedSession(t *testing.T) {
 	}
 
 	previousValidator := wbCookieValidator
-	wbCookieValidator = func(_ context.Context, cookies []*network.Cookie, deviceID string) error {
-		if !hasWBCredentials(cookies) || deviceID != "11111111-2222-4333-8444-555555555555" {
+	wbCookieValidator = func(_ context.Context, cookies []*network.Cookie, deviceID, userAgent string) error {
+		if !hasWBCredentials(cookies) || deviceID != "11111111-2222-4333-8444-555555555555" || userAgent != "Mozilla/5.0 test-mobile-browser" {
 			t.Fatalf("unexpected mobile WB credentials")
 		}
 		return nil
 	}
 	defer func() { wbCookieValidator = previousValidator }()
 
-	body := `{"deviceId":"11111111-2222-4333-8444-555555555555","cookies":{"wbx-refresh":"refresh-secret","x_wbaas_token":"wbaas-secret","wbx-validation-key":"validation-secret","ignored":"must-not-save"}}`
+	body := `{"deviceId":"11111111-2222-4333-8444-555555555555","userAgent":"Mozilla/5.0 test-mobile-browser","cookies":{"wbx-refresh":"refresh-secret","x_wbaas_token":"wbaas-secret","wbx-validation-key":"validation-secret","ignored":"must-not-save"}}`
 	upload := httptest.NewRequest(http.MethodPost, "/api/wb-login/device/credentials", strings.NewReader(body))
 	upload.Header.Set("Authorization", "Bearer "+landing.Fragment)
 	upload.Header.Set("Content-Type", "application/json")
@@ -786,7 +786,7 @@ func TestWBDevicePairingImportsAllowlistedSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(stored), "ignored") || !wbCookieFileReady(filepath.Join(managedDir, "cookies-wbstream.json")) {
+	if strings.Contains(string(stored), "ignored") || !strings.Contains(string(stored), "__wb_user_agent") || !wbCookieFileReady(filepath.Join(managedDir, "cookies-wbstream.json")) {
 		t.Fatalf("unexpected stored mobile WB session")
 	}
 	status := controlAPIRequest(t, mux, http.MethodGet, "/api/wb-login", "")

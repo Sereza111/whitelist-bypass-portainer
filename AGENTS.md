@@ -14,6 +14,23 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
+## Active handoff (2026-07-27, alpha.21 WB browser fingerprint candidate)
+
+- Alpha.20 field test reached the WB Stream home page and attempted upload, so
+  profile detection, exact-path cookie probing and `3/3` completion work. The
+  Manager returned HTTP 400 because server-side `slide-v3` rejected the mobile
+  session.
+- Candidate root cause is browser-fingerprint mismatch: Android obtained the
+  WBAAS token with its WebView User-Agent, while Manager and Creator replayed it
+  with the desktop common User-Agent. Alpha.21 sends a bounded/no-control-char
+  User-Agent with the one-time credential payload, validates with it, persists
+  it only as internal `__wb_user_agent`, and reuses it for Creator refresh and
+  reconnect. Existing cookie files without this metadata retain the old common
+  UA fallback.
+- Android now reads only the first bounded API response line and shows the
+  Manager's redacted error. Manager logs/returns only the upstream status class,
+  never cookies, bearer, phone, OTP, response body or full pairing URL.
+
 ## Active handoff (2026-07-26, alpha.20 WB post-login completion)
 
 - Alpha.19 field test proves the new device-assisted path opens on Android and
