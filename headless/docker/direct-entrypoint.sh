@@ -28,7 +28,7 @@ case "$MODE" in
         ;;
     wbstream)
         BINARY="$BINS_DIR/headless-wbstream-creator"
-        DEFAULT_COOKIE_FILE="$SECRETS_DIR/cookies-wbstream.json"
+        DEFAULT_COOKIE_FILE=""
         ;;
     dion)
         BINARY="$BINS_DIR/headless-dion-creator"
@@ -41,7 +41,7 @@ case "$MODE" in
 esac
 
 COOKIE_FILE="${COOKIE_FILE:-$DEFAULT_COOKIE_FILE}"
-if [ ! -s "$COOKIE_FILE" ]; then
+if [ "$MODE" != "wbstream" ] && [ ! -s "$COOKIE_FILE" ]; then
     echo "[FATAL] Cookie file is missing or empty: $COOKIE_FILE" >&2
     echo "[FATAL] Export cookies from the desktop Creator and place them in $SECRETS_DIR" >&2
     exit 66
@@ -51,9 +51,10 @@ mkdir -p "$(dirname "$LINK_FILE")"
 rm -f "$LINK_FILE"
 
 set -- \
-    --cookies "$COOKIE_FILE" \
     --resources "$RESOURCES" \
     --write-file "$LINK_FILE"
+
+[ "$MODE" != "wbstream" ] && set -- --cookies "$COOKIE_FILE" "$@"
 
 case "$MODE" in
     vk)
@@ -65,7 +66,14 @@ case "$MODE" in
     telemost)
         [ -n "$EXISTING_LINK" ] && set -- "$@" --tm-link "$EXISTING_LINK"
         ;;
-    wbstream|dion)
+    wbstream)
+        if [ -z "$EXISTING_LINK" ]; then
+            echo "[FATAL] WB direct mode requires EXISTING_LINK from the Android creator" >&2
+            exit 64
+        fi
+        set -- "$@" --room "$EXISTING_LINK" --name "$DISPLAY_NAME"
+        ;;
+    dion)
         [ -n "$EXISTING_LINK" ] && set -- "$@" --room "$EXISTING_LINK"
         set -- "$@" --name "$DISPLAY_NAME"
         ;;

@@ -534,10 +534,10 @@ function renderVKSummary(status) {
 
 function renderWBSummary(status) {
   app.wbLoginStatus = status;
-  const ready = status.managed || status.mounted;
+  const ready = status.managed;
   byId('wbAccountBadge').textContent = ready ? 'Подключён' : 'Не подключён';
   byId('wbAccountBadge').classList.toggle('good-badge', ready);
-  byId('wbAccountState').textContent = status.managed ? 'Подключён через панель' : (status.mounted ? 'Файл cookies' : 'Не подключён');
+  byId('wbAccountState').textContent = status.managed ? `${status.creatorName || 'Android creator'} · привязан` : 'Не подключён';
 }
 
 async function refresh() {
@@ -645,7 +645,7 @@ function closeVKLogin() {
 }
 
 function wbLoginStateLabel(state) {
-  return { idle:'Не подключён', mounted:'Импортированный файл', device:'Жду телефон', authorizing:'Проверяю сессию', ready:'Серверный WB готов', failed:'Нужна новая привязка' }[state] || state;
+  return { idle:'Не подключён', device:'Жду телефон', ready:'Creator готов', 'waiting-call':'Жду ссылку звонка' }[state] || state;
 }
 
 async function refreshWBLogin() {
@@ -654,9 +654,9 @@ async function refreshWBLogin() {
   byId('wbLoginState').textContent = wbLoginStateLabel(status.state);
   byId('wbLoginMessage').textContent = status.message;
   byId('wbLoginRune').dataset.state = status.state;
-  const active = ['device','authorizing'].includes(status.state);
+  const active = status.state === 'device';
   byId('wbLoginStart').hidden = active;
-  byId('wbLoginStart').textContent = status.state === 'failed' ? 'Создать новый QR' : (status.managed ? 'Сменить аккаунт' : 'Создать QR для телефона');
+  byId('wbLoginStart').textContent = status.managed ? 'Перепривязать Android' : 'Создать QR для Android';
   byId('wbLoginStart').disabled = location.protocol !== 'https:';
   byId('wbLoginCancel').hidden = !active;
   byId('wbLoginForget').hidden = !status.managed || active;
@@ -686,7 +686,7 @@ async function startWBLogin() {
 
 async function cancelWBLogin() { await api('/api/wb-login/cancel',{method:'POST',body:'{}'}); await refreshWBLogin(); }
 async function forgetWBLogin() {
-  if (!confirm('Отключить серверный WB Stream? Активная сессия продолжит работать до перезапуска.')) return;
+  if (!confirm('Отвязать Android WB creator? Активная relay-сессия продолжит работать до перезапуска.')) return;
   await api('/api/wb-login/credentials',{method:'DELETE'}); await refreshWBLogin(); await refresh();
 }
 

@@ -44,6 +44,7 @@ type sessionRequest struct {
 	RecoveryName       string `json:"-"`
 	RecoveryKey        string `json:"-"`
 	RecoveryGeneration int    `json:"-"`
+	DeviceInvite       bool   `json:"-"`
 }
 
 type sessionStatus struct {
@@ -83,6 +84,11 @@ type manager struct {
 	link    string
 	exitErr string
 	logs    *logRing
+
+	wbCreator     *wbLoginManager
+	pendingCancel context.CancelFunc
+	runGeneration uint64
+	onLinkReady   func(string)
 }
 
 type logRing struct {
@@ -200,23 +206,32 @@ func (m *manager) commandFor(req sessionRequest) (*exec.Cmd, error) {
 	cookieNames := map[string]string{
 		"vk":       "cookies-vk.json",
 		"telemost": "cookies-yandex.json",
-		"wbstream": "cookies-wbstream.json",
 		"dion":     "cookies-dion.json",
 	}
 	binaryPath := filepath.Join(m.binsDir, binaryNames[req.Mode])
-	cookiePath := filepath.Join(m.managedSecretsDir, cookieNames[req.Mode])
-	if !providerCredentialFileReady(req.Mode, cookiePath) {
-		cookiePath = filepath.Join(m.secretsDir, cookieNames[req.Mode])
-	}
 	if info, err := os.Stat(binaryPath); err != nil || info.IsDir() {
 		return nil, fmt.Errorf("creator binary unavailable: %s", binaryPath)
 	}
-	if !providerCredentialFileReady(req.Mode, cookiePath) {
-		providerNames := map[string]string{"vk": "VK", "telemost": "Telemost", "wbstream": "WB Stream", "dion": "Dion"}
-		return nil, fmt.Errorf("%s provider is not connected; open Providers in the panel", providerNames[req.Mode])
-	}
 
-	args := []string{"--cookies", cookiePath, "--resources", req.Resources, "--write-file", m.linkFile}
+	args := []string{"--resources", req.Resources, "--write-file", m.linkFile}
+	if req.Mode == "wbstream" {
+		if !req.DeviceInvite {
+			return nil, errors.New("WB session accepts invitations only from the paired Android creator")
+		}
+		if _, err := normalizeWBInvite(req.ExistingLink); err != nil {
+			return nil, errors.New("WB session requires an invite from the paired Android creator")
+		}
+	} else {
+		cookiePath := filepath.Join(m.managedSecretsDir, cookieNames[req.Mode])
+		if !providerCredentialFileReady(req.Mode, cookiePath) {
+			cookiePath = filepath.Join(m.secretsDir, cookieNames[req.Mode])
+		}
+		if !providerCredentialFileReady(req.Mode, cookiePath) {
+			providerNames := map[string]string{"vk": "VK", "telemost": "Telemost", "wbstream": "WB Stream", "dion": "Dion"}
+			return nil, fmt.Errorf("%s provider is not connected; open Providers in the panel", providerNames[req.Mode])
+		}
+		args = append([]string{"--cookies", cookiePath}, args...)
+	}
 	switch req.Mode {
 	case "vk":
 		if req.ExistingLink != "" {
@@ -271,8 +286,31 @@ func (m *manager) start(req sessionRequest) error {
 	if err != nil {
 		return err
 	}
+	if normalized.Mode == "wbstream" && !normalized.DeviceInvite {
+		normalized.ExistingLink = ""
+		return m.startDeviceAssisted(normalized)
+	}
 	m.mu.Lock()
-	if m.cmd != nil {
+	if m.cmd != nil || m.pendingCancel != nil {
+		m.mu.Unlock()
+		return errors.New("a Creator session is already running")
+	}
+	cmd, err := m.startCommandLocked(normalized, false)
+	m.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	go m.wait(cmd)
+	go m.watchLink(cmd)
+	return nil
+}
+
+func (m *manager) startDeviceAssisted(normalized sessionRequest) error {
+	if m.wbCreator == nil || !m.wbCreator.configured() {
+		return errors.New("Android WB creator is not paired; open Providers in the panel")
+	}
+	m.mu.Lock()
+	if m.cmd != nil || m.pendingCancel != nil {
 		m.mu.Unlock()
 		return errors.New("a Creator session is already running")
 	}
@@ -281,19 +319,77 @@ func (m *manager) start(req sessionRequest) error {
 		return err
 	}
 	_ = os.Remove(m.linkFile)
-	cmd, err := m.commandFor(normalized)
-	if err != nil {
-		m.mu.Unlock()
-		return err
-	}
-	cmd.Stdout = m.logs
-	cmd.Stderr = m.logs
-	m.state = "starting"
+	ctx, cancel := context.WithCancel(context.Background())
+	m.pendingCancel = cancel
+	m.runGeneration++
+	generation := m.runGeneration
+	m.state = "waiting-for-creator"
 	m.request = normalized
 	m.started = time.Now().UTC()
 	m.link = ""
 	m.exitErr = ""
 	m.done = make(chan struct{})
+	m.logs.add("[manager] waiting for paired Android creator profile=%s", normalized.RecoveryProfile)
+	m.mu.Unlock()
+
+	go func() {
+		link, requestErr := m.wbCreator.requestCall(ctx, normalized.RecoveryProfile, normalized.RecoveryName)
+		m.mu.Lock()
+		if m.runGeneration != generation || m.pendingCancel == nil {
+			m.mu.Unlock()
+			return
+		}
+		m.pendingCancel = nil
+		if requestErr != nil {
+			m.state = "failed"
+			m.exitErr = requestErr.Error()
+			close(m.done)
+			m.mu.Unlock()
+			return
+		}
+		normalized.ExistingLink = link
+		normalized.DeviceInvite = true
+		m.link = link
+		callback := m.onLinkReady
+		cmd, launchErr := m.startCommandLocked(normalized, true)
+		m.mu.Unlock()
+		if launchErr != nil {
+			return
+		}
+		if callback != nil {
+			callback(link)
+		}
+		go m.wait(cmd)
+		go m.watchLink(cmd)
+	}()
+	return nil
+}
+
+func (m *manager) startCommandLocked(normalized sessionRequest, preserveRun bool) (*exec.Cmd, error) {
+	if err := os.MkdirAll(m.dataDir, 0o700); err != nil {
+		return nil, err
+	}
+	if !preserveRun {
+		_ = os.Remove(m.linkFile)
+		m.runGeneration++
+		m.started = time.Now().UTC()
+		m.link = ""
+		m.exitErr = ""
+		m.done = make(chan struct{})
+	}
+	cmd, err := m.commandFor(normalized)
+	if err != nil {
+		m.state = "failed"
+		m.exitErr = err.Error()
+		if preserveRun {
+			close(m.done)
+		}
+		return nil, err
+	}
+	cmd.Stdout = m.logs
+	cmd.Stderr = m.logs
+	m.state = "starting"
+	m.request = normalized
 	m.cmd = cmd
 	m.logs.add("[manager] starting mode=%s resources=%s reliability=%s kcp_profile=%s", normalized.Mode, normalized.Resources, normalized.VideoReliability, normalized.KCPProfile)
 	if err := cmd.Start(); err != nil {
@@ -301,15 +397,10 @@ func (m *manager) start(req sessionRequest) error {
 		m.state = "failed"
 		m.exitErr = err.Error()
 		close(m.done)
-		m.mu.Unlock()
-		return err
+		return nil, err
 	}
 	m.state = "running"
-	m.mu.Unlock()
-
-	go m.wait(cmd)
-	go m.watchLink(cmd)
-	return nil
+	return cmd, nil
 }
 
 func (m *manager) wait(cmd *exec.Cmd) {
@@ -365,8 +456,18 @@ func (m *manager) stop() error {
 	m.mu.Lock()
 	cmd := m.cmd
 	done := m.done
+	pendingCancel := m.pendingCancel
+	if pendingCancel != nil {
+		m.pendingCancel = nil
+		m.runGeneration++
+		m.state = "stopped"
+		close(done)
+	}
 	if cmd == nil || cmd.Process == nil {
 		m.mu.Unlock()
+		if pendingCancel != nil {
+			pendingCancel()
+		}
 		return nil
 	}
 	m.state = "stopping"
@@ -470,8 +571,9 @@ func main() {
 		_, _ = w.Write([]byte("ok\n"))
 	})
 	vkLogin := newVKLoginManager(cp.managedSecretsDir, envOr("SECRETS_DIR", "/run/secrets/wlb"))
-	wbLogin := newWBLoginManager(cp.managedSecretsDir, envOr("SECRETS_DIR", "/run/secrets/wlb"), findVKLoginBrowser())
-	registerControlAPIRoutes(mux, cp, vkLogin, username, password, envOr("SECRETS_DIR", "/run/secrets/wlb"))
+	wbLogin := newWBLoginManager(dataDir)
+	cp.setWBCreator(wbLogin)
+	registerControlAPIRoutes(mux, cp, vkLogin, wbLogin, username, password, envOr("SECRETS_DIR", "/run/secrets/wlb"))
 	registerVKLoginRoutes(mux, vkLogin, username, password)
 	registerWBLoginRoutes(mux, wbLogin, username, password)
 	mux.Handle("/", requireAuth(username, password, http.FileServer(http.FS(webRoot))))

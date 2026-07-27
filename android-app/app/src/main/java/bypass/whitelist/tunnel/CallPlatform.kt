@@ -32,8 +32,15 @@ enum class CallPlatform(val id: String, val urlMarker: String) {
 					parsed.rawPath.orEmpty().startsWith("/call")
 				TELEMOST -> scheme == "https" && host == "telemost.yandex.ru" &&
 					parsed.rawPath.orEmpty().startsWith("/j/")
-				WBSTREAM -> scheme == "wbstream" && parsed.rawPath.orEmpty().isEmpty() &&
-					parsed.rawQuery == null && parsed.rawFragment == null && safeOpaqueId(host)
+				WBSTREAM -> when {
+					scheme == "wbstream" -> parsed.rawPath.orEmpty().isEmpty() && parsed.rawQuery == null &&
+						parsed.rawFragment == null && safeOpaqueId(host)
+					scheme == "https" && host == "stream.wb.ru" && parsed.rawQuery == null && parsed.rawFragment == null -> {
+						val parts = parsed.rawPath.orEmpty().trim('/').split('/')
+						parts.size == 2 && parts[0] == "room" && safeOpaqueId(parts[1])
+					}
+					else -> false
+				}
 				DION -> when {
 					scheme == "dion" -> parsed.rawPath.orEmpty().isEmpty() && parsed.rawQuery == null &&
 						parsed.rawFragment == null && safeOpaqueId(host)

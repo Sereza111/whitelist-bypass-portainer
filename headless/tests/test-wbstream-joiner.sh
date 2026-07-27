@@ -10,7 +10,7 @@ set -u
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 CREATOR="$ROOT/headless/wbstream/headless-wbstream-creator"
 JOINER="$ROOT/headless/wbstream-joiner/headless-wbstream-joiner"
-COOKIES="${WBSTREAM_COOKIES:-$ROOT/cookies-wbstream.json}"
+JOIN_LINK="${WBSTREAM_LINK:-}"
 SOCKS_PORT=11080
 TARGET_URL="https://api.ipify.org"
 PROBE_TIMEOUT=15
@@ -48,31 +48,16 @@ require_bin() {
 require_bin "$CREATOR"
 require_bin "$JOINER"
 
-if [ ! -f "$COOKIES" ]; then
-    echo "FAIL: cookies file not found at $COOKIES" >&2
-    echo "Set WBSTREAM_COOKIES or place cookies-wbstream.json at repo root." >&2
+if [ -z "$JOIN_LINK" ]; then
+    echo "FAIL: WBSTREAM_LINK is required." >&2
+    echo "Create a call in the paired Android WB interface and provide its invitation." >&2
     exit 2
 fi
 
 echo "=== mode=$mode_arg ==="
 
-"$CREATOR" --cookies "$COOKIES" > "$CREATOR_LOG" 2>&1 &
+"$CREATOR" --room "$JOIN_LINK" > "$CREATOR_LOG" 2>&1 &
 CREATOR_PID=$!
-
-waited=0
-JOIN_LINK=""
-while [ "$waited" -lt "$SETTLE_TIMEOUT" ]; do
-    JOIN_LINK=$(grep -m1 "join_link:" "$CREATOR_LOG" | awk '{print $2}')
-    [ -n "$JOIN_LINK" ] && break
-    sleep 1
-    waited=$((waited + 1))
-done
-
-if [ -z "$JOIN_LINK" ]; then
-    echo "FAIL: creator did not print a join_link within ${SETTLE_TIMEOUT}s" >&2
-    tail -20 "$CREATOR_LOG" >&2
-    exit 1
-fi
 echo "join_link=$JOIN_LINK"
 
 "$JOINER" --room "$JOIN_LINK" --socks-port "$SOCKS_PORT" --tunnel-mode "$mode_arg" \

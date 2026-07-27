@@ -54,6 +54,30 @@
         android:layout_height="0dp"
         android:layout_weight="1" />
 
+    <LinearLayout
+        android:id="@+id/wbInvitePanel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingHorizontal="16dp"
+        android:paddingTop="10dp"
+        android:visibility="gone">
+
+        <EditText
+            android:id="@+id/wbInviteInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="@string/wb_creator_invite_hint"
+            android:inputType="textUri"
+            android:maxLines="2" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/wbInviteSubmit"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/wb_creator_send_invite" />
+    </LinearLayout>
+
     <com.google.android.material.button.MaterialButton
         android:id="@+id/wbLoginClose"
         android:layout_width="match_parent"

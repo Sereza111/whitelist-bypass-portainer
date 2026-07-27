@@ -15,6 +15,7 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.fragment.app.Fragment
 import bypass.whitelist.App
 import bypass.whitelist.R
+import bypass.whitelist.WBLoginActivity
 import bypass.whitelist.tunnel.SplitTunnelingMode
 import bypass.whitelist.tunnel.TunnelMode
 import bypass.whitelist.util.Callback
@@ -151,6 +152,10 @@ class SettingsScreenFragment : Fragment(R.layout.fragment_settings_screen) {
 			card, R.drawable.ic_setting_headless, getString(R.string.settings_row_wb_pairing),
 			getString(R.string.settings_row_wb_pairing_sub), null,
 		) {
+			if (WBLoginActivity.hasBinding(requireContext())) {
+				startActivity(Intent(requireContext(), WBLoginActivity::class.java))
+				return@addRow
+			}
 			InputActionSheet.show(
 				manager = parentFragmentManager,
 				title = getString(R.string.settings_row_wb_pairing),

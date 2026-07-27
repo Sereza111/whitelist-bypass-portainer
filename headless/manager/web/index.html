@@ -138,7 +138,7 @@
             </article>
             <article class="panel provider-card">
               <div class="provider-brand"><span class="provider-logo wb-logo">WB</span><div><span class="kicker">Альтернативный carrier</span><h2>WB Stream</h2></div><span id="wbAccountBadge" class="status-badge">Проверка</span></div>
-              <p>Вход выполняется на телефоне через обычную мобильную сеть, поэтому защита WB не видит IP дата-центра. Панель получает только разрешённую серверную сессию по одноразовой HTTPS-привязке.</p>
+              <p>Android входит в WB локально и создаёт звонки обычным интерфейсом. Manager получает только готовую ссылку приглашения; cookies и WB-токены не покидают телефон.</p>
               <div class="identity-row"><span>Аккаунт</span><strong id="wbAccountState">Не подключён</strong></div>
               <button id="wbLoginOpen" class="primary full" type="button">Подключить / сменить WB</button>
             </article>
@@ -166,7 +166,7 @@
         <section class="page" data-page="settings">
           <div class="settings-grid">
             <article class="panel"><div class="panel-head"><div><span class="kicker">Сервер</span><h2>Control Plane</h2></div><span class="status-badge good-badge">Online</span></div><dl class="settings-list"><div><dt>Публичный порт</dt><dd>9200 / TCP</dd></div><div><dt>Авторизация</dt><dd>Basic Auth</dd></div><div><dt>Текущая сборка</dt><dd id="settingsBuild">—</dd></div><div><dt>Лимит Creator</dt><dd id="settingsLimit">—</dd></div></dl></article>
-            <article class="panel"><div class="panel-head"><div><span class="kicker">Безопасность</span><h2>Что хранится</h2></div></div><ul class="check-list"><li>Cookies VK/WB находятся только в <code>/data/managed-secrets</code></li><li>Номер и одноразовый код WB не сохраняются</li><li>Ссылки звонков скрыты из общего журнала</li><li>Токены и cookies не возвращаются через API</li><li>Изменения защищены проверкой Origin</li></ul></article>
+            <article class="panel"><div class="panel-head"><div><span class="kicker">Безопасность</span><h2>Что хранится</h2></div></div><ul class="check-list"><li>Manager хранит только хэш секрета привязанного Android creator</li><li>WB cookies и токены остаются внутри Android WebView</li><li>Manager принимает только проверенную ссылку приглашения</li><li>Ссылки звонков скрыты из общего журнала</li><li>Изменения панели защищены проверкой Origin</li></ul></article>
             <article class="panel span-all"><div class="panel-head"><div><span class="kicker">Рекомендуемая схема</span><h2>Стабильная эксплуатация</h2></div></div><div class="steps"><span>01<strong>Отдельный VK для сервера</strong></span><span>02<strong>Основной VK как получатель</strong></span><span>03<strong>Отдельный профиль на устройство</strong></span><span>04<strong>Auto для обычной сети</strong></span></div></article>
           </div>
         </section>
@@ -190,14 +190,14 @@
   <div id="wbLoginModal" class="modal-backdrop" hidden>
     <section class="vk-login-modal" role="dialog" aria-modal="true" aria-labelledby="wbLoginTitle">
       <button id="wbLoginClose" class="modal-close" type="button" aria-label="Закрыть">×</button>
-      <p class="eyebrow">Device assisted · one-time pairing</p><h2 id="wbLoginTitle">Вход WB через телефон</h2>
-      <p class="vk-login-lede">Отсканируй QR телефоном. WB откроется внутри клиента на сети телефона; после входа приложение безопасно передаст серверу только разрешённую WB-сессию.</p>
+      <p class="eyebrow">Device-assisted creator · persistent binding</p><h2 id="wbLoginTitle">Привязка Android creator</h2>
+      <p class="vk-login-lede">Отсканируй QR телефоном. Android войдёт в WB локально и будет отвечать на запросы Manager только готовыми ссылками приглашений.</p>
       <p id="wbTransportWarning" class="inline-warning" hidden>Привязка телефона работает только через публичный HTTPS-адрес панели.</p>
       <div class="vk-login-state"><span id="wbLoginRune" class="status-rune"></span><div><strong id="wbLoginState">Ожидание</strong><small id="wbLoginMessage">Нажми «Начать вход»</small></div></div>
       <div id="wbLoginScreen" class="vk-login-screen wb-pairing-screen" hidden><img id="wbLoginScreenshot" alt="QR-код привязки WB к телефону"><div class="scan-corners"></div></div>
       <a id="wbLoginOpenPhone" class="primary wb-phone-link" href="#" hidden>Открыть на этом телефоне</a>
-      <div class="vk-login-help"><span>1</span><p>Установи актуальный Android-клиент и отсканируй QR</p><span>2</span><p>Войди в технический WB-аккаунт внутри приложения</p><span>3</span><p>Панель проверит сессию и сохранит её с правами 0600</p></div>
-      <p class="field-help">QR действует 10 минут. Пароля панели, номера телефона, кода и cookies в QR нет.</p>
+      <div class="vk-login-help"><span>1</span><p>Установи актуальный Android-клиент и отсканируй QR</p><span>2</span><p>Войди в WB внутри WebView обычным способом</p><span>3</span><p>По запросу создай звонок штатным интерфейсом и отправь приглашение</p></div>
+      <p class="field-help">QR действует 10 минут. Cookies и WB-токенов в QR нет, на Manager они не отправляются.</p>
       <div class="actions vk-login-actions"><button id="wbLoginStart" class="primary" type="button">Создать QR для телефона</button><button id="wbLoginCancel" class="ghost" type="button" hidden>Отмена</button><button id="wbLoginForget" class="ghost danger" type="button" hidden>Отключить WB</button></div>
     </section>
   </div>

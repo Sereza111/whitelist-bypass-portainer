@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-const controlPlaneSchema = 3
+const controlPlaneSchema = 4
 
 type clientProfile struct {
 	ID                 string         `json:"id"`
@@ -31,6 +31,9 @@ type clientProfile struct {
 	RecoveryGeneration int            `json:"recoveryGeneration"`
 	RecoveryRecipient  *string        `json:"recoveryRecipient,omitempty"`
 	RecoveryVerifiedAt *time.Time     `json:"recoveryVerifiedAt,omitempty"`
+	CurrentInvite      string         `json:"currentInvite,omitempty"`
+	InviteGeneration   int            `json:"inviteGeneration,omitempty"`
+	InviteUpdatedAt    *time.Time     `json:"inviteUpdatedAt,omitempty"`
 }
 
 type panelSettings struct {
@@ -119,6 +122,33 @@ type controlPlane struct {
 	profiles          map[string]clientProfile
 	sessions          map[string]*managedSession
 	events            *eventLog
+	wbCreator         *wbLoginManager
+}
+
+func (cp *controlPlane) setWBCreator(login *wbLoginManager) {
+	cp.mu.Lock()
+	cp.wbCreator = login
+	cp.mu.Unlock()
+}
+
+func (cp *controlPlane) updateProfileInvite(profileID, link string) {
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+	profile, ok := cp.profiles[profileID]
+	if !ok {
+		return
+	}
+	now := time.Now().UTC()
+	profile.CurrentInvite = link
+	profile.InviteGeneration = profile.RecoveryGeneration
+	profile.InviteUpdatedAt = &now
+	profile.UpdatedAt = now
+	cp.profiles[profileID] = profile
+	if err := cp.saveLocked(); err != nil {
+		cp.events.add("error", "profile", "Could not persist refreshed WB invite", profileID)
+		return
+	}
+	cp.events.add("info", "profile", "Updated connected client profile with a fresh WB invite", profileID)
 }
 
 func newControlPlane(dataDir string, maxSessions int) (*controlPlane, error) {
@@ -423,6 +453,10 @@ func (cp *controlPlane) startSession(input sessionInput) (sessionView, error) {
 	mgr := newManagerAt(sessionDir)
 	mgr.managedSecretsDir = cp.managedSecretsDir
 	mgr.peerID = cp.effectiveRecoveryRecipientLocked(profile.ID)
+	mgr.wbCreator = cp.wbCreator
+	if config.Mode == "wbstream" {
+		mgr.onLinkReady = func(link string) { cp.updateProfileInvite(profile.ID, link) }
+	}
 	created := time.Now().UTC()
 	session := &managedSession{
 		ID: id, ClientID: input.ClientID, ClientName: profile.Name, CreatedAt: created,

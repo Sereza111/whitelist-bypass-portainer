@@ -176,7 +176,6 @@ ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.22
 |---|---|
 | VK | `cookies-vk.json` |
 | Telemost | `cookies-yandex.json` |
-| WB Stream | `cookies-wbstream.json` |
 | Dion | `cookies-dion.json` |
 
 Для VK на `amd64`/`arm64` предпочтителен вход через QR:
@@ -190,12 +189,12 @@ Manager сохраняет cookies в `/data/managed-secrets/cookies-vk.json` с
 `0600` и удаляет временный Chromium profile. Пароль VK в панель не вводится.
 
 Для WB Stream используй **Провайдеры → Подключить / сменить WB → Создать QR для
-телефона**. Серверный IP WB блокирует кодом 498, поэтому вход выполняется в
-Android-клиенте через сеть телефона. QR открывает публичную HTTPS-страницу, но
-одноразовый токен остаётся во фрагменте `#` и не попадает в access-log Nginx.
-Клиент передаёт панели только allowlisted WB cookies и device ID; Manager
-проверяет их через WB API и атомарно сохраняет в `/data/managed-secrets` с
-правами `0600`. Номер, код, pairing token и cookies не попадают в события.
+телефона**. QR сохраняет постоянную привязку Android creator к Manager. Android
+входит в WB и создаёт звонок обычным интерфейсом, после чего отправляет только
+готовую ссылку приглашения. Cookies и аккаунтные WB-токены остаются в WebView на
+телефоне. После завершения звонка Manager автоматически запрашивает новое
+приглашение и обновляет профиль подключённого клиента. При первом запуске новая
+версия удаляет старую управляемую копию WB cookies из `/data/managed-secrets`.
 
 ## Создание клиента
 

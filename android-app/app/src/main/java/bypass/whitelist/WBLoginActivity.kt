@@ -3,6 +3,7 @@ package bypass.whitelist
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -13,11 +14,12 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.EditText
+import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.button.MaterialButton
 import org.json.JSONObject
-import org.json.JSONTokener
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.UUID
@@ -29,24 +31,23 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
     private lateinit var webView: WebView
     private lateinit var status: TextView
     private lateinit var close: MaterialButton
+    private lateinit var invitePanel: LinearLayout
+    private lateinit var inviteInput: EditText
+    private lateinit var inviteSubmit: MaterialButton
     private val mainHandler = Handler(Looper.getMainLooper())
     private val executor = Executors.newSingleThreadExecutor()
-    private val uploadRunning = AtomicBoolean(false)
+    private val requestRunning = AtomicBoolean(false)
     private var serverOrigin = ""
-    private var pairingToken = ""
-    private var deviceId = ""
-    private var finished = false
-    private var nextUploadAt = 0L
-    private var accountDetected = false
-    private var streamPrimed = false
-    private var uploadAttempts = 0
-    private var deviceRefreshInFlight = false
+    private var creatorId = ""
+    private var deviceSecret = ""
+    private var pendingRequestId = ""
+    private var destroyed = false
 
-    private val cookieProbe = object : Runnable {
+    private val commandPoll = object : Runnable {
         override fun run() {
-            if (finished || isFinishing || isDestroyed) return
-            probeCredentials()
-            mainHandler.postDelayed(this, 1500)
+            if (destroyed || isFinishing || isDestroyed) return
+            if (creatorId.isNotEmpty() && deviceSecret.isNotEmpty() && pendingRequestId.isEmpty()) pollCommand()
+            mainHandler.postDelayed(this, POLL_INTERVAL_MS)
         }
     }
 
@@ -55,21 +56,37 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
         webView = findViewById(R.id.wbLoginWebView)
         status = findViewById(R.id.wbLoginStatus)
         close = findViewById(R.id.wbLoginClose)
+        invitePanel = findViewById(R.id.wbInvitePanel)
+        inviteInput = findViewById(R.id.wbInviteInput)
+        inviteSubmit = findViewById(R.id.wbInviteSubmit)
         close.setOnClickListener { finish() }
+        inviteSubmit.setOnClickListener { submitInvite() }
 
         val input = intent?.data
         val server = input?.getQueryParameter("server").orEmpty().trimEnd('/')
         val token = input?.getQueryParameter("token").orEmpty()
-        if (!validPairing(server, token)) {
-            fail(getString(R.string.wb_login_invalid_pairing))
-            return
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        val freshPairing = validPairing(server, token)
+        if (freshPairing) {
+            serverOrigin = server
+        } else {
+            serverOrigin = prefs.getString(KEY_SERVER, "").orEmpty()
+            creatorId = prefs.getString(KEY_CREATOR_ID, "").orEmpty()
+            deviceSecret = prefs.getString(KEY_DEVICE_SECRET, "").orEmpty()
+            if (!validServer(serverOrigin) || !CREATOR_RE.matches(creatorId) || !TOKEN_RE.matches(deviceSecret)) {
+                fail(getString(R.string.wb_login_invalid_pairing))
+                return
+            }
         }
-        serverOrigin = server
-        pairingToken = token
         configureWebView()
-        status.setText(R.string.wb_login_opening)
+        if (freshPairing) {
+            pairCreator(token)
+            status.setText(R.string.wb_creator_pairing)
+        } else {
+            status.setText(R.string.wb_creator_ready_help)
+            mainHandler.post(commandPoll)
+        }
         webView.loadUrl(WB_LOGIN_URL)
-        mainHandler.post(cookieProbe)
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -77,22 +94,13 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true
         webView.settings.cacheMode = WebSettings.LOAD_DEFAULT
-        webView.settings.javaScriptCanOpenWindowsAutomatically = false
+        webView.settings.javaScriptCanOpenWindowsAutomatically = true
         webView.settings.setSupportMultipleWindows(false)
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
         webView.webViewClient = object : WebViewClient() {
             override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
-                status.setText(if (accountDetected) R.string.wb_login_preparing else R.string.wb_login_waiting)
-            }
-
-            override fun onPageFinished(view: WebView, url: String) {
-                val parsed = Uri.parse(url)
-                val host = parsed.host.orEmpty().lowercase()
-                if (host == "wb.ru" || host.endsWith(".wb.ru")) ensureDeviceId()
-                if (parsed.path.orEmpty().startsWith("/profile")) onAccountDetected()
-                detectAccountPage()
-                probeCredentials()
+                if (pendingRequestId.isEmpty()) status.setText(R.string.wb_creator_ready_help)
             }
 
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
@@ -101,142 +109,126 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
         }
     }
 
-    private fun detectAccountPage() {
-        webView.evaluateJavascript(
-            """(() => /(^|\s)Выйти(\s|$)/i.test(document.body?.innerText || '') || location.pathname.startsWith('/profile'))()""",
-        ) { result ->
-            if (result == "true") onAccountDetected()
+    private fun pairCreator(pairingToken: String) {
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        val deviceId = prefs.getString(KEY_DEVICE_ID, null) ?: UUID.randomUUID().toString().also {
+            prefs.edit().putString(KEY_DEVICE_ID, it).apply()
         }
-    }
-
-    private fun onAccountDetected() {
-        accountDetected = true
-        status.setText(R.string.wb_login_preparing)
-        CookieManager.getInstance().flush()
-        refreshDeviceIdFromPage()
-        if (streamPrimed) return
-        streamPrimed = true
-        mainHandler.postDelayed({
-            if (!finished && !isFinishing && !isDestroyed) webView.loadUrl(WB_STREAM_URL)
-        }, 700)
-    }
-
-    private fun refreshDeviceIdFromPage() {
-        if (deviceRefreshInFlight) return
-        deviceRefreshInFlight = true
-        webView.evaluateJavascript("localStorage.getItem('wb_auth_api_device_id') || ''") { result ->
-            deviceRefreshInFlight = false
-            val parsed = runCatching { JSONTokener(result).nextValue() as? String }.getOrNull().orEmpty()
-            if (validDeviceId(parsed)) deviceId = parsed
-            probeCredentials()
-        }
-    }
-
-    private fun ensureDeviceId() {
-        if (deviceId.isNotEmpty()) return
-        val fallback = UUID.randomUUID().toString()
-        val script = """(() => { let value = localStorage.getItem('wb_auth_api_device_id'); if (!value) { value = ${JSONObject.quote(fallback)}; localStorage.setItem('wb_auth_api_device_id', value); } return value; })()"""
-        webView.evaluateJavascript(script) { result ->
-            val parsed = runCatching { JSONTokener(result).nextValue() as? String }.getOrNull().orEmpty()
-            deviceId = if (validDeviceId(parsed)) parsed else fallback
-            probeCredentials()
-        }
-    }
-
-    private fun probeCredentials() {
-        if (finished || uploadRunning.get() || System.currentTimeMillis() < nextUploadAt) return
-        val cookies = linkedMapOf<String, String>()
-        val urls = buildList {
-            addAll(COOKIE_URLS)
-            webView.url?.takeIf { it.startsWith("https://") }?.let(::add)
-        }
-        urls.forEach { url ->
-            CookieManager.getInstance().getCookie(url)?.split(';')?.forEach cookie@{ part ->
-                val index = part.indexOf('=')
-                if (index <= 0) return@cookie
-                val name = part.substring(0, index).trim()
-                val value = part.substring(index + 1).trim()
-                if (name in ALLOWED_COOKIES && value.isNotEmpty()) cookies.putIfAbsent(name, value)
-            }
-        }
-        val readyCount = REQUIRED_COOKIES.count(cookies::containsKey)
-        if (readyCount < REQUIRED_COOKIES.size) {
-            if (accountDetected) status.text = getString(R.string.wb_login_cookie_progress, readyCount, REQUIRED_COOKIES.size)
-            return
-        }
-        if (deviceId.isEmpty()) {
-            ensureDeviceId()
-            return
-        }
-        uploadCredentials(cookies)
-    }
-
-    private fun uploadCredentials(cookies: Map<String, String>) {
-        if (!uploadRunning.compareAndSet(false, true)) return
-        status.setText(R.string.wb_login_uploading)
         val body = JSONObject().apply {
             put("deviceId", deviceId)
-            put("userAgent", webView.settings.userAgentString.orEmpty())
-            put("cookies", JSONObject(cookies))
+            put("name", "${Build.MANUFACTURER} ${Build.MODEL}".trim().take(80))
         }.toString()
         executor.execute {
-            val result = runCatching {
-                val connection = URL("$serverOrigin/api/wb-login/device/credentials").openConnection() as HttpURLConnection
-                connection.requestMethod = "POST"
-                connection.connectTimeout = 15_000
-                connection.readTimeout = 25_000
-                connection.doOutput = true
-                connection.setRequestProperty("Authorization", "Bearer $pairingToken")
-                connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
-                connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
-                val code = connection.responseCode
-                val responseText = (if (code >= 400) connection.errorStream else connection.inputStream)
-                    ?.bufferedReader()?.use { it.readLine().orEmpty().take(2048) }.orEmpty()
-                val message = runCatching { JSONObject(responseText).optString("error") }
-                    .getOrDefault("").take(160)
-                connection.disconnect()
-                UploadResult(code, message)
-            }.getOrDefault(UploadResult(0, ""))
+            val response = post("/api/wb-creator/pair", body, pairingToken, "")
             mainHandler.post {
-                uploadRunning.set(false)
-                if (result.code in 200..299) {
-                    finished = true
-                    mainHandler.removeCallbacks(cookieProbe)
-                    CookieManager.getInstance().flush()
-                    webView.visibility = View.GONE
-                    status.setText(R.string.wb_login_success)
-                    close.setText(R.string.wb_login_done)
+                if (response.code !in 200..299) {
+                    fail(response.message.ifBlank { getString(R.string.wb_creator_pair_failed) })
+                    return@post
+                }
+                val json = runCatching { JSONObject(response.body) }.getOrNull()
+                creatorId = json?.optString("creatorId").orEmpty()
+                deviceSecret = json?.optString("deviceSecret").orEmpty()
+                if (!TOKEN_RE.matches(deviceSecret) || !CREATOR_RE.matches(creatorId)) {
+                    fail(getString(R.string.wb_creator_pair_failed))
+                    return@post
+                }
+                prefs.edit()
+                    .putString(KEY_SERVER, serverOrigin)
+                    .putString(KEY_CREATOR_ID, creatorId)
+                    .putString(KEY_DEVICE_SECRET, deviceSecret)
+                    .apply()
+                status.setText(R.string.wb_creator_ready_help)
+                mainHandler.post(commandPoll)
+            }
+        }
+    }
+
+    private fun pollCommand() {
+        if (!requestRunning.compareAndSet(false, true)) return
+        executor.execute {
+            val response = post("/api/wb-creator/commands/next", "", deviceSecret, creatorId)
+            mainHandler.post {
+                requestRunning.set(false)
+                if (response.code == HttpURLConnection.HTTP_NO_CONTENT) return@post
+                if (response.code == HttpURLConnection.HTTP_UNAUTHORIZED) {
+                    status.setText(R.string.wb_creator_unpaired)
+                    return@post
+                }
+                if (response.code !in 200..299) return@post
+                val json = runCatching { JSONObject(response.body) }.getOrNull() ?: return@post
+                val requestId = json.optString("id")
+                if (!CREATOR_RE.matches(requestId)) return@post
+                pendingRequestId = requestId
+                val profileName = json.optString("profileName").take(80)
+                status.text = getString(R.string.wb_creator_call_requested, profileName)
+                invitePanel.visibility = View.VISIBLE
+                inviteInput.setText("")
+            }
+        }
+    }
+
+    private fun submitInvite() {
+        if (pendingRequestId.isEmpty() || requestRunning.get()) return
+        val candidate = inviteInput.text.toString().trim().ifEmpty { webView.url.orEmpty() }
+        if (!isSafeInvite(candidate)) {
+            status.setText(R.string.wb_creator_invalid_invite)
+            return
+        }
+        if (!requestRunning.compareAndSet(false, true)) return
+        inviteSubmit.isEnabled = false
+        status.setText(R.string.wb_creator_sending_invite)
+        val requestId = pendingRequestId
+        val body = JSONObject().put("inviteLink", candidate).toString()
+        executor.execute {
+            val response = post("/api/wb-creator/commands/$requestId/invite", body, deviceSecret, creatorId)
+            mainHandler.post {
+                requestRunning.set(false)
+                inviteSubmit.isEnabled = true
+                if (response.code in 200..299) {
+                    pendingRequestId = ""
+                    invitePanel.visibility = View.GONE
+                    status.setText(R.string.wb_creator_invite_sent)
                 } else {
-                    uploadAttempts++
-                    nextUploadAt = System.currentTimeMillis() + 10_000
-                    val failure = if (result.message.isBlank()) {
-                        getString(R.string.wb_login_upload_failed, result.code)
-                    } else {
-                        getString(R.string.wb_login_upload_failed_detail, result.code, result.message)
-                    }
-                    if (uploadAttempts >= MAX_UPLOAD_ATTEMPTS) {
-                        finished = true
-                        mainHandler.removeCallbacks(cookieProbe)
-                        status.text = "$failure\n${getString(R.string.wb_login_new_pairing_required)}"
-                    } else {
-                        status.text = failure
-                    }
+                    status.text = response.message.ifBlank { getString(R.string.wb_creator_invite_failed) }
                 }
             }
         }
     }
 
+    private fun post(path: String, body: String, secret: String, id: String): ApiResponse {
+        return runCatching {
+            val connection = URL(serverOrigin + path).openConnection() as HttpURLConnection
+            connection.requestMethod = "POST"
+            connection.connectTimeout = 15_000
+            connection.readTimeout = 25_000
+            connection.setRequestProperty("Authorization", "Bearer $secret")
+            if (id.isNotEmpty()) connection.setRequestProperty("X-WLB-Creator-ID", id)
+            if (body.isNotEmpty()) {
+                connection.doOutput = true
+                connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            }
+            val code = connection.responseCode
+            val responseBody = (if (code >= 400) connection.errorStream else connection.inputStream)
+                ?.bufferedReader()?.use { it.readText().take(4096) }.orEmpty()
+            val message = runCatching { JSONObject(responseBody).optString("error") }.getOrDefault("").take(200)
+            connection.disconnect()
+            ApiResponse(code, responseBody, message)
+        }.getOrDefault(ApiResponse(0, "", ""))
+    }
+
     private fun fail(message: String) {
-        finished = true
-        webView.visibility = View.GONE
+        mainHandler.removeCallbacks(commandPoll)
+        invitePanel.visibility = View.GONE
         status.text = message
     }
 
     override fun onDestroy() {
-        finished = true
+        destroyed = true
         mainHandler.removeCallbacksAndMessages(null)
         executor.shutdownNow()
         if (::webView.isInitialized) {
+            CookieManager.getInstance().flush()
             webView.stopLoading()
             webView.loadUrl("about:blank")
             webView.destroy()
@@ -246,32 +238,48 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 
     companion object {
         private const val WB_LOGIN_URL = "https://stream.wb.ru/login"
-        private const val WB_STREAM_URL = "https://stream.wb.ru/"
-        private const val MAX_UPLOAD_ATTEMPTS = 3
+        private const val POLL_INTERVAL_MS = 3_000L
+        private const val PREFS = "wb_creator"
+        private const val KEY_SERVER = "server"
+        private const val KEY_CREATOR_ID = "creator_id"
+        private const val KEY_DEVICE_SECRET = "device_secret"
+        private const val KEY_DEVICE_ID = "device_id"
         private val TOKEN_RE = Regex("^[A-Za-z0-9_-]{32,128}$")
-        private val DEVICE_RE = Regex("^[A-Za-z0-9._-]{8,128}$")
-        private val COOKIE_URLS = listOf(
-            "https://auth-stream.wb.ru/v2/auth/slide-v3",
-            "https://auth-stream.wb.ru/",
-            "https://stream.wb.ru/",
-            "https://stream.wb.ru/login",
-            "https://stream.wb.ru/profile",
-            "https://www.wildberries.ru/",
-            "https://www.wildberries.ru/lk",
-            "https://wb.ru/",
-        )
-        private val REQUIRED_COOKIES = setOf("wbx-refresh", "x_wbaas_token", "wbx-validation-key")
-        private val ALLOWED_COOKIES = REQUIRED_COOKIES + "_wbauid"
+        private val CREATOR_RE = Regex("^[A-Za-z0-9._-]{8,128}$")
+        private val ROOM_RE = Regex("^[A-Za-z0-9_-]{3,256}$")
 
         private fun validPairing(server: String, token: String): Boolean {
-            val uri = runCatching { Uri.parse(server) }.getOrNull() ?: return false
-            return uri.scheme == "https" && !uri.host.isNullOrBlank() && uri.userInfo == null &&
-                (uri.path.isNullOrEmpty() || uri.path == "/") && uri.query == null && uri.fragment == null &&
-                TOKEN_RE.matches(token)
+            return validServer(server) && TOKEN_RE.matches(token)
         }
 
-        private fun validDeviceId(value: String): Boolean = DEVICE_RE.matches(value)
+        private fun validServer(server: String): Boolean {
+            val uri = runCatching { Uri.parse(server) }.getOrNull() ?: return false
+            return uri.scheme == "https" && !uri.host.isNullOrBlank() && uri.userInfo == null &&
+                (uri.path.isNullOrEmpty() || uri.path == "/") && uri.query == null && uri.fragment == null
+        }
+
+        fun hasBinding(context: android.content.Context): Boolean {
+            val prefs = context.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE)
+            return validServer(prefs.getString(KEY_SERVER, "").orEmpty()) &&
+                CREATOR_RE.matches(prefs.getString(KEY_CREATOR_ID, "").orEmpty()) &&
+                TOKEN_RE.matches(prefs.getString(KEY_DEVICE_SECRET, "").orEmpty())
+        }
+
+        private fun isSafeInvite(value: String): Boolean {
+            if (value.length !in 1..2048) return false
+            val uri = runCatching { Uri.parse(value) }.getOrNull() ?: return false
+            if (uri.userInfo != null || uri.port != -1 || uri.query != null || uri.fragment != null) return false
+            val room = when {
+                uri.scheme.equals("wbstream", true) && uri.path.isNullOrEmpty() -> uri.host.orEmpty()
+                uri.scheme.equals("https", true) && uri.host.equals("stream.wb.ru", true) -> {
+                    val parts = uri.path.orEmpty().trim('/').split('/')
+                    if (parts.size == 2 && parts[0] == "room") parts[1] else ""
+                }
+                else -> ""
+            }
+            return ROOM_RE.matches(room)
+        }
     }
 
-    private data class UploadResult(val code: Int, val message: String)
+    private data class ApiResponse(val code: Int, val body: String, val message: String)
 }

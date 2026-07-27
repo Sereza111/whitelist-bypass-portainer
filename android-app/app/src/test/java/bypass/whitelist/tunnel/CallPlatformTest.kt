@@ -20,6 +20,7 @@ class CallPlatformTest {
             CallPlatform.VK to "https://vk.com/call/join/example",
             CallPlatform.TELEMOST to "https://telemost.yandex.ru/j/123456",
             CallPlatform.WBSTREAM to "wbstream://room-123",
+            CallPlatform.WBSTREAM to "https://stream.wb.ru/room/room-123",
             CallPlatform.DION to "dion://room-123",
             CallPlatform.DION to "https://dion.vc/event/room-123",
         )

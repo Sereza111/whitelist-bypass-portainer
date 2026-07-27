@@ -70,7 +70,7 @@ type mobileInviteRecord struct {
 
 var recoveryMessageSender = sendVKTestMessage
 
-func registerControlAPIRoutes(mux *http.ServeMux, cp *controlPlane, vkLogin *vkLoginManager, username, password, secretsDir string) {
+func registerControlAPIRoutes(mux *http.ServeMux, cp *controlPlane, vkLogin *vkLoginManager, wbLogin *wbLoginManager, username, password, secretsDir string) {
 	protect := func(handler http.HandlerFunc) http.Handler {
 		return requireAuth(username, password, handler)
 	}
@@ -161,13 +161,13 @@ func registerControlAPIRoutes(mux *http.ServeMux, cp *controlPlane, vkLogin *vkL
 		writeJSON(w, http.StatusOK, overviewResponse{
 			BuildVersion: Version, BuildCommit: BuildCommit, BuildTime: BuildTime,
 			MaxSessions: cp.maxSessions, ActiveSessions: active,
-			ClientCount: len(cp.listProfiles()), Providers: inspectProviders(secretsDir, cp.managedSecretsDir),
+			ClientCount: len(cp.listProfiles()), Providers: inspectProviders(secretsDir, cp.managedSecretsDir, wbLogin),
 			RecoveryDelivery: cp.recoveryConfigured(),
 		})
 	}))
 
 	mux.Handle("GET /api/providers", protect(func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, inspectProviders(secretsDir, cp.managedSecretsDir))
+		writeJSON(w, http.StatusOK, inspectProviders(secretsDir, cp.managedSecretsDir, wbLogin))
 	}))
 	mux.Handle("GET /api/profiles", protect(func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, cp.listProfiles())
@@ -399,8 +399,8 @@ func validMobileInviteLink(provider, raw string) bool {
 		return scheme == "https" && host == "telemost.yandex.ru" &&
 			strings.HasPrefix(parsed.EscapedPath(), "/j/")
 	case "wbstream":
-		return scheme == "wbstream" && parsed.RawQuery == "" && parsed.Fragment == "" &&
-			parsed.Path == "" && safeInviteID(parsed.Host)
+		_, err := normalizeWBInvite(raw)
+		return err == nil
 	case "dion":
 		if scheme == "dion" {
 			return parsed.RawQuery == "" && parsed.Fragment == "" && parsed.Path == "" && safeInviteID(parsed.Host)
@@ -440,7 +440,7 @@ func decodeRequest(w http.ResponseWriter, r *http.Request, value any) bool {
 	return true
 }
 
-func inspectProviders(secretsDir, managedSecretsDir string) []providerStatus {
+func inspectProviders(secretsDir, managedSecretsDir string, wbLogin *wbLoginManager) []providerStatus {
 	providers := []providerStatus{
 		{ID: "vk", Name: "VK Video"},
 		{ID: "telemost", Name: "Telemost"},
@@ -449,9 +449,13 @@ func inspectProviders(secretsDir, managedSecretsDir string) []providerStatus {
 	}
 	files := map[string]string{
 		"vk": "cookies-vk.json", "telemost": "cookies-yandex.json",
-		"wbstream": "cookies-wbstream.json", "dion": "cookies-dion.json",
+		"dion": "cookies-dion.json",
 	}
 	for index := range providers {
+		if providers[index].ID == "wbstream" {
+			providers[index].Configured = wbLogin != nil && wbLogin.configured()
+			continue
+		}
 		providers[index].Configured = providerCredentialFileReady(providers[index].ID, filepath.Join(managedSecretsDir, files[providers[index].ID])) ||
 			providerCredentialFileReady(providers[index].ID, filepath.Join(secretsDir, files[providers[index].ID]))
 	}
@@ -460,7 +464,7 @@ func inspectProviders(secretsDir, managedSecretsDir string) []providerStatus {
 
 func isActiveState(state string) bool {
 	switch strings.ToLower(state) {
-	case "starting", "running", "link-ready", "waiting-for-client", "connected", "degraded", "recovering", "stopping":
+	case "starting", "waiting-for-creator", "running", "link-ready", "waiting-for-client", "connected", "degraded", "recovering", "stopping":
 		return true
 	default:
 		return false

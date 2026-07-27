@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"runtime/debug"
-	"time"
 
 	"whitelist-bypass/relay/common"
 	"whitelist-bypass/relay/tunnel"
@@ -16,8 +15,7 @@ import (
 func main() {
 	common.MaybePrintVersion()
 	common.LogBuild(log.Printf)
-	cookiesPath := flag.String("cookies", "", "path to cookies-wbstream.json")
-	roomFlag := flag.String("room", "", "WB Stream room id, wbstream://<id>, or https://stream.wb.ru/room/<id> (empty = create new)")
+	roomFlag := flag.String("room", "", "WB Stream invitation created by the paired Android device (required)")
 	displayName := flag.String("name", "Headless", "display name in the room")
 	resources := flag.String("resources", "default", "resource mode: default, moderate, unlimited, custom")
 	customReadBuf := flag.Int("read-buf", 0, "DC read buffer size in bytes, used with -resources custom")
@@ -57,23 +55,11 @@ func main() {
 	}
 	log.Printf("[config] resources=%s read-buf=%d mem-limit=%d", *resources, readBuf, memLimit)
 
-	if *cookiesPath == "" {
-		log.Fatalf("[auth] --cookies is required")
-	}
-	rawCookies := common.LoadCookies(*cookiesPath)
-	deviceID := common.CookieValue(rawCookies, "__wb_device_id")
-	if deviceID == "" {
-		log.Fatalf("[auth] cookies file is missing __wb_device_id; re-export via creator-app's 'Export Cookies' button")
-	}
-	cookieHeader := common.FilterCookies(rawCookies, wbstream.WBStreamCookieAllowlist)
-	userAgent := common.CookieValue(rawCookies, "__wb_user_agent")
-	bearer, err := wbstream.RefreshAccessTokenWithUserAgent(nil, cookieHeader, deviceID, userAgent)
-	if err != nil {
-		log.Fatalf("[auth] slide-v3 refresh: %v", err)
-	}
-	log.Printf("[auth] bearer refreshed (len=%d)", len(bearer))
 	requestedRoom := wbstream.ParseRoomID(*roomFlag)
-	roomID, roomToken, accessToken, serverURL, err := wbstream.AuthAsLoggedIn(nil, cookieHeader, bearer, requestedRoom, *displayName)
+	if requestedRoom == "" {
+		log.Fatal("[config] --room invitation is required; Manager obtains it from the paired Android creator")
+	}
+	roomID, roomToken, accessToken, serverURL, err := wbstream.AuthAndGetToken(nil, requestedRoom, *displayName)
 	if err != nil {
 		log.Fatalf("[auth] %v", err)
 	}
@@ -141,39 +127,16 @@ func main() {
 	fmt.Println("  join_link: wbstream://" + roomID)
 	fmt.Println("")
 
-	for {
-		sess := makeSession(roomToken, accessToken, serverURL)
-		if err := sess.Start(); err != nil {
-			log.Printf("[session] start failed: %v, retrying in 5s", err)
-			sess.Close()
-			time.Sleep(5 * time.Second)
-		} else {
-			<-sess.Done()
-			log.Printf("[session] ended, rejoining in 3s")
-			sess.Close()
-		}
-
-		if activeBridge != nil {
-			activeBridge.Reset()
-		}
-		time.Sleep(3 * time.Second)
-
-		newBearer, refreshErr := wbstream.RefreshAccessTokenWithUserAgent(nil, cookieHeader, deviceID, userAgent)
-		if refreshErr != nil {
-			log.Printf("[rejoin] slide-v3 refresh failed: %v, retrying in 5s", refreshErr)
-			time.Sleep(5 * time.Second)
-			continue
-		}
-		bearer = newBearer
-		_, newRoomToken, newAccessToken, newServerURL, err := wbstream.AuthAsLoggedIn(nil, cookieHeader, bearer, roomID, *displayName)
-		if err != nil {
-			log.Printf("[rejoin] auth failed: %v, retrying in 5s", err)
-			time.Sleep(5 * time.Second)
-			continue
-		}
-		roomToken = newRoomToken
-		accessToken = newAccessToken
-		serverURL = newServerURL
-		log.Printf("[rejoin] refreshed token for room=%s server=%s", roomID, serverURL)
+	sess := makeSession(roomToken, accessToken, serverURL)
+	if err := sess.Start(); err != nil {
+		sess.Close()
+		log.Fatalf("[session] start failed: %v", err)
 	}
+	<-sess.Done()
+	log.Printf("[session] call ended; Manager must request a fresh Android invitation")
+	sess.Close()
+	if activeBridge != nil {
+		activeBridge.Reset()
+	}
+	os.Exit(1)
 }
