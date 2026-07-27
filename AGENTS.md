@@ -14,7 +14,7 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
-## Active handoff (2026-07-27, alpha.22 WB token response candidate)
+## Active handoff (2026-07-27, alpha.22 WB token response completion)
 
 - Alpha.21 field evidence is decisive and safe: Android reached upload, Manager
   called `slide-v3`, WB returned HTTP 200, but the response had no parsed
@@ -31,6 +31,12 @@ Portainer and a headless Joiner in Video mode.
 - Branch build metadata was still hard-coded as alpha.18 in all three workflows.
   CI now derives the branch base version from `headless/docker/Dockerfile`, while
   immutable tagged builds continue to derive it from the tag.
+- `v0.5.0-alpha.22` is published from immutable commit `49eb97d`; do not move
+  the tag. Branch and tagged Android, Windows and Docker workflows passed. APK
+  SHA-256 is
+  `faa71978e8b551ace309ae2b86fd5c74e5a7006df8cca0f12f61a26b4952809f`;
+  EXE SHA-256 is
+  `7ed545f1b9189944eaa6c26b91079054c368f94ef6829346118f0b34fd04338c`.
 
 ## Active handoff (2026-07-27, alpha.21 WB browser fingerprint completion)
 

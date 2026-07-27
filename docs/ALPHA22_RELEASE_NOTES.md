@@ -26,3 +26,10 @@ preventing the prior 10-second infinite retry loop.
 Branch CI previously hard-coded `0.5.0-alpha.18+SHA` even for newer source.
 Android, Docker and Windows workflows now read the base version from the Docker
 build default. Tagged releases continue to use the immutable tag version.
+
+Branch and immutable-tag CI successfully built Android, Windows and Docker.
+
+- APK SHA-256:
+  `faa71978e8b551ace309ae2b86fd5c74e5a7006df8cca0f12f61a26b4952809f`.
+- EXE SHA-256:
+  `7ed545f1b9189944eaa6c26b91079054c368f94ef6829346118f0b34fd04338c`.
