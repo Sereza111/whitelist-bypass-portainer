@@ -14,6 +14,24 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
+## Active handoff (2026-07-27, alpha.22 WB token response candidate)
+
+- Alpha.21 field evidence is decisive and safe: Android reached upload, Manager
+  called `slide-v3`, WB returned HTTP 200, but the response had no parsed
+  `payload.access_token`. This is not VPS connectivity or an HTTP 498 block.
+- Android previously flattened same-named allowlisted cookies from several
+  domains and let later Wildberries/root probes overwrite the cookie selected
+  for the exact `auth-stream .../slide-v3` URL. Alpha.22 gives the exact endpoint
+  first priority (`putIfAbsent`) and re-reads the final Stream localStorage
+  device id after authenticated Profile detection.
+- Manager and Creator now accept both snake_case and camelCase access token
+  fields at payload or top level. If no token exists, diagnostics expose only
+  sorted JSON key names, never values or the upstream body. Android stops after
+  three identical automatic upload failures instead of hammering WB forever.
+- Branch build metadata was still hard-coded as alpha.18 in all three workflows.
+  CI now derives the branch base version from `headless/docker/Dockerfile`, while
+  immutable tagged builds continue to derive it from the tag.
+
 ## Active handoff (2026-07-27, alpha.21 WB browser fingerprint completion)
 
 - Alpha.20 field test reached the WB Stream home page and attempted upload, so

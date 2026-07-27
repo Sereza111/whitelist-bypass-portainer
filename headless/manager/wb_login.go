@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -60,6 +61,12 @@ type wbValidationStatusError struct{ Status int }
 
 func (err *wbValidationStatusError) Error() string {
 	return fmt.Sprintf("WB validation status %d", err.Status)
+}
+
+type wbValidationSchemaError struct{ Schema string }
+
+func (err *wbValidationSchemaError) Error() string {
+	return "WB validation returned no access token (" + err.Schema + ")"
 }
 
 var wbCookieValidator = validateWBCookiesWithUserAgent
@@ -203,6 +210,10 @@ func (login *wbLoginManager) submitDeviceCredentials(ctx context.Context, bearer
 		var statusErr *wbValidationStatusError
 		if errors.As(err, &statusErr) {
 			return login.status(), fmt.Errorf("WB rejected the mobile session (upstream status %d)", statusErr.Status)
+		}
+		var schemaErr *wbValidationSchemaError
+		if errors.As(err, &schemaErr) {
+			return login.status(), errors.New(schemaErr.Error())
 		}
 		return login.status(), errors.New("WB rejected the mobile session before an upstream response")
 	}
@@ -575,15 +586,49 @@ func validateWBCookiesWithUserAgent(parent context.Context, cookies []*network.C
 	if response.StatusCode != http.StatusOK {
 		return &wbValidationStatusError{Status: response.StatusCode}
 	}
-	var result struct {
-		Payload struct {
-			AccessToken string `json:"access_token"`
-		} `json:"payload"`
-	}
-	if err := json.Unmarshal(body, &result); err != nil || result.Payload.AccessToken == "" {
-		return errors.New("WB validation returned no access token")
+	accessToken, schema := wbAccessTokenFromBody(body)
+	if accessToken == "" {
+		return &wbValidationSchemaError{Schema: schema}
 	}
 	return nil
+}
+
+func wbAccessTokenFromBody(body []byte) (string, string) {
+	var top map[string]json.RawMessage
+	if json.Unmarshal(body, &top) != nil {
+		return "", "invalid-json"
+	}
+	if token := firstJSONString(top, "access_token", "accessToken"); token != "" {
+		return token, "top=" + joinedJSONKeys(top)
+	}
+	var payload map[string]json.RawMessage
+	if raw := top["payload"]; len(raw) > 0 && json.Unmarshal(raw, &payload) == nil {
+		if token := firstJSONString(payload, "access_token", "accessToken"); token != "" {
+			return token, "top=" + joinedJSONKeys(top) + " payload=" + joinedJSONKeys(payload)
+		}
+	}
+	return "", "top=" + joinedJSONKeys(top) + " payload=" + joinedJSONKeys(payload)
+}
+
+func firstJSONString(values map[string]json.RawMessage, keys ...string) string {
+	for _, key := range keys {
+		var value string
+		if raw := values[key]; len(raw) > 0 && json.Unmarshal(raw, &value) == nil && value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func joinedJSONKeys(values map[string]json.RawMessage) string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		if len(key) <= 64 {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	return strings.Join(keys, ",")
 }
 
 func wbCookieHeader(cookies []*network.Cookie) string {

@@ -6,12 +6,12 @@ Dion. Это уже не минимальная Docker-обёртка upstream: 
 клиенты, SOCKS5/TUN, автоматическое восстановление звонков, диагностику и
 multi-arch релизный pipeline.
 
-Текущий релиз: **[v0.5.0-alpha.21](https://github.com/Sereza111/whitelist-bypass-portainer/releases/tag/v0.5.0-alpha.21)**.
+Текущий кандидат: **v0.5.0-alpha.22**. Последний опубликованный релиз: **[v0.5.0-alpha.21](https://github.com/Sereza111/whitelist-bypass-portainer/releases/tag/v0.5.0-alpha.21)**.
 
 Docker image:
 
 ```text
-ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.21
+ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.22
 ```
 
 Проект основан на
@@ -80,7 +80,8 @@ ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.21
 - [План производительности](docs/PERFORMANCE_ROADMAP.md);
 - [Панель и её API](docs/PANEL.md);
 - [Развёртывание в Portainer](PORTAINER.md);
-- [Примечания alpha.21](docs/ALPHA21_RELEASE_NOTES.md),
+- [Примечания alpha.22](docs/ALPHA22_RELEASE_NOTES.md),
+  [alpha.21](docs/ALPHA21_RELEASE_NOTES.md),
   [alpha.20](docs/ALPHA20_RELEASE_NOTES.md) и
   [alpha.19](docs/ALPHA19_RELEASE_NOTES.md).
 
@@ -148,7 +149,7 @@ ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.21
 
 | Переменная | Рекомендуемое значение |
 |---|---|
-| `WLB_IMAGE` | `ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.21` |
+| `WLB_IMAGE` | `ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.22` |
 | `PANEL_USERNAME` | новый логин, по умолчанию `admin` |
 | `PANEL_PASSWORD` | уникальный пароль длиной от 12 символов |
 | `WLB_SECRETS_DIR` | `/opt/whitelist-bypass/secrets` |
@@ -224,7 +225,7 @@ WB Stream и Dion; тип провайдера связан с проверен�
 В логах клиента и сервера должны совпадать:
 
 ```text
-[build] version=0.5.0-alpha.21 commit=... built=...
+[build] version=0.5.0-alpha.22 commit=... built=...
 ```
 
 Если на телефоне осталась старая debug-signed `alpha.8`, её нужно удалить один

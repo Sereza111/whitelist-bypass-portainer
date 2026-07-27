@@ -39,6 +39,8 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
     private var nextUploadAt = 0L
     private var accountDetected = false
     private var streamPrimed = false
+    private var uploadAttempts = 0
+    private var deviceRefreshInFlight = false
 
     private val cookieProbe = object : Runnable {
         override fun run() {
@@ -111,11 +113,23 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
         accountDetected = true
         status.setText(R.string.wb_login_preparing)
         CookieManager.getInstance().flush()
+        refreshDeviceIdFromPage()
         if (streamPrimed) return
         streamPrimed = true
         mainHandler.postDelayed({
             if (!finished && !isFinishing && !isDestroyed) webView.loadUrl(WB_STREAM_URL)
         }, 700)
+    }
+
+    private fun refreshDeviceIdFromPage() {
+        if (deviceRefreshInFlight) return
+        deviceRefreshInFlight = true
+        webView.evaluateJavascript("localStorage.getItem('wb_auth_api_device_id') || ''") { result ->
+            deviceRefreshInFlight = false
+            val parsed = runCatching { JSONTokener(result).nextValue() as? String }.getOrNull().orEmpty()
+            if (validDeviceId(parsed)) deviceId = parsed
+            probeCredentials()
+        }
     }
 
     private fun ensureDeviceId() {
@@ -133,8 +147,8 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
         if (finished || uploadRunning.get() || System.currentTimeMillis() < nextUploadAt) return
         val cookies = linkedMapOf<String, String>()
         val urls = buildList {
-            webView.url?.takeIf { it.startsWith("https://") }?.let(::add)
             addAll(COOKIE_URLS)
+            webView.url?.takeIf { it.startsWith("https://") }?.let(::add)
         }
         urls.forEach { url ->
             CookieManager.getInstance().getCookie(url)?.split(';')?.forEach cookie@{ part ->
@@ -142,7 +156,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
                 if (index <= 0) return@cookie
                 val name = part.substring(0, index).trim()
                 val value = part.substring(index + 1).trim()
-                if (name in ALLOWED_COOKIES && value.isNotEmpty()) cookies[name] = value
+                if (name in ALLOWED_COOKIES && value.isNotEmpty()) cookies.putIfAbsent(name, value)
             }
         }
         val readyCount = REQUIRED_COOKIES.count(cookies::containsKey)
@@ -193,11 +207,19 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
                     status.setText(R.string.wb_login_success)
                     close.setText(R.string.wb_login_done)
                 } else {
+                    uploadAttempts++
                     nextUploadAt = System.currentTimeMillis() + 10_000
-                    status.text = if (result.message.isBlank()) {
+                    val failure = if (result.message.isBlank()) {
                         getString(R.string.wb_login_upload_failed, result.code)
                     } else {
                         getString(R.string.wb_login_upload_failed_detail, result.code, result.message)
+                    }
+                    if (uploadAttempts >= MAX_UPLOAD_ATTEMPTS) {
+                        finished = true
+                        mainHandler.removeCallbacks(cookieProbe)
+                        status.text = "$failure\n${getString(R.string.wb_login_new_pairing_required)}"
+                    } else {
+                        status.text = failure
                     }
                 }
             }
@@ -225,14 +247,15 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
     companion object {
         private const val WB_LOGIN_URL = "https://stream.wb.ru/login"
         private const val WB_STREAM_URL = "https://stream.wb.ru/"
+        private const val MAX_UPLOAD_ATTEMPTS = 3
         private val TOKEN_RE = Regex("^[A-Za-z0-9_-]{32,128}$")
         private val DEVICE_RE = Regex("^[A-Za-z0-9._-]{8,128}$")
         private val COOKIE_URLS = listOf(
+            "https://auth-stream.wb.ru/v2/auth/slide-v3",
+            "https://auth-stream.wb.ru/",
             "https://stream.wb.ru/",
             "https://stream.wb.ru/login",
             "https://stream.wb.ru/profile",
-            "https://auth-stream.wb.ru/",
-            "https://auth-stream.wb.ru/v2/auth/slide-v3",
             "https://www.wildberries.ru/",
             "https://www.wildberries.ru/lk",
             "https://wb.ru/",

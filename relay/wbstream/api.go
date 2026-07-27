@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 
 	"whitelist-bypass/relay/common"
@@ -251,12 +252,6 @@ var ModeratorPermissions = []string{
 	"ROOM_PERMISSION_LOCAL_RECORD",
 }
 
-type slideV3Response struct {
-	Payload struct {
-		AccessToken string `json:"access_token"`
-	} `json:"payload"`
-}
-
 func newRequestID() string {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -303,14 +298,49 @@ func RefreshAccessTokenWithUserAgent(client *http.Client, cookieHeader, deviceID
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("slide-v3: status %d: %s", resp.StatusCode, string(raw))
 	}
-	var r slideV3Response
-	if err := json.Unmarshal(raw, &r); err != nil {
-		return "", fmt.Errorf("slide-v3 decode: %w", err)
+	accessToken, schema := accessTokenFromSlideBody(raw)
+	if accessToken == "" {
+		return "", fmt.Errorf("slide-v3: no access token (%s)", schema)
 	}
-	if r.Payload.AccessToken == "" {
-		return "", fmt.Errorf("slide-v3: empty access_token in response: %s", string(raw))
+	return accessToken, nil
+}
+
+func accessTokenFromSlideBody(body []byte) (string, string) {
+	var top map[string]json.RawMessage
+	if json.Unmarshal(body, &top) != nil {
+		return "", "invalid-json"
 	}
-	return r.Payload.AccessToken, nil
+	if token := slideString(top, "access_token", "accessToken"); token != "" {
+		return token, "top=" + slideKeys(top)
+	}
+	var payload map[string]json.RawMessage
+	if raw := top["payload"]; len(raw) > 0 && json.Unmarshal(raw, &payload) == nil {
+		if token := slideString(payload, "access_token", "accessToken"); token != "" {
+			return token, "top=" + slideKeys(top) + " payload=" + slideKeys(payload)
+		}
+	}
+	return "", "top=" + slideKeys(top) + " payload=" + slideKeys(payload)
+}
+
+func slideString(values map[string]json.RawMessage, keys ...string) string {
+	for _, key := range keys {
+		var value string
+		if raw := values[key]; len(raw) > 0 && json.Unmarshal(raw, &value) == nil && value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func slideKeys(values map[string]json.RawMessage) string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		if len(key) <= 64 {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	return strings.Join(keys, ",")
 }
 
 func joinAndGetDetails(client *http.Client, accessToken, roomID, displayName string) (string, string, string, string, error) {

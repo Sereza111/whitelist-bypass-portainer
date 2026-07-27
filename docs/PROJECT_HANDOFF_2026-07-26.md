@@ -1,10 +1,9 @@
 # Project handoff · 2026-07-26
 
 Этот документ — точка входа для следующего разработчика или AI-агента. Основная
-архитектура относится к `v0.5.0-alpha.19`; alpha.20 исправил post-login
-завершение Android WB, а опубликованный alpha.21 сохраняет мобильный User-Agent
-для WBAAS validation/Creator refresh. См. `ALPHA20_RELEASE_NOTES.md` и
-`ALPHA21_RELEASE_NOTES.md`.
+архитектура относится к `v0.5.0-alpha.19`; alpha.20 исправил post-login,
+alpha.21 сохранил мобильный User-Agent, а текущий alpha.22 candidate исправляет
+точный cookie-path/device-id/token-response этап. См. release notes alpha.20–22.
 
 ## 1. Репозиторий и происхождение
 

@@ -79,7 +79,9 @@ jobs:
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
             version="${GITHUB_REF_NAME#v}"
           else
-            version="0.5.0-alpha.18+${short_sha}"
+            base_version="$(sed -n 's/^ARG BUILD_VERSION=//p' headless/docker/Dockerfile | head -n1)"
+            test -n "${base_version}"
+            version="${base_version}+${short_sha}"
           fi
           echo "BUILD_VERSION=${version}" >> "${GITHUB_ENV}"
           echo "BUILD_COMMIT=${GITHUB_SHA}" >> "${GITHUB_ENV}"
