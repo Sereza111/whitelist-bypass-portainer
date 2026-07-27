@@ -2,9 +2,9 @@
 
 Этот документ — точка входа для следующего разработчика или AI-агента. Основная
 архитектура относится к `v0.5.0-alpha.19`; alpha.20 исправил post-login
-завершение Android WB, а текущий alpha.21 candidate сохраняет мобильный
-User-Agent для WBAAS validation/Creator refresh. См. `ALPHA20_RELEASE_NOTES.md`
-и `ALPHA21_RELEASE_NOTES.md`.
+завершение Android WB, а опубликованный alpha.21 сохраняет мобильный User-Agent
+для WBAAS validation/Creator refresh. См. `ALPHA20_RELEASE_NOTES.md` и
+`ALPHA21_RELEASE_NOTES.md`.
 
 ## 1. Репозиторий и происхождение
 

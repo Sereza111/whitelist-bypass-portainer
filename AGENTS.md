@@ -14,7 +14,7 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
-## Active handoff (2026-07-27, alpha.21 WB browser fingerprint candidate)
+## Active handoff (2026-07-27, alpha.21 WB browser fingerprint completion)
 
 - Alpha.20 field test reached the WB Stream home page and attempted upload, so
   profile detection, exact-path cookie probing and `3/3` completion work. The
@@ -30,6 +30,12 @@ Portainer and a headless Joiner in Video mode.
 - Android now reads only the first bounded API response line and shows the
   Manager's redacted error. Manager logs/returns only the upstream status class,
   never cookies, bearer, phone, OTP, response body or full pairing URL.
+- `v0.5.0-alpha.21` is published from immutable commit `bde73c7`; do not move
+  the tag. Branch and tagged Android, Windows and Docker workflows passed. APK
+  SHA-256 is
+  `d39ea7f7cfae378eda399f6a2930557695ae65a3cc7b8667e738cb74d5057349`;
+  EXE SHA-256 is
+  `9fd875f23db40a473796f9597a7703b00b782c6c317cddd4f0656623108550b6`.
 
 ## Active handoff (2026-07-26, alpha.20 WB post-login completion)
 

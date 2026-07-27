@@ -19,3 +19,10 @@ Alpha.21 keeps that browser fingerprint consistent:
 Android also displays the Manager's redacted upstream failure reason instead of
 only `HTTP 400`. The API never returns the upstream response body, cookies,
 pairing bearer, phone or OTP.
+
+Branch and immutable-tag CI successfully built Android, Windows and Docker.
+
+- APK SHA-256:
+  `d39ea7f7cfae378eda399f6a2930557695ae65a3cc7b8667e738cb74d5057349`.
+- EXE SHA-256:
+  `9fd875f23db40a473796f9597a7703b00b782c6c317cddd4f0656623108550b6`.
