@@ -129,6 +129,9 @@ func (cp *controlPlane) setWBCreator(login *wbLoginManager) {
 	cp.mu.Lock()
 	cp.wbCreator = login
 	cp.mu.Unlock()
+	if login != nil {
+		login.setEventLog(cp.events)
+	}
 }
 
 func (cp *controlPlane) updateProfileInvite(profileID, link string) {
@@ -148,7 +151,7 @@ func (cp *controlPlane) updateProfileInvite(profileID, link string) {
 		cp.events.add("error", "profile", "Could not persist refreshed WB invite", profileID)
 		return
 	}
-	cp.events.add("info", "profile", "Updated connected client profile with a fresh WB invite", profileID)
+	cp.events.add("info", "profile", "WB relay started; updated client profile with a fresh invite", profileID)
 }
 
 func newControlPlane(dataDir string, maxSessions int) (*controlPlane, error) {

@@ -17,6 +17,7 @@ import android.webkit.WebViewClient
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.util.Log
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.button.MaterialButton
 import org.json.JSONObject
@@ -30,6 +31,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 
     private lateinit var webView: WebView
     private lateinit var status: TextView
+	private lateinit var diagnostics: TextView
     private lateinit var close: MaterialButton
     private lateinit var invitePanel: LinearLayout
     private lateinit var inviteInput: EditText
@@ -42,6 +44,8 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
     private var deviceSecret = ""
     private var pendingRequestId = ""
     private var destroyed = false
+	private var pollCount = 0
+	private val diagnosticLines = ArrayDeque<String>()
 
     private val commandPoll = object : Runnable {
         override fun run() {
@@ -55,6 +59,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
         super.onCreate(savedInstanceState)
         webView = findViewById(R.id.wbLoginWebView)
         status = findViewById(R.id.wbLoginStatus)
+		diagnostics = findViewById(R.id.wbLoginDiagnostics)
         close = findViewById(R.id.wbLoginClose)
         invitePanel = findViewById(R.id.wbInvitePanel)
         inviteInput = findViewById(R.id.wbInviteInput)
@@ -67,6 +72,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
         val token = input?.getQueryParameter("token").orEmpty()
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
         val freshPairing = validPairing(server, token)
+		trace("boot", "version=${BuildConfig.VERSION_NAME} mode=${if (freshPairing) "pair" else "resume"}")
         if (freshPairing) {
             serverOrigin = server
         } else {
@@ -74,6 +80,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
             creatorId = prefs.getString(KEY_CREATOR_ID, "").orEmpty()
             deviceSecret = prefs.getString(KEY_DEVICE_SECRET, "").orEmpty()
             if (!validServer(serverOrigin) || !CREATOR_RE.matches(creatorId) || !TOKEN_RE.matches(deviceSecret)) {
+				trace("binding", "missing-or-invalid")
                 fail(getString(R.string.wb_login_invalid_pairing))
                 return
             }
@@ -100,16 +107,21 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
         webView.webViewClient = object : WebViewClient() {
             override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
+				trace("webview", "page-start")
                 if (pendingRequestId.isEmpty()) status.setText(R.string.wb_creator_ready_help)
             }
 
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
-                if (request.isForMainFrame) status.setText(R.string.wb_login_page_error)
+				if (request.isForMainFrame) {
+					trace("webview", "main-frame-error=${error.errorCode}")
+					status.setText(R.string.wb_login_page_error)
+				}
             }
         }
     }
 
     private fun pairCreator(pairingToken: String) {
+		trace("pair", "request")
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
         val deviceId = prefs.getString(KEY_DEVICE_ID, null) ?: UUID.randomUUID().toString().also {
             prefs.edit().putString(KEY_DEVICE_ID, it).apply()
@@ -121,6 +133,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
         executor.execute {
             val response = post("/api/wb-creator/pair", body, pairingToken, "")
             mainHandler.post {
+				trace("pair", "http=${response.code}${response.transportError.takeIf { it.isNotEmpty() }?.let { " error=$it" }.orEmpty()}")
                 if (response.code !in 200..299) {
                     fail(response.message.ifBlank { getString(R.string.wb_creator_pair_failed) })
                     return@post
@@ -137,6 +150,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
                     .putString(KEY_CREATOR_ID, creatorId)
                     .putString(KEY_DEVICE_SECRET, deviceSecret)
                     .apply()
+				trace("pair", "stored creator=${creatorId.takeLast(8)}")
                 status.setText(R.string.wb_creator_ready_help)
                 mainHandler.post(commandPoll)
             }
@@ -149,7 +163,12 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
             val response = post("/api/wb-creator/commands/next", "", deviceSecret, creatorId)
             mainHandler.post {
                 requestRunning.set(false)
-                if (response.code == HttpURLConnection.HTTP_NO_CONTENT) return@post
+				pollCount++
+				if (response.code == HttpURLConnection.HTTP_NO_CONTENT) {
+					if (pollCount == 1 || pollCount % 10 == 0) trace("poll", "http=204 count=$pollCount")
+					return@post
+				}
+				trace("poll", "http=${response.code}${response.transportError.takeIf { it.isNotEmpty() }?.let { " error=$it" }.orEmpty()}")
                 if (response.code == HttpURLConnection.HTTP_UNAUTHORIZED) {
                     status.setText(R.string.wb_creator_unpaired)
                     return@post
@@ -159,6 +178,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
                 val requestId = json.optString("id")
                 if (!CREATOR_RE.matches(requestId)) return@post
                 pendingRequestId = requestId
+				trace("command", "received request=${requestId.takeLast(8)}")
                 val profileName = json.optString("profileName").take(80)
                 status.text = getString(R.string.wb_creator_call_requested, profileName)
                 invitePanel.visibility = View.VISIBLE
@@ -171,6 +191,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
         if (pendingRequestId.isEmpty() || requestRunning.get()) return
         val candidate = inviteInput.text.toString().trim().ifEmpty { webView.url.orEmpty() }
         if (!isSafeInvite(candidate)) {
+			trace("invite", "rejected-locally")
             status.setText(R.string.wb_creator_invalid_invite)
             return
         }
@@ -178,10 +199,12 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
         inviteSubmit.isEnabled = false
         status.setText(R.string.wb_creator_sending_invite)
         val requestId = pendingRequestId
+		trace("invite", "submit request=${requestId.takeLast(8)}")
         val body = JSONObject().put("inviteLink", candidate).toString()
         executor.execute {
             val response = post("/api/wb-creator/commands/$requestId/invite", body, deviceSecret, creatorId)
             mainHandler.post {
+				trace("invite", "http=${response.code}${response.transportError.takeIf { it.isNotEmpty() }?.let { " error=$it" }.orEmpty()}")
                 requestRunning.set(false)
                 inviteSubmit.isEnabled = true
                 if (response.code in 200..299) {
@@ -213,9 +236,18 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
                 ?.bufferedReader()?.use { it.readText().take(4096) }.orEmpty()
             val message = runCatching { JSONObject(responseBody).optString("error") }.getOrDefault("").take(200)
             connection.disconnect()
-            ApiResponse(code, responseBody, message)
-        }.getOrDefault(ApiResponse(0, "", ""))
+			ApiResponse(code, responseBody, message, "")
+		}.getOrElse { ApiResponse(0, "", "", it.javaClass.simpleName.take(48)) }
     }
+
+	private fun trace(step: String, detail: String) {
+		val line = "$step · $detail"
+		if (diagnosticLines.lastOrNull() == line) return
+		diagnosticLines.addLast(line)
+		while (diagnosticLines.size > MAX_DIAGNOSTIC_LINES) diagnosticLines.removeFirst()
+		if (::diagnostics.isInitialized) diagnostics.text = diagnosticLines.joinToString("\n")
+		Log.i("WB_CREATOR", line)
+	}
 
     private fun fail(message: String) {
         mainHandler.removeCallbacks(commandPoll)
@@ -239,6 +271,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
     companion object {
         private const val WB_LOGIN_URL = "https://stream.wb.ru/login"
         private const val POLL_INTERVAL_MS = 3_000L
+		private const val MAX_DIAGNOSTIC_LINES = 7
         private const val PREFS = "wb_creator"
         private const val KEY_SERVER = "server"
         private const val KEY_CREATOR_ID = "creator_id"
@@ -281,5 +314,5 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
         }
     }
 
-    private data class ApiResponse(val code: Int, val body: String, val message: String)
+	private data class ApiResponse(val code: Int, val body: String, val message: String, val transportError: String)
 }

@@ -41,6 +41,17 @@
             android:text="@string/wb_login_opening"
             android:textColor="@color/ink_2"
             android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/wbLoginDiagnostics"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:fontFamily="monospace"
+            android:maxLines="7"
+            android:textColor="@color/ink_2"
+            android:textIsSelectable="true"
+            android:textSize="10sp" />
     </LinearLayout>
 
     <View

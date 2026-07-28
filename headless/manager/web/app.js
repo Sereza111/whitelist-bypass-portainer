@@ -652,7 +652,10 @@ async function refreshWBLogin() {
   const status = await api('/api/wb-login');
   renderWBSummary(status);
   byId('wbLoginState').textContent = wbLoginStateLabel(status.state);
-  byId('wbLoginMessage').textContent = status.message;
+  const details = [];
+  if (status.lastSeenAt) details.push(`устройство на связи ${new Date(status.lastSeenAt).toLocaleTimeString()}`);
+  if (status.pendingCalls) details.push(`запросов звонка: ${status.pendingCalls}`);
+  byId('wbLoginMessage').textContent = details.length ? `${status.message} · ${details.join(' · ')}` : status.message;
   byId('wbLoginRune').dataset.state = status.state;
   const active = status.state === 'device';
   byId('wbLoginStart').hidden = active;

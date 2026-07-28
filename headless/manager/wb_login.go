@@ -59,6 +59,7 @@ type wbCallRequest struct {
 	ProfileName string    `json:"profileName"`
 	CreatedAt   time.Time `json:"createdAt"`
 	ExpiresAt   time.Time `json:"expiresAt"`
+	delivered   bool
 	result      chan wbCallResult
 }
 
@@ -75,6 +76,22 @@ type wbLoginManager struct {
 	binding   *wbCreatorBinding
 	pairing   *wbDevicePairing
 	pending   map[string]*wbCallRequest
+	events    *eventLog
+}
+
+func (login *wbLoginManager) setEventLog(events *eventLog) {
+	login.mu.Lock()
+	login.events = events
+	login.mu.Unlock()
+}
+
+func (login *wbLoginManager) addEvent(level, message, reference string) {
+	login.mu.Lock()
+	events := login.events
+	login.mu.Unlock()
+	if events != nil {
+		events.add(level, "wb-creator", message, reference)
+	}
 }
 
 func newWBLoginManager(dataDir string) *wbLoginManager {
@@ -189,6 +206,7 @@ func (login *wbLoginManager) startDevicePairing(origin string) (wbLoginStatus, s
 	login.mu.Lock()
 	login.pairing = &wbDevicePairing{tokenHash: sha256.Sum256([]byte(token)), landingURL: landingURL, expiresAt: expires}
 	login.mu.Unlock()
+	login.addEvent("info", "Created Android creator pairing", "")
 	return login.status(), landingURL, nil
 }
 
@@ -234,6 +252,9 @@ func (login *wbLoginManager) pairDevice(bearer, deviceID, name string) (string, 
 		return "", "", err
 	}
 	login.pairing = nil
+	if login.events != nil {
+		login.events.add("info", "wb-creator", "Paired Android creator", creatorID)
+	}
 	return creatorID, secret, nil
 }
 
@@ -269,6 +290,12 @@ func (login *wbLoginManager) nextCall() *wbCallRequest {
 	if len(requests) == 0 {
 		return nil
 	}
+	if !requests[0].delivered {
+		requests[0].delivered = true
+		if login.events != nil {
+			login.events.add("info", "wb-creator", "Delivered call request to Android creator", requests[0].ProfileID)
+		}
+	}
 	copy := *requests[0]
 	copy.result = nil
 	return &copy
@@ -288,6 +315,7 @@ func (login *wbLoginManager) requestCall(ctx context.Context, profileID, profile
 	}
 	login.pending[request.ID] = request
 	login.mu.Unlock()
+	login.addEvent("info", "Requested a new WB call from Android creator", profileID)
 
 	timer := time.NewTimer(wbCallLifetime)
 	defer timer.Stop()
@@ -325,6 +353,7 @@ func (login *wbLoginManager) submitInvite(requestID, raw string) (string, error)
 		return "", errors.New("call request is unknown or expired")
 	}
 	request.result <- wbCallResult{link: link}
+	login.addEvent("info", "Accepted Android WB invitation", request.ProfileID)
 	return link, nil
 }
 
