@@ -555,6 +555,7 @@ class MainActivity :
 			recoveryKey = invite.key,
 			recoveryGeneration = invite.generation,
 			recoveryPending = false,
+			recoverySyncUrl = invite.syncUrl,
 		)
 		MaterialAlertDialogBuilder(this)
 			.setTitle(R.string.mobile_invite_title)
@@ -577,7 +578,8 @@ class MainActivity :
 				Charsets.UTF_8,
 			)
 			val payload = JSONObject(decoded)
-			if (payload.optInt("v") != 1) return@runCatching null
+			val version = payload.optInt("v")
+			if (version != 1 && version != 2) return@runCatching null
 			val name = payload.optString("name").trim().takeIf { it.isNotEmpty() && it.length <= 80 }
 				?: return@runCatching null
 			val profile = payload.optString("profile").trim()
@@ -595,7 +597,10 @@ class MainActivity :
 			}
 			if (!CallPlatform.isSafeInviteLink(platform, link)) return@runCatching null
 			val generation = payload.optInt("generation", 0).takeIf { it >= 0 } ?: return@runCatching null
-			MobileInvite(name, profile, key, generation, link)
+			val syncUrl = payload.optString("syncUrl").trim().takeIf { it.isNotEmpty() }
+			if (version == 2 && (syncUrl == null || !validProfileSyncURL(syncUrl, profile))) return@runCatching null
+			if (syncUrl != null && !validProfileSyncURL(syncUrl, profile)) return@runCatching null
+			MobileInvite(name, profile, key, generation, link, syncUrl)
 		}.getOrNull()
 	}
 
@@ -605,7 +610,17 @@ class MainActivity :
 		val key: String,
 		val generation: Int,
 		val link: String,
+		val syncUrl: String?,
 	)
+
+	private fun validProfileSyncURL(value: String, profile: String): Boolean {
+		if (value.length !in 1..2048) return false
+		val parsed = runCatching { java.net.URI(value) }.getOrNull() ?: return false
+		if (parsed.scheme != "https" || parsed.host.isNullOrBlank() || parsed.userInfo != null ||
+			parsed.rawQuery != null || parsed.rawFragment != null || (parsed.port != -1 && parsed.port != 443)
+		) return false
+		return parsed.rawPath == "/api/client-profiles/$profile/invite"
+	}
 
 	private fun handleRecoveryUpdate(destinationId: String?) {
 		val config = Prefs.savedDestinations.firstOrNull { it.id == destinationId } ?: return

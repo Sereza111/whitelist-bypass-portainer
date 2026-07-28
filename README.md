@@ -81,6 +81,7 @@ ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.22
 - [Панель и её API](docs/PANEL.md);
 - [Развёртывание в Portainer](PORTAINER.md);
 - [Примечания alpha.22](docs/ALPHA22_RELEASE_NOTES.md),
+- [Кандидат alpha.23](docs/ALPHA23_RELEASE_NOTES.md),
   [alpha.21](docs/ALPHA21_RELEASE_NOTES.md),
   [alpha.20](docs/ALPHA20_RELEASE_NOTES.md) и
   [alpha.19](docs/ALPHA19_RELEASE_NOTES.md).

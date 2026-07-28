@@ -16,6 +16,7 @@ data class CallConfig(
 	val recoveryKey: String? = null,
 	val recoveryGeneration: Int = 0,
 	val recoveryPending: Boolean = false,
+	val recoverySyncUrl: String? = null,
 ) {
     val platform: CallPlatform get() = CallPlatform.fromUrl(url)
 
@@ -45,6 +46,7 @@ data class CallConfig(
 		recoveryKey?.let { put("recoveryKey", it) }
 		put("recoveryGeneration", recoveryGeneration)
 		put("recoveryPending", recoveryPending)
+		recoverySyncUrl?.let { put("recoverySyncUrl", it) }
     }
 
     companion object {
@@ -63,6 +65,7 @@ data class CallConfig(
 			recoveryKey = obj.optString("recoveryKey").takeIf { it.isNotBlank() },
 			recoveryGeneration = obj.optInt("recoveryGeneration", 0),
 			recoveryPending = obj.optBoolean("recoveryPending", false),
+			recoverySyncUrl = obj.optString("recoverySyncUrl").takeIf { it.isNotBlank() },
         )
 
         fun listToJson(items: List<CallConfig>): String {

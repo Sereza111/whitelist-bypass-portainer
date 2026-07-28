@@ -62,6 +62,30 @@ func TestEncodeMobileInvite(t *testing.T) {
 	}
 }
 
+func TestEncodeMobileInviteIncludesHTTPSProfileSync(t *testing.T) {
+	profile := clientProfile{
+		ID: "client-mobile-1", Name: "Телефон", RecoveryKey: "abcdefghijklmnopqrstuvwxyz012345",
+		Config: sessionRequest{Mode: "wbstream"},
+	}
+	status := sessionStatus{SessionLink: "wbstream://room-123", Generation: 7}
+	invite, err := encodeMobileInvite(profile, status, "https://panel.example/api/client-profiles/client-mobile-1/invite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, _ := strings.CutPrefix(invite, "wlb://import?data=")
+	body, err := base64.RawURLEncoding.DecodeString(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload mobileInvitePayload
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Version != 2 || payload.SyncURL != "https://panel.example/api/client-profiles/client-mobile-1/invite" {
+		t.Fatalf("profile sync missing from payload: %#v", payload)
+	}
+}
+
 func TestValidMobileInviteLink(t *testing.T) {
 	tests := []struct {
 		provider string
@@ -239,6 +263,54 @@ func TestControlAPIProfileLifecycle(t *testing.T) {
 	}
 }
 
+func TestClientProfileInviteSyncRequiresKeyAndReturnsOnlyNewGeneration(t *testing.T) {
+	cp, err := newControlPlane(t.TempDir(), 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enabled := true
+	profile, err := cp.createProfile(profileInput{
+		Name: "WB phone", Enabled: &enabled, MaxSessions: 1,
+		Config: sessionRequest{Mode: "wbstream", Resources: "default", DisplayName: "Phone"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cp.mu.Lock()
+	stored := cp.profiles[profile.ID]
+	stored.RecoveryGeneration = 3
+	cp.profiles[profile.ID] = stored
+	cp.mu.Unlock()
+	cp.updateProfileInvite(profile.ID, "wbstream://room-123")
+
+	mux := http.NewServeMux()
+	registerControlAPIRoutes(mux, cp, nil, nil, "admin", testPanelPassword, t.TempDir())
+	path := "/api/client-profiles/" + profile.ID + "/invite"
+	request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"afterGeneration":2}`))
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("profile sync without key=%d", response.Code)
+	}
+
+	request = httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"afterGeneration":2}`))
+	request.Header.Set("Authorization", "Bearer "+profile.RecoveryKey)
+	response = httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"generation":3`) ||
+		!strings.Contains(response.Body.String(), `"link":"wbstream://room-123"`) {
+		t.Fatalf("fresh profile sync=%d body=%s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"afterGeneration":3}`))
+	request.Header.Set("Authorization", "Bearer "+profile.RecoveryKey)
+	response = httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("unchanged profile sync=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestNormalizeVKRecipient(t *testing.T) {
 	for input, want := range map[string]string{
 		"123":                    "123",
@@ -396,7 +468,8 @@ func controlAPIRequest(t *testing.T, handler http.Handler, method, path, body st
 	request := httptest.NewRequest(method, path, bytes.NewBufferString(body))
 	request.SetBasicAuth("admin", testPanelPassword)
 	if method != http.MethodGet {
-		request.Header.Set("Origin", "http://example.test")
+		request.Header.Set("Origin", "https://example.test")
+		request.Header.Set("X-Forwarded-Proto", "https")
 		request.Host = "example.test"
 	}
 	response := httptest.NewRecorder()

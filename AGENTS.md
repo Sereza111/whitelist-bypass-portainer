@@ -14,6 +14,22 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
+## Active handoff (2026-07-28, alpha.23 WB device creator + client sync)
+
+- WB account state stays on the paired Android creator. Manager stores only a
+  hash of the device secret and accepts a provider-bound invitation link; it
+  never receives Android WebView cookies or account tokens.
+- Manager starts the server relay as a guest of the Android-created room. When
+  that call ends, the relay exits so the supervisor requests a fresh Android
+  invitation and increments the client profile generation.
+- Mobile invites are v2 and include an HTTPS profile-sync endpoint authenticated
+  by the existing per-profile recovery key. Android's foreground Joiner polls
+  generation/link only, persists a newer invite and restarts the carrier while
+  retaining the active VPN/proxy service.
+- The immutable `v0.5.0-alpha.22` release remains old. Branch builds now identify
+  as alpha.23; use the commit-qualified workflow artifact until a new immutable
+  release is intentionally published.
+
 ## Active handoff (2026-07-27, alpha.22 WB token response completion)
 
 - Alpha.21 field evidence is decisive and safe: Android reached upload, Manager

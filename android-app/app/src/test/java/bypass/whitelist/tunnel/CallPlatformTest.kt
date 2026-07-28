@@ -4,6 +4,19 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class CallPlatformTest {
+	@Test
+	fun preservesManagerProfileSyncInSavedConfig() {
+		val config = CallConfig.newWith("WB", "wbstream://room-123").copy(
+			recoveryProfile = "client-room-123",
+			recoveryKey = "abcdefghijklmnopqrstuvwxyz012345",
+			recoveryGeneration = 4,
+			recoverySyncUrl = "https://panel.example/api/client-profiles/client-room-123/invite",
+		)
+		val restored = CallConfig.fromJson(config.toJson())
+		assertEquals(config.recoverySyncUrl, restored.recoverySyncUrl)
+		assertEquals(4, restored.recoveryGeneration)
+	}
+
     @Test
     fun detectsEverySupportedProvider() {
         assertEquals(CallPlatform.VK, CallPlatform.fromUrl("https://vk.com/call/join/example"))

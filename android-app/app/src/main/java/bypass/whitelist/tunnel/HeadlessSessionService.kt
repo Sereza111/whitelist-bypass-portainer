@@ -16,12 +16,14 @@ import android.util.Log
 import android.widget.Toast
 import bypass.whitelist.MainActivity
 import bypass.whitelist.R
+import bypass.whitelist.recovery.ProfileSyncClient
 import bypass.whitelist.ui.JoinFragmentHost
 import bypass.whitelist.util.LogWriter
 import bypass.whitelist.util.Prefs
 import bypass.whitelist.util.maskUrl
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 
 class HeadlessSessionService : Service() {
@@ -30,6 +32,18 @@ class HeadlessSessionService : Service() {
     private var controller: HeadlessJoinController? = null
     @Volatile private var sessionRunning: Boolean = false
     @Volatile private var stopInProgress: Boolean = false
+	@Volatile private var awaitingFreshInvite: Boolean = false
+	@Volatile private var restartInProgress: Boolean = false
+	private val syncHandler = Handler(Looper.getMainLooper())
+	private val syncBusy = AtomicBoolean(false)
+	private val syncPoll = object : Runnable {
+		override fun run() {
+			if (stopInProgress || isDestroyed) return
+			pollProfileInvite()
+			syncHandler.postDelayed(this, PROFILE_SYNC_INTERVAL_MS)
+		}
+	}
+	@Volatile private var isDestroyed: Boolean = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -103,10 +117,15 @@ class HeadlessSessionService : Service() {
                 }
 
                 override fun onJoinStatus(status: VpnStatus) {
+					if (awaitingFreshInvite || restartInProgress || stopInProgress) return
                     updateNotification(getString(status.labelRes))
                     TunnelServiceState.vpnStatusCallback?.invoke(status)
                     if (status == VpnStatus.CALL_FAILED) {
-                        stopSession(stopDependentServices = true)
+						if (canSyncProfile(config)) {
+							waitForFreshInvite()
+						} else {
+							stopSession(stopDependentServices = true)
+						}
                     }
                 }
 
@@ -151,15 +170,90 @@ class HeadlessSessionService : Service() {
                 override fun setJoinUiVisible(visible: Boolean) = Unit
 
                 override fun onJoinCancel() {
-                    stopSession(stopDependentServices = true)
+					if (!awaitingFreshInvite && !restartInProgress && !stopInProgress) {
+						stopSession(stopDependentServices = true)
+					}
                 }
             },
             platform,
             config.url.trim(),
         )
         controller?.start()
+		startProfileSync(config)
         TunnelServiceState.requestTileRefresh(this)
     }
+
+	private fun canSyncProfile(config: CallConfig): Boolean =
+		config.recoverySyncUrl?.startsWith("https://") == true &&
+		!config.recoveryProfile.isNullOrBlank() && !config.recoveryKey.isNullOrBlank()
+
+	private fun startProfileSync(config: CallConfig) {
+		if (!canSyncProfile(config)) return
+		syncHandler.removeCallbacks(syncPoll)
+		syncHandler.post(syncPoll)
+	}
+
+	private fun pollProfileInvite() {
+		val config = Prefs.activeDestination ?: return
+		if (!canSyncProfile(config) || !syncBusy.compareAndSet(false, true)) return
+		thread(name = "profile-invite-sync") {
+			val update = ProfileSyncClient.poll(config)
+			syncHandler.post {
+				syncBusy.set(false)
+				if (update != null && !stopInProgress && !isDestroyed) {
+					applySyncedInvite(config, update)
+				}
+			}
+		}
+	}
+
+	private fun applySyncedInvite(config: CallConfig, update: ProfileSyncClient.Update) {
+		val current = Prefs.savedDestinations.firstOrNull { it.id == config.id } ?: return
+		if (update.generation <= current.recoveryGeneration) return
+		val refreshed = current.copy(
+			url = update.link,
+			recoveryGeneration = update.generation,
+			recoveryPending = false,
+		)
+		Prefs.updateDestination(refreshed)
+		logWriter.append("Profile sync received generation=${update.generation}; restarting carrier")
+		restartWithFreshInvite()
+	}
+
+	private fun waitForFreshInvite() {
+		if (awaitingFreshInvite || restartInProgress || stopInProgress) return
+		awaitingFreshInvite = true
+		sessionRunning = false
+		val active = controller
+		controller = null
+		updateNotification(getString(R.string.vpn_recovering))
+		TunnelServiceState.vpnStatusCallback?.invoke(VpnStatus.RECOVERING)
+		logWriter.append("Carrier ended; waiting for a fresh Manager invite")
+		thread(name = "carrier-recovery-wait") { runCatching { active?.close() } }
+		syncHandler.removeCallbacks(syncPoll)
+		syncHandler.post(syncPoll)
+	}
+
+	private fun restartWithFreshInvite() {
+		if (restartInProgress || stopInProgress) return
+		restartInProgress = true
+		awaitingFreshInvite = false
+		sessionRunning = false
+		val active = controller
+		controller = null
+		thread(name = "carrier-profile-restart") {
+			val closed = CountDownLatch(1)
+			thread(name = "carrier-profile-close") {
+				try { active?.close() } finally { closed.countDown() }
+			}
+			closed.await(2200, TimeUnit.MILLISECONDS)
+			syncHandler.post {
+				if (stopInProgress || isDestroyed) return@post
+				restartInProgress = false
+				startSession()
+			}
+		}
+	}
 
     private fun startForegroundNotification(text: String) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -217,11 +311,14 @@ class HeadlessSessionService : Service() {
     private fun stopSession(stopDependentServices: Boolean) {
         if (stopInProgress) return
         val activeController = controller
-        if (activeController == null && !sessionRunning) {
+		if (activeController == null && !sessionRunning && !awaitingFreshInvite && !restartInProgress) {
             safeStopSelf()
             return
         }
         stopInProgress = true
+		awaitingFreshInvite = false
+		restartInProgress = false
+		syncHandler.removeCallbacks(syncPoll)
         sessionRunning = false
         controller = null
         if (stopDependentServices) {
@@ -254,11 +351,15 @@ class HeadlessSessionService : Service() {
         }
     }
 
-    private fun hasLiveSessionInternal(): Boolean = sessionRunning || stopInProgress || controller != null
+    private fun hasLiveSessionInternal(): Boolean =
+		sessionRunning || stopInProgress || awaitingFreshInvite || restartInProgress || controller != null
 
     private fun safeStopSelf() {
         sessionRunning = false
         stopInProgress = false
+		awaitingFreshInvite = false
+		restartInProgress = false
+		syncHandler.removeCallbacks(syncPoll)
         controller = null
         runCatching {
             @Suppress("DEPRECATION")
@@ -281,6 +382,7 @@ class HeadlessSessionService : Service() {
         private const val CHANNEL_ID = "headless_session_channel"
         private const val NOTIFICATION_ID = 3
         private const val TAG = "HeadlessSession"
+		private const val PROFILE_SYNC_INTERVAL_MS = 5_000L
 
         @Volatile
         var instance: HeadlessSessionService? = null
@@ -316,10 +418,13 @@ class HeadlessSessionService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+		isDestroyed = false
         instance = this
     }
 
     override fun onDestroy() {
+		isDestroyed = true
+		syncHandler.removeCallbacksAndMessages(null)
         instance = null
         sessionRunning = false
         stopInProgress = false

@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -54,6 +56,17 @@ type mobileInvitePayload struct {
 	Provider   string `json:"provider,omitempty"`
 	Profile    string `json:"profile"`
 	Key        string `json:"key"`
+	Generation int    `json:"generation"`
+	Link       string `json:"link"`
+	SyncURL    string `json:"syncUrl,omitempty"`
+}
+
+type clientInviteInput struct {
+	AfterGeneration int `json:"afterGeneration"`
+}
+
+type clientInviteResponse struct {
+	Provider   string `json:"provider"`
 	Generation int    `json:"generation"`
 	Link       string `json:"link"`
 }
@@ -172,20 +185,27 @@ func registerControlAPIRoutes(mux *http.ServeMux, cp *controlPlane, vkLogin *vkL
 	mux.Handle("GET /api/profiles", protect(func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, cp.listProfiles())
 	}))
-	mobileInvite := func(profileID string) (string, error) {
+	mobileInvite := func(profileID, syncURL string) (string, error) {
 		profile, ok := cp.profile(profileID)
 		if !ok {
 			return "", os.ErrNotExist
 		}
 		for _, session := range cp.listSessions() {
 			if session.ClientID == profileID && session.Status.SessionLink != "" {
-				return encodeMobileInvite(profile, session.Status)
+				return encodeMobileInvite(profile, session.Status, syncURL)
 			}
 		}
 		return "", errors.New("start the profile and wait for its call link first")
 	}
 	mux.Handle("POST /api/profiles/{id}/mobile-invite", mutate(func(w http.ResponseWriter, r *http.Request) {
-		invite, err := mobileInvite(r.PathValue("id"))
+		origin, originErr := wbPublicPanelOrigin(r)
+		if originErr != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "open the panel through HTTPS before pairing a client"})
+			return
+		}
+		profileID := r.PathValue("id")
+		syncURL := strings.TrimRight(origin, "/") + "/api/client-profiles/" + url.PathEscape(profileID) + "/invite"
+		invite, err := mobileInvite(profileID, syncURL)
 		if errors.Is(err, os.ErrNotExist) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "client profile not found"})
 			return
@@ -207,6 +227,42 @@ func registerControlAPIRoutes(mux *http.ServeMux, cp *controlPlane, vkLogin *vkL
 		mobileInviteMu.Unlock()
 		writeJSON(w, http.StatusCreated, mobileInviteResponse{URL: "/join/" + token, ExpiresAt: expiresAt})
 	}))
+	mux.HandleFunc("POST /api/client-profiles/{id}/invite", func(w http.ResponseWriter, r *http.Request) {
+		profile, ok := cp.profile(r.PathValue("id"))
+		if !ok {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "client profile not found"})
+			return
+		}
+		secret, hasBearer := requestBearer(r)
+		want := sha256.Sum256([]byte(profile.RecoveryKey))
+		got := sha256.Sum256([]byte(secret))
+		if !hasBearer || subtle.ConstantTimeCompare(got[:], want[:]) != 1 {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "client profile authentication required"})
+			return
+		}
+		if !profile.Enabled || (profile.ExpiresAt != nil && time.Now().After(*profile.ExpiresAt)) {
+			writeJSON(w, http.StatusGone, map[string]string{"error": "client profile is unavailable"})
+			return
+		}
+		var input clientInviteInput
+		if !decodeRequest(w, r, &input) {
+			return
+		}
+		if profile.InviteGeneration <= input.AfterGeneration || profile.CurrentInvite == "" {
+			w.Header().Set("Cache-Control", "no-store")
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		provider := strings.ToLower(strings.TrimSpace(profile.Config.Mode))
+		if !validMobileInviteLink(provider, profile.CurrentInvite) {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "profile invite is unavailable"})
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, http.StatusOK, clientInviteResponse{
+			Provider: provider, Generation: profile.InviteGeneration, Link: profile.CurrentInvite,
+		})
+	})
 	mux.HandleFunc("GET /join/{token}", func(w http.ResponseWriter, r *http.Request) {
 		now := time.Now().UTC()
 		mobileInviteMu.Lock()
@@ -359,7 +415,7 @@ func registerControlAPIRoutes(mux *http.ServeMux, cp *controlPlane, vkLogin *vkL
 	}))
 }
 
-func encodeMobileInvite(profile clientProfile, status sessionStatus) (string, error) {
+func encodeMobileInvite(profile clientProfile, status sessionStatus, syncURLs ...string) (string, error) {
 	if profile.ID == "" || profile.RecoveryKey == "" || status.SessionLink == "" {
 		return "", errors.New("mobile invite is incomplete")
 	}
@@ -370,9 +426,20 @@ func encodeMobileInvite(profile clientProfile, status sessionStatus) (string, er
 	if !validMobileInviteLink(provider, status.SessionLink) {
 		return "", fmt.Errorf("session link does not match provider %q", provider)
 	}
+	version, syncURL := 1, ""
+	if len(syncURLs) > 0 {
+		syncURL = strings.TrimSpace(syncURLs[0])
+		if syncURL != "" {
+			parsed, parseErr := url.Parse(syncURL)
+			if parseErr != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
+				return "", errors.New("mobile invite sync URL is invalid")
+			}
+			version = 2
+		}
+	}
 	payload, err := json.Marshal(mobileInvitePayload{
-		Version: 1, Name: profile.Name, Provider: provider, Profile: profile.ID, Key: profile.RecoveryKey,
-		Generation: status.Generation, Link: status.SessionLink,
+		Version: version, Name: profile.Name, Provider: provider, Profile: profile.ID, Key: profile.RecoveryKey,
+		Generation: status.Generation, Link: status.SessionLink, SyncURL: syncURL,
 	})
 	if err != nil {
 		return "", err
