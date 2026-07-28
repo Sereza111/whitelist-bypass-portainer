@@ -14,6 +14,24 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
+## Active handoff (2026-07-28, alpha.24 WB field follow-up candidate)
+
+- The user-supplied alpha.23 WB relay log and speed-test video are external-only
+  and must never be committed. They prove a real tunnel at about 2.46 Mbps down
+  and roughly 2-4 Mbps sustained upload, but loaded latency reached about 4.8s
+  down / 3.7s up.
+- Carrier health stayed good (`kcp_stalls=0`, `kcp_ack_stalls=0`). The direct WB
+  wrapper instead forced Fast, filled `WaitSnd=2048/2048` and the carrier output
+  queue, accumulated more than 16k local drops and raised fair wait above 6s.
+- Alpha.24 changes only the direct/legacy WB KCP default from Fast to bounded
+  Auto (256-512). The wire path remains compatible; matching Android and server
+  builds are still required for a valid field comparison.
+- Android creator now attempts the visible regular WB UI button labelled
+  `Новая видеовстреча`, accepts only a strict `stream.wb.ru/room/...` navigation,
+  and submits that invitation to Manager. It never reads or uploads WebView
+  cookies/tokens. The existing manual invitation field remains after a bounded
+  timeout if WB changes its UI.
+
 ## Active handoff (2026-07-28, alpha.23 WB device creator + client sync)
 
 - WB account state stays on the paired Android creator. Manager stores only a

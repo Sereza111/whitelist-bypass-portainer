@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.View
 import android.webkit.CookieManager
 import android.webkit.WebResourceError
@@ -44,6 +45,8 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
     private var deviceSecret = ""
     private var pendingRequestId = ""
     private var destroyed = false
+	private var autoCreateStartedAt = 0L
+	private var autoCreateClicked = false
 	private var pollCount = 0
 	private val diagnosticLines = ArrayDeque<String>()
 
@@ -54,6 +57,13 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
             mainHandler.postDelayed(this, POLL_INTERVAL_MS)
         }
     }
+
+	private val autoCreatePoll = object : Runnable {
+		override fun run() {
+			if (destroyed || isFinishing || isDestroyed || pendingRequestId.isEmpty()) return
+			tryCreateRequestedCall()
+		}
+	}
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -109,7 +119,13 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
             override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
 				trace("webview", "page-start")
                 if (pendingRequestId.isEmpty()) status.setText(R.string.wb_creator_ready_help)
+				maybeSubmitInvite(url)
             }
+
+			override fun onPageFinished(view: WebView, url: String) {
+				maybeSubmitInvite(url)
+				if (pendingRequestId.isNotEmpty()) scheduleAutoCreate(0)
+			}
 
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
 				if (request.isForMainFrame) {
@@ -178,18 +194,70 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
                 val requestId = json.optString("id")
                 if (!CREATOR_RE.matches(requestId)) return@post
                 pendingRequestId = requestId
+				autoCreateStartedAt = SystemClock.elapsedRealtime()
+				autoCreateClicked = false
 				trace("command", "received request=${requestId.takeLast(8)}")
                 val profileName = json.optString("profileName").take(80)
-                status.text = getString(R.string.wb_creator_call_requested, profileName)
+				status.text = getString(R.string.wb_creator_call_requested, profileName)
                 invitePanel.visibility = View.VISIBLE
                 inviteInput.setText("")
+				scheduleAutoCreate(0)
             }
         }
     }
 
+	private fun scheduleAutoCreate(delayMs: Long = AUTO_CREATE_POLL_MS) {
+		mainHandler.removeCallbacks(autoCreatePoll)
+		mainHandler.postDelayed(autoCreatePoll, delayMs)
+	}
+
+	private fun tryCreateRequestedCall() {
+		val currentURL = webView.url.orEmpty()
+		if (maybeSubmitInvite(currentURL)) return
+		if (!isTrustedWBPage(currentURL) || isWBLoginPage(currentURL)) {
+			// Login is intentionally completed by the user in the regular WebView.
+			// Do not consume the UI-automation timeout while waiting for it.
+			autoCreateStartedAt = SystemClock.elapsedRealtime()
+			status.setText(R.string.wb_creator_login_required)
+			scheduleAutoCreate()
+			return
+		}
+		if (SystemClock.elapsedRealtime() - autoCreateStartedAt >= AUTO_CREATE_TIMEOUT_MS) {
+			trace("call-ui", "manual-fallback")
+			status.setText(R.string.wb_creator_manual_fallback)
+			return
+		}
+		if (autoCreateClicked) {
+			status.setText(R.string.wb_creator_opening_call)
+			scheduleAutoCreate()
+			return
+		}
+		webView.evaluateJavascript(AUTO_CREATE_CALL_JS) { result ->
+			if (pendingRequestId.isEmpty() || destroyed) return@evaluateJavascript
+			if (result == "1") {
+				autoCreateClicked = true
+				trace("call-ui", "create-clicked")
+				status.setText(R.string.wb_creator_opening_call)
+			}
+			scheduleAutoCreate()
+		}
+	}
+
+	private fun maybeSubmitInvite(candidate: String): Boolean {
+		if (pendingRequestId.isEmpty() || !isSafeInvite(candidate)) return false
+		inviteInput.setText(candidate)
+		trace("call-ui", "invite-detected")
+		submitInvite(candidate)
+		return true
+	}
+
     private fun submitInvite() {
-        if (pendingRequestId.isEmpty() || requestRunning.get()) return
         val candidate = inviteInput.text.toString().trim().ifEmpty { webView.url.orEmpty() }
+		submitInvite(candidate)
+	}
+
+	private fun submitInvite(candidate: String) {
+		if (pendingRequestId.isEmpty() || requestRunning.get()) return
         if (!isSafeInvite(candidate)) {
 			trace("invite", "rejected-locally")
             status.setText(R.string.wb_creator_invalid_invite)
@@ -209,6 +277,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
                 inviteSubmit.isEnabled = true
                 if (response.code in 200..299) {
                     pendingRequestId = ""
+					mainHandler.removeCallbacks(autoCreatePoll)
                     invitePanel.visibility = View.GONE
                     status.setText(R.string.wb_creator_invite_sent)
                 } else {
@@ -256,6 +325,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 
     private fun fail(message: String) {
         mainHandler.removeCallbacks(commandPoll)
+		mainHandler.removeCallbacks(autoCreatePoll)
         invitePanel.visibility = View.GONE
         status.text = message
     }
@@ -276,6 +346,8 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
     companion object {
         private const val WB_LOGIN_URL = "https://stream.wb.ru/login"
         private const val POLL_INTERVAL_MS = 3_000L
+		private const val AUTO_CREATE_POLL_MS = 1_000L
+		private const val AUTO_CREATE_TIMEOUT_MS = 25_000L
 		private const val MAX_DIAGNOSTIC_LINES = 7
         private const val PREFS = "wb_creator"
         private const val KEY_SERVER = "server"
@@ -295,6 +367,17 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
             return uri.scheme == "https" && !uri.host.isNullOrBlank() && uri.userInfo == null &&
                 (uri.path.isNullOrEmpty() || uri.path == "/") && uri.query == null && uri.fragment == null
         }
+
+		private fun isTrustedWBPage(value: String): Boolean {
+			val uri = runCatching { Uri.parse(value) }.getOrNull() ?: return false
+			return uri.scheme.equals("https", true) && uri.host.equals("stream.wb.ru", true) &&
+				uri.userInfo == null && uri.port == -1
+		}
+
+		private fun isWBLoginPage(value: String): Boolean {
+			val path = runCatching { Uri.parse(value).path.orEmpty().trimEnd('/') }.getOrDefault("")
+			return path.equals("/login", true)
+		}
 
         fun hasBinding(context: android.content.Context): Boolean {
             val prefs = context.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE)
@@ -317,6 +400,21 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
             }
             return ROOM_RE.matches(room)
         }
+
+		private val AUTO_CREATE_CALL_JS = """
+			(() => {
+			  const labels = ['новая видеовстреча', 'создать видеовстречу', 'new video meeting', 'create meeting'];
+			  const nodes = Array.from(document.querySelectorAll('button,[role="button"],a'));
+			  const target = nodes.find((node) => {
+			    const text = String(node.innerText || node.textContent || '').toLowerCase().replace(/\s+/g, ' ').trim();
+			    const visible = node.getClientRects().length > 0;
+			    return visible && !node.disabled && labels.some((label) => text.includes(label));
+			  });
+			  if (!target) return 0;
+			  target.click();
+			  return 1;
+			})()
+		""".trimIndent()
     }
 
 	private data class ApiResponse(val code: Int, val body: String, val message: String, val transportError: String)

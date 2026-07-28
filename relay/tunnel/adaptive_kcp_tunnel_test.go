@@ -74,6 +74,20 @@ func TestAdaptiveKCPProfiles(t *testing.T) {
 	}
 }
 
+func TestDirectKCPTunnelDefaultsToAuto(t *testing.T) {
+	leftRaw, _ := newMemoryTunnelPair()
+	direct := NewKCPTunnel(leftRaw, func(string, ...any) {})
+	defer direct.Stop()
+
+	metrics := direct.TunnelMetrics()
+	if got := direct.Profile(); got != KCPProfileAuto {
+		t.Fatalf("direct KCP profile=%q, want %q", got, KCPProfileAuto)
+	}
+	if metrics.KCPWindow != kcpAutoMinWindow {
+		t.Fatalf("direct KCP window=%d, want bounded auto start %d", metrics.KCPWindow, kcpAutoMinWindow)
+	}
+}
+
 func TestPreferSaferKCPProfile(t *testing.T) {
 	for _, test := range []struct{ local, peer, want string }{
 		{KCPProfileFast, KCPProfileBalanced, KCPProfileBalanced},
