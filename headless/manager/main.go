@@ -25,7 +25,7 @@ import (
 )
 
 var (
-	Version     = "0.5.0-alpha.24"
+	Version     = "0.5.0-alpha.25"
 	BuildCommit = "unknown"
 	BuildTime   = "unknown"
 )
@@ -575,7 +575,7 @@ func main() {
 	cp.setWBCreator(wbLogin)
 	registerControlAPIRoutes(mux, cp, vkLogin, wbLogin, username, password, envOr("SECRETS_DIR", "/run/secrets/wlb"))
 	registerVKLoginRoutes(mux, vkLogin, username, password)
-	registerWBLoginRoutes(mux, wbLogin, username, password)
+	registerWBLoginRoutes(mux, wbLogin, username, password, cp)
 	mux.Handle("/", requireAuth(username, password, http.FileServer(http.FS(webRoot))))
 
 	handler := securityHeaders(mux)

@@ -91,10 +91,10 @@ type KCPTunnel struct {
 func NewKCPTunnel(inner DataTunnel, logFn func(string, ...any)) *KCPTunnel {
 	t := newKCPTunnel(inner, kcpSegmentMTU, logFn)
 	// WB Stream still uses this direct KCP wrapper rather than the negotiated
-	// adaptive wrapper. Fast's 2048-segment window can hide many seconds of
-	// backlog on that carrier, so retain the legacy wire path while starting
-	// with Auto's bounded window. SetProfile remains available for experiments.
-	t.SetProfile(KCPProfileAuto)
+	// adaptive wrapper. Field alpha.24 showed that Auto's 256-segment start
+	// window pinned a high-RTT WB carrier near 0.5 Mbps, while Fast's 2048 window
+	// hid many seconds of backlog. Balanced is the measured compatibility point.
+	t.SetProfile(KCPProfileBalanced)
 	return t
 }
 

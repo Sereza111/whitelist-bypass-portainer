@@ -37,7 +37,6 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import bypass.whitelist.recovery.RecoveryNotificationListener
 import bypass.whitelist.tunnel.CallConfig
 import bypass.whitelist.tunnel.CallPlatform
-import bypass.whitelist.tunnel.HeadlessJoinController
 import bypass.whitelist.tunnel.HeadlessSessionService
 import bypass.whitelist.tunnel.PortGuard
 import bypass.whitelist.tunnel.ProxyService
@@ -99,13 +98,13 @@ class MainActivity :
     private var lastStatus: VpnStatus? = null
     private var connected: Boolean = false
     private var activeJoinUrl: String = ""
-    private var activeHeadlessController: HeadlessJoinController? = null
     private var navPageChangeCallback: ViewPager2.OnPageChangeCallback? = null
     private var navScrollState: Int = ViewPager2.SCROLL_STATE_IDLE
     @Volatile private var resetInProgress: Boolean = false
     @Volatile private var overlayVisible: Boolean = false
     @Volatile private var resetGeneration: Long = 0L
     private var pendingConnectConfig: CallConfig? = null
+	private var pendingHeadlessServiceConfig: CallConfig? = null
 	private var recoveryInProgress: Boolean = false
     private val navColorEvaluator = ArgbEvaluator()
 	private val recoveryReceiver = object : BroadcastReceiver() {
@@ -117,8 +116,11 @@ class MainActivity :
     private val vpnLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        if (result.resultCode == RESULT_OK) startVpnService()
-        else appendLog("VPN permission denied")
+		val headlessConfig = pendingHeadlessServiceConfig
+		pendingHeadlessServiceConfig = null
+		if (result.resultCode == RESULT_OK) {
+			if (headlessConfig != null) startHeadlessSessionService(headlessConfig) else startVpnService()
+		} else appendLog("VPN permission denied")
     }
 	private val notificationPermissionLauncher = registerForActivityResult(
 		ActivityResultContracts.RequestPermission()
@@ -551,6 +553,7 @@ class MainActivity :
 			name = invite.name,
 			url = invite.link,
 			tunnelMode = TunnelMode.VIDEO,
+			dualTrack = existing?.dualTrack ?: (CallPlatform.fromUrl(invite.link) == CallPlatform.WBSTREAM),
 			recoveryProfile = invite.profile,
 			recoveryKey = invite.key,
 			recoveryGeneration = invite.generation,
@@ -864,12 +867,15 @@ class MainActivity :
 
         if (headlessMode && platform != CallPlatform.VK) {
             setJoinOverlayVisible(false)
-            activeHeadlessController = HeadlessJoinController(
-                applicationInfo.nativeLibraryDir,
-                this,
-                platform,
-                url,
-            ).also { it.start() }
+			if (!Prefs.proxyOnly) {
+				val permission = VpnService.prepare(this)
+				if (permission != null) {
+					pendingHeadlessServiceConfig = config
+					vpnLauncher.launch(permission)
+					return
+				}
+			}
+			startHeadlessSessionService(config)
             return
         }
 
@@ -886,6 +892,18 @@ class MainActivity :
             .commit()
     }
 
+	private fun startHeadlessSessionService(config: CallConfig) {
+		val exists = Prefs.savedDestinations.any { it.id == config.id }
+		if (exists) {
+			Prefs.updateDestination(config)
+			Prefs.activeDestinationId = config.id
+		} else {
+			Prefs.addDestination(config)
+		}
+		appendLog("Starting persistent ${config.platformLabel} session with profile sync")
+		ContextCompat.startForegroundService(this, Intent(this, HeadlessSessionService::class.java))
+	}
+
     private fun startVpnService() {
         startService(Intent(this, TunnelVpnService::class.java))
         appendLog("VPN start requested")
@@ -899,7 +917,6 @@ class MainActivity :
         }
         connected = false
         lastStatus = null
-        closeActiveHeadlessController()
         removeJoinFragment()
         setJoinOverlayVisible(false)
         mainFragment()?.onConnectedChanged(false)
@@ -914,9 +931,8 @@ class MainActivity :
         val resetId = ++resetGeneration
         connected = false
 		lastStatus = if (recoveryInProgress) VpnStatus.RECOVERING else VpnStatus.STOPPING
-        val controller = activeHeadlessController
-        activeHeadlessController = null
         activeJoinUrl = ""
+		pendingHeadlessServiceConfig = null
 
         removeJoinFragment()
         TunnelVpnService.requestStop(this)
@@ -927,7 +943,6 @@ class MainActivity :
 		mainFragment()?.onStatusChanged(lastStatus ?: VpnStatus.STOPPING)
 		mainFragment()?.onStatusTextChanged(if (recoveryInProgress) getString(R.string.vpn_recovering) else "Stopping previous session...")
         thread(name = "full-reset-shutdown") {
-            controller?.close()
             var attempts = 0
             while (
                 attempts < 40 &&
@@ -991,7 +1006,6 @@ class MainActivity :
         connected = false
         activeJoinUrl = ""
         lastStatus = if (PortGuard.isPortAvailable(Prefs.socksPort)) VpnStatus.CALL_DISCONNECTED else VpnStatus.PORT_BUSY
-        closeActiveHeadlessController()
         removeJoinFragment()
         setJoinOverlayVisible(false)
         TunnelVpnService.requestStop(this)
@@ -1001,14 +1015,6 @@ class MainActivity :
         mainFragment()?.onStatusChanged(lastStatus ?: VpnStatus.CALL_DISCONNECTED)
         mainFragment()?.onStatusTextChanged(message)
         appendLog(message)
-    }
-
-    private fun closeActiveHeadlessController() {
-        val controller = activeHeadlessController
-        activeHeadlessController = null
-        if (controller != null) {
-            thread(name = "headless-shutdown") { controller.close() }
-        }
     }
 
     private fun isResetCurrent(resetId: Long): Boolean =

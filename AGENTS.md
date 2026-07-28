@@ -14,6 +14,27 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
+## Active handoff (2026-07-28, alpha.25 WB client/recovery candidate)
+
+- Matching alpha.24 Android/server field logs are external-only. Auto removed
+  KCP output drops but pinned the Android direct-WB sender at `256/256` with
+  zero window changes. The Speedtest result was about 0.58/0.30 Mbps; KCP
+  backpressure reached 43.5s, client fair wait 9.8s and server fair wait 13.8s.
+- Direct WB now defaults to measured Balanced `512/512`. Android WB client
+  profiles default to dual track; the alpha.24 trace used only one track.
+- The authenticated creator invite response may include only a provider-bound
+  client-profile handoff (profile id/key/generation, no cookies/WB tokens).
+  Android stores the validated WB invite locally and can connect this phone
+  automatically. A visible switch disables this when the creator serves a PC.
+- Main-screen headless connects now use `HeadlessSessionService`, not the
+  short-lived activity controller. This activates the existing HTTPS
+  profile-sync loop for normal UI connections, so a refreshed WB generation
+  restarts the carrier while VPN/SOCKS remains supervised.
+- SOCKS-only remains a gateway and intentionally does not route phone apps.
+  The UI now states this explicitly; Device/selected-app routing still uses
+  VpnService. VPN and SOCKS share the same call carrier and therefore have the
+  same throughput ceiling.
+
 ## Active handoff (2026-07-28, alpha.24 WB field follow-up candidate)
 
 - The user-supplied alpha.23 WB relay log and speed-test video are external-only

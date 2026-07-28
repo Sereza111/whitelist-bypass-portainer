@@ -1,6 +1,7 @@
 package bypass.whitelist
 
 import android.annotation.SuppressLint
+import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
@@ -21,6 +22,12 @@ import android.widget.TextView
 import android.util.Log
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.materialswitch.MaterialSwitch
+import bypass.whitelist.tunnel.CallConfig
+import bypass.whitelist.tunnel.HeadlessSessionService
+import bypass.whitelist.tunnel.TunnelMode
+import bypass.whitelist.tunnel.TunnelServiceState
+import bypass.whitelist.util.Prefs
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -37,6 +44,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
     private lateinit var invitePanel: LinearLayout
     private lateinit var inviteInput: EditText
     private lateinit var inviteSubmit: MaterialButton
+	private lateinit var autoConnect: MaterialSwitch
     private val mainHandler = Handler(Looper.getMainLooper())
     private val executor = Executors.newSingleThreadExecutor()
     private val requestRunning = AtomicBoolean(false)
@@ -74,6 +82,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
         invitePanel = findViewById(R.id.wbInvitePanel)
         inviteInput = findViewById(R.id.wbInviteInput)
         inviteSubmit = findViewById(R.id.wbInviteSubmit)
+		autoConnect = findViewById(R.id.wbAutoConnect)
         close.setOnClickListener { finish() }
         inviteSubmit.setOnClickListener { submitInvite() }
 
@@ -81,6 +90,10 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
         val server = input?.getQueryParameter("server").orEmpty().trimEnd('/')
         val token = input?.getQueryParameter("token").orEmpty()
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+		autoConnect.isChecked = prefs.getBoolean(KEY_AUTO_CONNECT, true)
+		autoConnect.setOnCheckedChangeListener { _, checked ->
+			prefs.edit().putBoolean(KEY_AUTO_CONNECT, checked).apply()
+		}
         val freshPairing = validPairing(server, token)
 		trace("boot", "version=${appVersion()} mode=${if (freshPairing) "pair" else "resume"}")
         if (freshPairing) {
@@ -279,13 +292,63 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
                     pendingRequestId = ""
 					mainHandler.removeCallbacks(autoCreatePoll)
                     invitePanel.visibility = View.GONE
-                    status.setText(R.string.wb_creator_invite_sent)
+					val clientConfig = installClientProfile(response.body, candidate)
+					if (clientConfig != null) {
+						trace("client", "profile-updated")
+						status.setText(R.string.wb_creator_client_ready)
+						if (autoConnect.isChecked && !TunnelServiceState.isAnyTunnelComponentRunning(this)) {
+							trace("client", "auto-connect")
+							openClientAndConnect()
+						}
+					} else {
+						status.setText(R.string.wb_creator_invite_sent)
+					}
                 } else {
                     status.text = response.message.ifBlank { getString(R.string.wb_creator_invite_failed) }
                 }
             }
         }
     }
+
+	private fun installClientProfile(responseBody: String, link: String): CallConfig? {
+		val payload = runCatching { JSONObject(responseBody).optJSONObject("clientProfile") }.getOrNull()
+			?: return null
+		if (!payload.optString("provider").equals("wbstream", true)) return null
+		val profile = payload.optString("profile").trim().takeIf { CREATOR_RE.matches(it) } ?: return null
+		val key = payload.optString("key").trim().takeIf { TOKEN_RE.matches(it) } ?: return null
+		val name = payload.optString("name").trim().takeIf { it.isNotEmpty() && it.length <= 80 } ?: "WB Stream"
+		val generation = payload.optInt("generation", -1).takeIf { it >= 0 } ?: return null
+		if (!isSafeInvite(link)) return null
+		val syncURL = "$serverOrigin/api/client-profiles/$profile/invite"
+		val existing = Prefs.savedDestinations.firstOrNull { it.recoveryProfile == profile }
+		if (existing != null && Prefs.activeDestinationId == existing.id && HeadlessSessionService.hasLiveSession()) {
+			// The running service must observe the newer generation itself so it
+			// can close the old carrier and restart. Advancing the stored generation
+			// here would make its next sync poll incorrectly return 204.
+			return existing
+		}
+		val config = (existing ?: CallConfig.newWith(name, link)).copy(
+			name = name,
+			url = link,
+			tunnelMode = TunnelMode.VIDEO,
+			dualTrack = true,
+			recoveryProfile = profile,
+			recoveryKey = key,
+			recoveryGeneration = generation,
+			recoveryPending = false,
+			recoverySyncUrl = syncURL,
+		)
+		Prefs.addDestination(config)
+		return config
+	}
+
+	private fun openClientAndConnect() {
+		val intent = Intent(this, MainActivity::class.java).apply {
+			action = MainActivity.ACTION_AUTO_START
+			addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+		}
+		startActivity(intent)
+	}
 
     private fun post(path: String, body: String, secret: String, id: String): ApiResponse {
         return runCatching {
@@ -354,6 +417,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
         private const val KEY_CREATOR_ID = "creator_id"
         private const val KEY_DEVICE_SECRET = "device_secret"
         private const val KEY_DEVICE_ID = "device_id"
+		private const val KEY_AUTO_CONNECT = "auto_connect_client"
         private val TOKEN_RE = Regex("^[A-Za-z0-9_-]{32,128}$")
         private val CREATOR_RE = Regex("^[A-Za-z0-9._-]{8,128}$")
         private val ROOM_RE = Regex("^[A-Za-z0-9_-]{3,256}$")

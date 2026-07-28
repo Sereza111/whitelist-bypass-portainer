@@ -337,10 +337,10 @@ func (login *wbLoginManager) cancelRequest(id string) {
 	login.mu.Unlock()
 }
 
-func (login *wbLoginManager) submitInvite(requestID, raw string) (string, error) {
+func (login *wbLoginManager) submitInvite(requestID, raw string) (string, string, error) {
 	link, err := normalizeWBInvite(raw)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	login.mu.Lock()
 	login.expireLocked(time.Now().UTC())
@@ -350,11 +350,11 @@ func (login *wbLoginManager) submitInvite(requestID, raw string) (string, error)
 	}
 	login.mu.Unlock()
 	if !ok {
-		return "", errors.New("call request is unknown or expired")
+		return "", "", errors.New("call request is unknown or expired")
 	}
 	request.result <- wbCallResult{link: link}
 	login.addEvent("info", "Accepted Android WB invitation", request.ProfileID)
-	return link, nil
+	return link, request.ProfileID, nil
 }
 
 func normalizeWBInvite(raw string) (string, error) {
@@ -416,7 +416,11 @@ func (login *wbLoginManager) removeManagedCredentials() (wbLoginStatus, error) {
 	return login.status(), err
 }
 
-func registerWBLoginRoutes(mux *http.ServeMux, login *wbLoginManager, username, password string) {
+func registerWBLoginRoutes(mux *http.ServeMux, login *wbLoginManager, username, password string, controlPlanes ...*controlPlane) {
+	var cp *controlPlane
+	if len(controlPlanes) > 0 {
+		cp = controlPlanes[0]
+	}
 	protect := func(handler http.HandlerFunc) http.Handler { return requireAuth(username, password, handler) }
 	mutate := func(handler http.HandlerFunc) http.Handler {
 		return requireAuth(username, password, sameOrigin(handler))
@@ -490,12 +494,22 @@ func registerWBLoginRoutes(mux *http.ServeMux, login *wbLoginManager, username, 
 		if !decodeRequest(w, r, &input) {
 			return
 		}
-		link, err := login.submitInvite(r.PathValue("id"), input.InviteLink)
+		link, profileID, err := login.submitInvite(r.PathValue("id"), input.InviteLink)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]string{"inviteLink": link})
+		response := map[string]any{"inviteLink": link}
+		if cp != nil {
+			if profile, ok := cp.profile(profileID); ok && profile.Config.Mode == "wbstream" {
+				response["clientProfile"] = map[string]any{
+					"name": profile.Name, "profile": profile.ID, "key": profile.RecoveryKey,
+					"generation": profile.RecoveryGeneration, "provider": "wbstream",
+				}
+			}
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, http.StatusOK, response)
 	})
 	mux.Handle("POST /api/wb-login/cancel", mutate(func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, login.cancelLogin("Привязка Android отменена"))

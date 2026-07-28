@@ -735,11 +735,23 @@ func TestWBDevicePairingAndCallExchangeOnlyInvite(t *testing.T) {
 		t.Fatal(err)
 	}
 	login := newWBLoginManager(dataDir)
+	cp, err := newControlPlane(dataDir, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enabled := true
+	profile, err := cp.createProfile(profileInput{
+		Name: "Test profile", Enabled: &enabled, MaxSessions: 1,
+		Config: sessionRequest{Mode: "wbstream"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := os.Stat(legacyPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("legacy managed WB credentials were not removed: %v", err)
 	}
 	mux := http.NewServeMux()
-	registerWBLoginRoutes(mux, login, "admin", testPanelPassword)
+	registerWBLoginRoutes(mux, login, "admin", testPanelPassword, cp)
 
 	start := httptest.NewRequest(http.MethodPost, "/api/wb-login/device/start", strings.NewReader(`{}`))
 	start.Host = "panel.example.test"
@@ -810,7 +822,7 @@ func TestWBDevicePairingAndCallExchangeOnlyInvite(t *testing.T) {
 
 	callResult := make(chan wbCallResult, 1)
 	go func() {
-		link, err := login.requestCall(context.Background(), "client-test", "Test profile")
+		link, err := login.requestCall(context.Background(), profile.ID, profile.Name)
 		callResult <- wbCallResult{link: link, err: err}
 	}()
 	deadline := time.Now().Add(time.Second)
@@ -836,6 +848,21 @@ func TestWBDevicePairingAndCallExchangeOnlyInvite(t *testing.T) {
 	mux.ServeHTTP(response, invite)
 	if response.Code != http.StatusOK {
 		t.Fatalf("invite submit=%d body=%s", response.Code, response.Body.String())
+	}
+	var handoff struct {
+		ClientProfile struct {
+			Profile    string `json:"profile"`
+			Key        string `json:"key"`
+			Provider   string `json:"provider"`
+			Generation int    `json:"generation"`
+		} `json:"clientProfile"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &handoff); err != nil {
+		t.Fatal(err)
+	}
+	if handoff.ClientProfile.Profile != profile.ID || handoff.ClientProfile.Key != profile.RecoveryKey ||
+		handoff.ClientProfile.Provider != "wbstream" {
+		t.Fatal("creator response did not include the expected provider-bound client handoff")
 	}
 	result := <-callResult
 	if result.err != nil || result.link != "wbstream://room_123" {

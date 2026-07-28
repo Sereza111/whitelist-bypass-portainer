@@ -93,10 +93,10 @@
         <item quantity="other">%d apps selected</item>
     </plurals>
     <string name="routing_mode_proxy">SOCKS5</string>
-    <string name="routing_mode_proxy_sub">Manual proxy and LAN gateway</string>
+    <string name="routing_mode_proxy_sub">SOCKS gateway; phone traffic is not routed</string>
     <string name="routing_proxy_endpoint_label">Local SOCKS5 endpoint</string>
     <string name="routing_proxy_endpoint">127.0.0.1:%1$d</string>
-    <string name="routing_proxy_hint">The VPN interface stays off. Enter this SOCKS5 address in apps that support a proxy.</string>
+    <string name="routing_proxy_hint">Phone apps will NOT use the tunnel in this mode. Enter this SOCKS5 address in a proxy-aware app or on your PC; use Tunnel/Split tunneling for phone traffic.</string>
     <string name="routing_proxy_configure">Configure</string>
     <string name="routing_proxy_copy">Copy</string>
     <string name="routing_proxy_copied">Local SOCKS5 configuration copied</string>
@@ -212,6 +212,8 @@
     <string name="wb_creator_invalid_invite">Paste a valid WB Stream room invitation.</string>
     <string name="wb_creator_sending_invite">Checking and sending the invitation…</string>
     <string name="wb_creator_invite_sent">Invitation accepted. Manager is starting the relay.</string>
+    <string name="wb_creator_client_ready">Invitation accepted. The WB client profile was updated on this phone.</string>
+    <string name="wb_creator_auto_connect">Connect this phone automatically after creating the WB call</string>
     <string name="wb_creator_invite_failed">Manager rejected the invitation. Create a fresh call and retry.</string>
     <string name="wb_login_cancel">Cancel</string>
     <string name="settings_forget_all_destinations">Forget all calls</string>
