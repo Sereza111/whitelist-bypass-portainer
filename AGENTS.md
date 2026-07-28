@@ -14,7 +14,7 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
-## Active handoff (2026-07-28, alpha.25 WB client/recovery candidate)
+## Active handoff (2026-07-28, alpha.26 WB one-tap client candidate)
 
 - Matching alpha.24 Android/server field logs are external-only. Auto removed
   KCP output drops but pinned the Android direct-WB sender at `256/256` with
@@ -34,6 +34,12 @@ Portainer and a headless Joiner in Video mode.
   The UI now states this explicitly; Device/selected-app routing still uses
   VpnService. VPN and SOCKS share the same call carrier and therefore have the
   same throughput ceiling.
+- A paired Android creator can start an enabled WB client profile through a
+  creator-authenticated, provider-restricted endpoint. Tapping the saved WB
+  card brings the existing creator WebView forward, asks Manager to start that
+  exact profile, handles the regular visible WB create button, then connects
+  with the returned local profile. This grants no panel/admin access and cannot
+  start VK/Telemost/Dion profiles.
 
 ## Active handoff (2026-07-28, alpha.24 WB field follow-up candidate)
 

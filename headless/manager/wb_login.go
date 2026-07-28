@@ -68,6 +68,13 @@ type wbCallResult struct {
 	err  error
 }
 
+func wbClientProfileHandoff(profile clientProfile) map[string]any {
+	return map[string]any{
+		"name": profile.Name, "profile": profile.ID, "key": profile.RecoveryKey,
+		"generation": profile.RecoveryGeneration, "provider": "wbstream",
+	}
+}
+
 type wbLoginManager struct {
 	mu sync.Mutex
 
@@ -483,6 +490,42 @@ func registerWBLoginRoutes(mux *http.ServeMux, login *wbLoginManager, username, 
 		}
 		writeJSON(w, http.StatusOK, request)
 	})
+	mux.HandleFunc("POST /api/wb-creator/profiles/{id}/start", func(w http.ResponseWriter, r *http.Request) {
+		if !authenticateCreatorRequest(login, r) {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "creator authentication required"})
+			return
+		}
+		if cp == nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "client control plane is unavailable"})
+			return
+		}
+		profileID := r.PathValue("id")
+		profile, ok := cp.profile(profileID)
+		if !ok || profile.Config.Mode != "wbstream" || !profile.Enabled ||
+			(profile.ExpiresAt != nil && time.Now().After(*profile.ExpiresAt)) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "WB client profile is unavailable"})
+			return
+		}
+		for _, session := range cp.listSessions() {
+			if session.ClientID == profileID && isActiveState(session.Status.State) {
+				w.Header().Set("Cache-Control", "no-store")
+				response := map[string]any{"state": "already-running"}
+				if profile.CurrentInvite != "" {
+					response["inviteLink"] = profile.CurrentInvite
+					response["clientProfile"] = wbClientProfileHandoff(profile)
+				}
+				writeJSON(w, http.StatusOK, response)
+				return
+			}
+		}
+		go func() {
+			if _, err := cp.startSession(sessionInput{ClientID: profileID}); err != nil {
+				cp.events.add("error", "wb-creator", "Android could not start the WB client profile", profileID)
+			}
+		}()
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, http.StatusAccepted, map[string]string{"state": "starting"})
+	})
 	mux.HandleFunc("POST /api/wb-creator/commands/{id}/invite", func(w http.ResponseWriter, r *http.Request) {
 		if !authenticateCreatorRequest(login, r) {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "creator authentication required"})
@@ -502,10 +545,7 @@ func registerWBLoginRoutes(mux *http.ServeMux, login *wbLoginManager, username, 
 		response := map[string]any{"inviteLink": link}
 		if cp != nil {
 			if profile, ok := cp.profile(profileID); ok && profile.Config.Mode == "wbstream" {
-				response["clientProfile"] = map[string]any{
-					"name": profile.Name, "profile": profile.ID, "key": profile.RecoveryKey,
-					"generation": profile.RecoveryGeneration, "provider": "wbstream",
-				}
+				response["clientProfile"] = wbClientProfileHandoff(profile)
 			}
 		}
 		w.Header().Set("Cache-Control", "no-store")

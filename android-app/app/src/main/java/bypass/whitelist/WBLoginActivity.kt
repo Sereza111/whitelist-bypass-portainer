@@ -52,6 +52,8 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
     private var creatorId = ""
     private var deviceSecret = ""
     private var pendingRequestId = ""
+	private var requestedProfileId = ""
+	private var profileStartIssued = false
     private var destroyed = false
 	private var autoCreateStartedAt = 0L
 	private var autoCreateClicked = false
@@ -87,6 +89,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
         inviteSubmit.setOnClickListener { submitInvite() }
 
         val input = intent?.data
+		requestedProfileId = intent?.getStringExtra(EXTRA_START_PROFILE).orEmpty().trim()
         val server = input?.getQueryParameter("server").orEmpty().trimEnd('/')
         val token = input?.getQueryParameter("token").orEmpty()
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
@@ -115,6 +118,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
         } else {
             status.setText(R.string.wb_creator_ready_help)
             mainHandler.post(commandPoll)
+			requestSelectedProfileStart()
         }
         webView.loadUrl(WB_LOGIN_URL)
     }
@@ -182,9 +186,53 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 				trace("pair", "stored creator=${creatorId.takeLast(8)}")
                 status.setText(R.string.wb_creator_ready_help)
                 mainHandler.post(commandPoll)
+				requestSelectedProfileStart()
             }
         }
     }
+
+	override fun onNewIntent(intent: Intent) {
+		super.onNewIntent(intent)
+		setIntent(intent)
+		val profile = intent.getStringExtra(EXTRA_START_PROFILE).orEmpty().trim()
+		if (CREATOR_RE.matches(profile)) {
+			requestedProfileId = profile
+			profileStartIssued = false
+			requestSelectedProfileStart()
+		}
+	}
+
+	private fun requestSelectedProfileStart() {
+		if (profileStartIssued || !CREATOR_RE.matches(requestedProfileId) ||
+			!CREATOR_RE.matches(creatorId) || !TOKEN_RE.matches(deviceSecret) || requestRunning.get()
+		) return
+		profileStartIssued = true
+		if (!requestRunning.compareAndSet(false, true)) {
+			profileStartIssued = false
+			return
+		}
+		status.setText(R.string.wb_creator_requesting_profile)
+		trace("client", "start-request")
+		executor.execute {
+			val response = post("/api/wb-creator/profiles/$requestedProfileId/start", "", deviceSecret, creatorId)
+			mainHandler.post {
+				requestRunning.set(false)
+				trace("client", "start-http=${response.code}${response.transportError.takeIf { it.isNotEmpty() }?.let { " error=$it" }.orEmpty()}")
+				when (response.code) {
+					HttpURLConnection.HTTP_ACCEPTED -> status.setText(R.string.wb_creator_waiting_for_command)
+					HttpURLConnection.HTTP_OK -> {
+						val body = runCatching { JSONObject(response.body) }.getOrNull()
+						val link = body?.optString("inviteLink").orEmpty()
+						if (link.isNotEmpty()) installClientProfile(response.body, link)
+						val local = Prefs.savedDestinations.firstOrNull { it.recoveryProfile == requestedProfileId }
+						if (local != null) openClientAndConnect()
+						else status.setText(R.string.wb_creator_waiting_for_command)
+					}
+					else -> status.text = response.message.ifBlank { getString(R.string.wb_creator_profile_start_failed) }
+				}
+			}
+		}
+	}
 
     private fun pollCommand() {
         if (!requestRunning.compareAndSet(false, true)) return
@@ -345,6 +393,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 	private fun openClientAndConnect() {
 		val intent = Intent(this, MainActivity::class.java).apply {
 			action = MainActivity.ACTION_AUTO_START
+			putExtra(MainActivity.EXTRA_USE_EXISTING_WB_INVITE, true)
 			addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP)
 		}
 		startActivity(intent)
@@ -418,6 +467,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
         private const val KEY_DEVICE_SECRET = "device_secret"
         private const val KEY_DEVICE_ID = "device_id"
 		private const val KEY_AUTO_CONNECT = "auto_connect_client"
+		const val EXTRA_START_PROFILE = "bypass.whitelist.extra.START_WB_PROFILE"
         private val TOKEN_RE = Regex("^[A-Za-z0-9_-]{32,128}$")
         private val CREATOR_RE = Regex("^[A-Za-z0-9._-]{8,128}$")
         private val ROOM_RE = Regex("^[A-Za-z0-9_-]{3,256}$")

@@ -356,6 +356,16 @@ class MainActivity :
             fullReset()
             return
         }
+		if (config.platform == CallPlatform.WBSTREAM && WBLoginActivity.hasBinding(this) &&
+			!config.recoveryProfile.isNullOrBlank()
+		) {
+			val intent = Intent(this, WBLoginActivity::class.java).apply {
+				putExtra(WBLoginActivity.EXTRA_START_PROFILE, config.recoveryProfile)
+				addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+			}
+			startActivity(intent)
+			return
+		}
         startJoinFor(config)
     }
 
@@ -530,11 +540,15 @@ class MainActivity :
 			handleRecoveryUpdate(intent.getStringExtra(RecoveryNotificationListener.EXTRA_DESTINATION_ID))
 			return
 		}
-        if (intent?.action != ACTION_AUTO_START) return
+		if (intent?.action != ACTION_AUTO_START) return
         intent.action = null
+		val useExistingWBInvite = intent.getBooleanExtra(EXTRA_USE_EXISTING_WB_INVITE, false)
         val isConnecting = lastStatus == VpnStatus.CONNECTING
         if (!connected && !isConnecting && !TunnelServiceState.isAnyTunnelComponentRunning(this)) {
-            Prefs.activeDestination?.let(::onConnectPressed) ?: run {
+			Prefs.activeDestination?.let { config ->
+				if (useExistingWBInvite && config.platform == CallPlatform.WBSTREAM) startJoinFor(config)
+				else onConnectPressed(config)
+			} ?: run {
                 Toast.makeText(this, R.string.error_no_destination, Toast.LENGTH_SHORT).show()
             }
         } else if (connected) {
@@ -1040,6 +1054,7 @@ class MainActivity :
 		private const val MOBILE_INVITE_SCHEME = "wlb"
 		private const val MOBILE_INVITE_HOST = "import"
         const val ACTION_AUTO_START = "bypass.whitelist.AUTO_START"
+		const val EXTRA_USE_EXISTING_WB_INVITE = "bypass.whitelist.extra.USE_EXISTING_WB_INVITE"
 		const val ACTION_RECOVERY_UPDATE = "bypass.whitelist.OPEN_RECOVERY"
         private const val SUB_PAGE_TAG = "sub_page"
         private const val STATE_CURRENT_TAB_ID = "current_tab_id"
