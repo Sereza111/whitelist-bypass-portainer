@@ -40,6 +40,14 @@ func profileInviteReady(profile clientProfile) bool {
 	return profile.CurrentInvite != "" && profile.InviteGeneration == profile.RecoveryGeneration
 }
 
+func profileBootstrapInvite(profile clientProfile) string {
+	if profile.InviteGeneration > 0 && strings.EqualFold(profile.Config.Mode, "wbstream") &&
+		validMobileInviteLink("wbstream", profile.CurrentInvite) {
+		return profile.CurrentInvite
+	}
+	return ""
+}
+
 type panelSettings struct {
 	RecoveryRecipient  string     `json:"recoveryRecipient,omitempty"`
 	RecoveryVerifiedAt *time.Time `json:"recoveryVerifiedAt,omitempty"`
@@ -445,11 +453,20 @@ func (cp *controlPlane) startSession(input sessionInput) (sessionView, error) {
 	if input.Config != nil {
 		config = *input.Config
 	}
-	profile.RecoveryGeneration++
-	cp.profiles[profile.ID] = profile
-	if err := cp.saveLocked(); err != nil {
-		cp.mu.Unlock()
-		return sessionView{}, fmt.Errorf("persist recovery generation: %w", err)
+	bootstrapInvite := ""
+	if strings.EqualFold(config.Mode, "wbstream") {
+		bootstrapInvite = profileBootstrapInvite(profile)
+	}
+	if bootstrapInvite == "" {
+		profile.RecoveryGeneration++
+		cp.profiles[profile.ID] = profile
+		if err := cp.saveLocked(); err != nil {
+			cp.mu.Unlock()
+			return sessionView{}, fmt.Errorf("persist recovery generation: %w", err)
+		}
+	} else {
+		config.ExistingLink = bootstrapInvite
+		config.DeviceInvite = true
 	}
 	config.RecoveryProfile = profile.ID
 	config.RecoveryName = profile.Name
@@ -477,6 +494,9 @@ func (cp *controlPlane) startSession(input sessionInput) (sessionView, error) {
 		delete(cp.sessions, id)
 		cp.mu.Unlock()
 		return sessionView{}, err
+	}
+	if bootstrapInvite != "" {
+		cp.events.add("info", "wb-creator", "Reused the last validated WB room as the whitelist bootstrap", profile.ID)
 	}
 	if session.AutoRestart {
 		go cp.superviseSession(session)
@@ -524,17 +544,25 @@ func (cp *controlPlane) superviseSession(session *managedSession) {
 				cp.mu.Unlock()
 				return
 			}
-			profile.RecoveryGeneration++
-			cp.profiles[profile.ID] = profile
-			if err := cp.saveLocked(); err != nil {
-				cp.mu.Unlock()
-				continue
+			session.StateMu.Lock()
+			config := session.Config
+			bootstrapInvite := profileBootstrapInvite(profile)
+			if bootstrapInvite == "" {
+				profile.RecoveryGeneration++
+				cp.profiles[profile.ID] = profile
+				if err := cp.saveLocked(); err != nil {
+					session.StateMu.Unlock()
+					cp.mu.Unlock()
+					continue
+				}
+				config.ExistingLink = ""
+				config.DeviceInvite = false
+			} else {
+				config.ExistingLink = bootstrapInvite
+				config.DeviceInvite = true
 			}
 			cp.mu.Unlock()
-			session.StateMu.Lock()
 			session.Generation = profile.RecoveryGeneration
-			config := session.Config
-			config.ExistingLink = ""
 			config.RecoveryGeneration = session.Generation
 			session.NextRetryAt = nil
 			session.StateMu.Unlock()

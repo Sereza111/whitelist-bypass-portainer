@@ -14,6 +14,31 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
+## Active handoff (2026-07-28, alpha.30 WB whitelist bootstrap candidate)
+
+- The alpha.29 screenshot is external-only and must never be committed. It
+  proves the matching APK was installed, the WB UI created a room, and direct
+  Manager polling consistently failed with `ConnectException` while the phone
+  was intentionally behind an active whitelist. Public Manager DNS/TLS/health
+  remained healthy from an unrestricted network.
+- Direct creator HTTPS cannot be the bootstrap dependency under a whitelist.
+  Manager now reuses the last validated WB invitation without advancing the
+  generation, auto-starts enabled WB bootstrap relays on boot, and
+  republishes that invitation for the current generation only after the relay
+  actually joins.
+- Android first tries Manager normally. After three direct failures for a
+  selected managed WB profile, it starts the saved confirmed WB room. Once the
+  local tunnel exists, creator commands and profile sync prefer authenticated
+  local SOCKS and reach Manager through the working relay; unrestricted phones
+  retain the physical-network fallback.
+- Reusing a confirmed room preserves the only available control channel and
+  avoids creating an unreachable one-participant replacement. A profile with
+  no previously validated room still needs one unrestricted bootstrap pairing;
+  no cookie-free design can transmit its first unknown room identifier without
+  some phone-to-Manager channel.
+- Do not research or reproduce WBAAS or `slide-v3`. WB cookies/tokens stay on
+  Android and Manager accepts only validated invitation links.
+
 ## Active handoff (2026-07-28, alpha.29 WB Manager reachability candidate)
 
 - The external-only alpha.28 field log `relay (26).log` and its screenshot

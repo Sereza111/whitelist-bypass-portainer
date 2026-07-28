@@ -36,6 +36,31 @@ func TestNormalizeRequest(t *testing.T) {
 	}
 }
 
+func TestProfileBootstrapInviteUsesOnlyValidatedWBRoom(t *testing.T) {
+	profile := clientProfile{
+		Config:           sessionRequest{Mode: "wbstream"},
+		CurrentInvite:    "wbstream://test-bootstrap-room",
+		InviteGeneration: 2,
+	}
+	if got := profileBootstrapInvite(profile); got != profile.CurrentInvite {
+		t.Fatalf("bootstrap invite=%q", got)
+	}
+	profile.CurrentInvite = "https://example.test/not-wb"
+	if got := profileBootstrapInvite(profile); got != "" {
+		t.Fatalf("untrusted bootstrap accepted: %q", got)
+	}
+	profile.Config.Mode = "vk"
+	profile.CurrentInvite = "wbstream://test-bootstrap-room"
+	if got := profileBootstrapInvite(profile); got != "" {
+		t.Fatalf("cross-provider bootstrap accepted: %q", got)
+	}
+	profile.Config.Mode = "wbstream"
+	profile.InviteGeneration = 0
+	if got := profileBootstrapInvite(profile); got != "" {
+		t.Fatalf("unvalidated bootstrap accepted: %q", got)
+	}
+}
+
 func TestWatchLinkPublishesReadinessOnce(t *testing.T) {
 	m := newManagerAt(t.TempDir())
 	cmd := &exec.Cmd{}

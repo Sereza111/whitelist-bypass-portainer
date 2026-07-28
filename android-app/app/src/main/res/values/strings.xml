@@ -220,6 +220,7 @@
     <string name="wb_creator_profile_start_failed">Manager could not start this WB profile.</string>
     <string name="wb_creator_invite_failed">Manager rejected the invitation. Create a fresh call and retry.</string>
 	<string name="wb_creator_manager_offline">Manager %1$s is unreachable from this phone. Check the phone network, private DNS or VPN. If the address is wrong, create and scan a fresh WB creator QR.</string>
+	<string name="wb_creator_bootstrap_starting">The public Manager is blocked by the active whitelist. Rejoining the last confirmed WB room first; Manager control will continue through that tunnel.</string>
 	<string name="wb_creator_binding_required_title">WB creator is not paired</string>
 	<string name="wb_creator_binding_required_message">This is a Manager-controlled WB profile, so its saved room cannot be started directly. Open Providers → WB Stream in Manager, create a fresh creator QR and scan it on this phone.</string>
     <string name="wb_login_cancel">Cancel</string>

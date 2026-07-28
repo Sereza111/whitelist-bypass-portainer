@@ -25,7 +25,7 @@ import (
 )
 
 var (
-	Version     = "0.5.0-alpha.29"
+	Version     = "0.5.0-alpha.30"
 	BuildCommit = "unknown"
 	BuildTime   = "unknown"
 )
@@ -625,6 +625,19 @@ func main() {
 		}
 		if createErr != nil {
 			log.Printf("[manager] auto-start failed: %v", createErr)
+		}
+	}
+
+	// A strict whitelist cannot reach the public Manager before the tunnel is
+	// up. Keep the last validated WB room available as a bootstrap rendezvous so
+	// Android can restore the data path first and use it for later control-plane
+	// requests. Fresh profiles still require the normal one-time creator flow.
+	for _, profile := range cp.listProfiles() {
+		if !profile.Enabled || profileBootstrapInvite(profile) == "" {
+			continue
+		}
+		if _, startErr := cp.startSession(sessionInput{ClientID: profile.ID}); startErr != nil {
+			log.Printf("[manager] WB bootstrap auto-start skipped profile=%s: %v", profile.ID, startErr)
 		}
 	}
 

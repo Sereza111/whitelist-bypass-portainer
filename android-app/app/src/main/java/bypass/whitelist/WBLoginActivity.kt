@@ -59,6 +59,8 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 	private var autoCreateClicked = false
 	private var pollCount = 0
 	private var consecutiveManagerFailures = 0
+	private var bootstrapStarted = false
+	private var lastManagerRoute = ""
 	private val diagnosticLines = ArrayDeque<String>()
 	private val profileStartRetry = Runnable { requestSelectedProfileStart() }
 
@@ -431,23 +433,25 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 
     private fun post(path: String, body: String, secret: String, id: String): ApiResponse {
         return runCatching {
-			val connection = ManagerNetwork.open(this, URL(serverOrigin + path))
-            connection.requestMethod = "POST"
-            connection.connectTimeout = 15_000
-            connection.readTimeout = 25_000
-            connection.setRequestProperty("Authorization", "Bearer $secret")
-            if (id.isNotEmpty()) connection.setRequestProperty("X-WLB-Creator-ID", id)
-            if (body.isNotEmpty()) {
-                connection.doOutput = true
-                connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
-                connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
-            }
-            val code = connection.responseCode
-            val responseBody = (if (code >= 400) connection.errorStream else connection.inputStream)
-                ?.bufferedReader()?.use { it.readText().take(4096) }.orEmpty()
-            val message = runCatching { JSONObject(responseBody).optString("error") }.getOrDefault("").take(200)
-            connection.disconnect()
-			ApiResponse(code, responseBody, message, "")
+			ManagerNetwork.execute(this, URL(serverOrigin + path)) { connection ->
+				connection.requestMethod = "POST"
+				connection.connectTimeout = 15_000
+				connection.readTimeout = 25_000
+				connection.setRequestProperty("Authorization", "Bearer $secret")
+				if (id.isNotEmpty()) connection.setRequestProperty("X-WLB-Creator-ID", id)
+				if (body.isNotEmpty()) {
+					connection.doOutput = true
+					connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+					connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+				}
+				val code = connection.responseCode
+				val responseBody = (if (code >= 400) connection.errorStream else connection.inputStream)
+					?.bufferedReader()?.use { it.readText().take(4096) }.orEmpty()
+				val message = runCatching { JSONObject(responseBody).optString("error") }
+					.getOrDefault("").take(200)
+				connection.disconnect()
+				ApiResponse(code, responseBody, message, "")
+			}
 		}.getOrElse { ApiResponse(0, "", "", it.javaClass.simpleName.take(48)) }
     }
 
@@ -461,6 +465,11 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 	}
 
 	private fun recordManagerResponse(response: ApiResponse) {
+		val route = ManagerNetwork.routeHint(this)
+		if (route != lastManagerRoute) {
+			lastManagerRoute = route
+			trace("manager", "route=$route")
+		}
 		if (response.code != 0) {
 			if (consecutiveManagerFailures >= MANAGER_OFFLINE_THRESHOLD) {
 				trace("manager", "online host=${managerLabel(serverOrigin)}")
@@ -471,8 +480,25 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 		consecutiveManagerFailures++
 		if (consecutiveManagerFailures == MANAGER_OFFLINE_THRESHOLD) {
 			trace("manager", "offline host=${managerLabel(serverOrigin)} retries=$consecutiveManagerFailures")
-			status.text = getString(R.string.wb_creator_manager_offline, managerLabel(serverOrigin))
+			if (!startSavedBootstrap()) {
+				status.text = getString(R.string.wb_creator_manager_offline, managerLabel(serverOrigin))
+			}
 		}
+	}
+
+	private fun startSavedBootstrap(): Boolean {
+		if (bootstrapStarted || !CREATOR_RE.matches(requestedProfileId) ||
+			TunnelServiceState.isAnyTunnelComponentRunning(this)
+		) return false
+		val saved = Prefs.savedDestinations.firstOrNull {
+			it.recoveryProfile == requestedProfileId && isSafeInvite(it.url)
+		} ?: return false
+		bootstrapStarted = true
+		Prefs.activeDestinationId = saved.id
+		trace("bootstrap", "starting saved WB room before Manager control")
+		status.setText(R.string.wb_creator_bootstrap_starting)
+		openClientAndConnect()
+		return true
 	}
 
 	@Suppress("DEPRECATION")

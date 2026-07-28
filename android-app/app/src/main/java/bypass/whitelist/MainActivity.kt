@@ -560,7 +560,7 @@ class MainActivity :
 			} ?: run {
                 Toast.makeText(this, R.string.error_no_destination, Toast.LENGTH_SHORT).show()
             }
-        } else if (connected) {
+        } else if (connected && !useExistingWBInvite) {
             onDisconnectPressed()
         }
     }

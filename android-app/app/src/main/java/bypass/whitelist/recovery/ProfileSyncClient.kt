@@ -23,32 +23,33 @@ object ProfileSyncClient {
         ) return null
 
         return runCatching {
-			val connection = ManagerNetwork.open(context, URL(syncUrl))
-            connection.requestMethod = "POST"
-            connection.connectTimeout = 10_000
-            connection.readTimeout = 15_000
-            connection.doOutput = true
-            connection.setRequestProperty("Authorization", "Bearer $key")
-            connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
-            connection.setRequestProperty("Cache-Control", "no-cache")
-            val request = JSONObject().put("afterGeneration", config.recoveryGeneration).toString()
-            connection.outputStream.use { it.write(request.toByteArray(Charsets.UTF_8)) }
-            val code = connection.responseCode
-            if (code != HttpURLConnection.HTTP_OK) {
-                connection.disconnect()
-                return@runCatching null
-            }
-            val body = connection.inputStream.bufferedReader().use { it.readText().take(4096) }
-            connection.disconnect()
-            val payload = JSONObject(body)
-            val provider = payload.optString("provider")
-            val generation = payload.optInt("generation", -1)
-            val link = payload.optString("link").trim()
-            val platform = CallPlatform.fromId(provider) ?: return@runCatching null
-            if (platform != config.platform || generation <= config.recoveryGeneration ||
-                !CallPlatform.isSafeInviteLink(platform, link)
-            ) return@runCatching null
-            Update(generation, link)
+			ManagerNetwork.execute(context, URL(syncUrl)) { connection ->
+				connection.requestMethod = "POST"
+				connection.connectTimeout = 10_000
+				connection.readTimeout = 15_000
+				connection.doOutput = true
+				connection.setRequestProperty("Authorization", "Bearer $key")
+				connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+				connection.setRequestProperty("Cache-Control", "no-cache")
+				val payloadBody = JSONObject().put("afterGeneration", config.recoveryGeneration).toString()
+				connection.outputStream.use { it.write(payloadBody.toByteArray(Charsets.UTF_8)) }
+				val code = connection.responseCode
+				if (code != HttpURLConnection.HTTP_OK) {
+					connection.disconnect()
+					return@execute null
+				}
+				val responseBody = connection.inputStream.bufferedReader().use { it.readText().take(4096) }
+				connection.disconnect()
+				val payload = JSONObject(responseBody)
+				val provider = payload.optString("provider")
+				val generation = payload.optInt("generation", -1)
+				val link = payload.optString("link").trim()
+				val platform = CallPlatform.fromId(provider) ?: return@execute null
+				if (platform != config.platform || generation <= config.recoveryGeneration ||
+					!CallPlatform.isSafeInviteLink(platform, link)
+				) return@execute null
+				Update(generation, link)
+			}
         }.getOrNull()
     }
 }
