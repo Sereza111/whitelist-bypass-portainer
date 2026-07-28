@@ -66,16 +66,6 @@ func main() {
 	}
 	log.Printf("[auth] room=%s server=%s", roomID, serverURL)
 
-	if *writeFile != "" {
-		f, err := os.OpenFile(*writeFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			log.Fatalf("Failed to open write-file: %v", err)
-		}
-		fmt.Fprintln(f, "wbstream://"+roomID)
-		f.Close()
-		log.Printf("[config] Wrote join link to %s", *writeFile)
-	}
-
 	obf, err := tunnel.NewTunnelObfuscator(tunnel.DeriveSecretFromJoinLink(roomID))
 	if err != nil {
 		log.Fatalf("[obf] init failed: %v", err)
@@ -137,6 +127,26 @@ func main() {
 	if err := sess.Start(); err != nil {
 		sess.Close()
 		log.Fatalf("[session] start failed: %v", err)
+	}
+	// For device-assisted sessions the Manager treats this file as a readiness
+	// barrier. Publish it only after the server relay has successfully joined
+	// WB; process creation alone is not sufficient to hand the room to Android.
+	if *writeFile != "" {
+		f, err := os.OpenFile(*writeFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			sess.Close()
+			log.Fatalf("Failed to open write-file: %v", err)
+		}
+		if _, err := fmt.Fprintln(f, "wbstream://"+roomID); err != nil {
+			_ = f.Close()
+			sess.Close()
+			log.Fatalf("Failed to write ready link: %v", err)
+		}
+		if err := f.Close(); err != nil {
+			sess.Close()
+			log.Fatalf("Failed to close ready link: %v", err)
+		}
+		log.Printf("[config] Wrote ready join link to %s", *writeFile)
 	}
 	<-sess.Done()
 	log.Printf("[session] call ended; Manager must request a fresh Android invitation")

@@ -1,5 +1,6 @@
 package bypass.whitelist.recovery
 
+import android.content.Context
 import bypass.whitelist.tunnel.CallConfig
 import bypass.whitelist.tunnel.CallPlatform
 import org.json.JSONObject
@@ -10,7 +11,7 @@ object ProfileSyncClient {
 
     data class Update(val generation: Int, val link: String)
 
-    fun poll(config: CallConfig): Update? {
+    fun poll(context: Context, config: CallConfig): Update? {
         val syncUrl = config.recoverySyncUrl?.takeIf { it.startsWith("https://") } ?: return null
         val key = config.recoveryKey?.takeIf { it.length in 24..256 } ?: return null
         val profile = config.recoveryProfile?.takeIf { it.length in 8..128 } ?: return null
@@ -22,7 +23,7 @@ object ProfileSyncClient {
         ) return null
 
         return runCatching {
-            val connection = URL(syncUrl).openConnection() as HttpURLConnection
+			val connection = ManagerNetwork.open(context, URL(syncUrl))
             connection.requestMethod = "POST"
             connection.connectTimeout = 10_000
             connection.readTimeout = 15_000

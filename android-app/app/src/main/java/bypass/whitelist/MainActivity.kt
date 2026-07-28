@@ -240,7 +240,10 @@ class MainActivity :
         if (CALL_LINK.isNotEmpty() && !TunnelServiceState.isAnyTunnelComponentRunning(this)) {
             startJoinFor(CallConfig.newWith(name = CallConfig.suggestNameFor(CALL_LINK), url = CALL_LINK))
         } else if (Prefs.connectOnStart && !TunnelServiceState.isAnyTunnelComponentRunning(this)) {
-            Prefs.activeDestination?.let(::startJoinFor)
+            // Managed WB rooms expire and must be confirmed by Manager before
+            // every start. Route startup through the same creator gate as the
+            // visible Connect button instead of launching a saved old room.
+            Prefs.activeDestination?.let(::onConnectPressed)
         }
 
         handleIntent(intent)
@@ -356,9 +359,15 @@ class MainActivity :
             fullReset()
             return
         }
-		if (config.platform == CallPlatform.WBSTREAM && WBLoginActivity.hasBinding(this) &&
-			!config.recoveryProfile.isNullOrBlank()
-		) {
+		if (config.platform == CallPlatform.WBSTREAM && !config.recoveryProfile.isNullOrBlank()) {
+			if (!WBLoginActivity.hasBinding(this)) {
+				MaterialAlertDialogBuilder(this)
+					.setTitle(R.string.wb_creator_binding_required_title)
+					.setMessage(R.string.wb_creator_binding_required_message)
+					.setPositiveButton(android.R.string.ok, null)
+					.show()
+				return
+			}
 			val intent = Intent(this, WBLoginActivity::class.java).apply {
 				putExtra(WBLoginActivity.EXTRA_START_PROFILE, config.recoveryProfile)
 				addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP)
@@ -1003,7 +1012,7 @@ class MainActivity :
         pendingConnectConfig = null
         if (pendingConfig != null) {
             appendLog("Previous session stopped, starting new connection")
-            startJoinFor(pendingConfig)
+			onConnectPressed(pendingConfig)
         }
     }
 

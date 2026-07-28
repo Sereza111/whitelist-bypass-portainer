@@ -14,6 +14,35 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
+## Active handoff (2026-07-28, alpha.29 WB Manager reachability candidate)
+
+- The external-only alpha.28 field log `relay (26).log` and its screenshot
+  must never be committed. Smart correctly rejected a DC with no inbound peer
+  data and switched to Video+KCP, but Video also received zero bytes. Android
+  simultaneously reported repeated Manager `ConnectException`; only the phone
+  was present in the WB call, so this is not another carrier-selection failure.
+- The public Manager health endpoint was externally reachable after the field
+  report. Android resume mode now displays only the sanitized saved Manager
+  hostname, counts transport failures, and shows a clear Manager-offline /
+  fresh-QR instruction after three consecutive failures.
+- Creator commands and profile sync now open Manager HTTPS over a validated
+  non-VPN Android network when available. This prevents the control plane from
+  being captured by the app's own dead tunnel and preserves recovery when the
+  active call has no server peer.
+- A Manager-controlled saved WB profile can no longer bypass creator readiness
+  when its Android binding is missing. Both visible Connect and connect-on-start
+  go through the creator gate; only the internal fresh-handoff action may start
+  the just-confirmed invitation directly.
+- Manager no longer advances WB `InviteGeneration` immediately after spawning
+  the relay process. The WB relay publishes its ready-link only after
+  `Session.Start()` succeeds, and `watchLink` performs the profile callback once
+  that file appears. Android stays on HTTP 202 until the server has joined.
+- Do not change DC/Video/KCP based on this trace. First install matching
+  alpha.29, scan a fresh creator QR if the displayed host is wrong, and verify
+  that Android receives HTTP 204/200 before creating a call.
+- Do not research or reproduce WBAAS or `slide-v3`. WB cookies/tokens stay on
+  Android and Manager accepts only validated invitation links.
+
 ## Active handoff (2026-07-28, alpha.28 WB readiness + DC validation candidate)
 
 - The external-only alpha.27 field log `relay (25).log` reached Smart DC and

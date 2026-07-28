@@ -197,7 +197,7 @@ class HeadlessSessionService : Service() {
 		val config = Prefs.activeDestination ?: return
 		if (!canSyncProfile(config) || !syncBusy.compareAndSet(false, true)) return
 		thread(name = "profile-invite-sync") {
-			val update = ProfileSyncClient.poll(config)
+			val update = ProfileSyncClient.poll(this, config)
 			syncHandler.post {
 				syncBusy.set(false)
 				if (update != null && !stopInProgress && !isDestroyed) {

@@ -25,7 +25,7 @@ import (
 )
 
 var (
-	Version     = "0.5.0-alpha.28"
+	Version     = "0.5.0-alpha.29"
 	BuildCommit = "unknown"
 	BuildTime   = "unknown"
 )
@@ -350,14 +350,10 @@ func (m *manager) startDeviceAssisted(normalized sessionRequest) error {
 		normalized.ExistingLink = link
 		normalized.DeviceInvite = true
 		m.link = link
-		callback := m.onLinkReady
 		cmd, launchErr := m.startCommandLocked(normalized, true)
 		m.mu.Unlock()
 		if launchErr != nil {
 			return
-		}
-		if callback != nil {
-			callback(link)
 		}
 		go m.wait(cmd)
 		go m.watchLink(cmd)
@@ -425,6 +421,7 @@ func (m *manager) wait(cmd *exec.Cmd) {
 func (m *manager) watchLink(cmd *exec.Cmd) {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
+	deliveredLink := ""
 	for range ticker.C {
 		m.mu.Lock()
 		if m.cmd != cmd {
@@ -441,14 +438,22 @@ func (m *manager) watchLink(cmd *exec.Cmd) {
 			continue
 		}
 		link := lines[len(lines)-1]
+		var callback func(string)
 		m.mu.Lock()
 		if m.cmd == cmd {
 			m.link = link
 			if m.state == "running" {
 				m.state = "link-ready"
 			}
+			if link != deliveredLink {
+				deliveredLink = link
+				callback = m.onLinkReady
+			}
 		}
 		m.mu.Unlock()
+		if callback != nil {
+			callback(link)
+		}
 	}
 }
 
@@ -538,7 +543,8 @@ func deriveRuntimeState(fallback string, lines []string) string {
 			return "degraded"
 		case strings.Contains(line, "=== TUNNEL CONNECTED ===") || strings.Contains(line, "handshake status=ok"):
 			return "connected"
-		case strings.Contains(line, "CALL CREATED") || strings.Contains(line, "Wrote call link"):
+		case strings.Contains(line, "CALL CREATED") || strings.Contains(line, "Wrote call link") ||
+			strings.Contains(line, "Wrote ready join link"):
 			return "waiting-for-client"
 		}
 	}

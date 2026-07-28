@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -33,6 +34,45 @@ func TestNormalizeRequest(t *testing.T) {
 	if _, err := m.normalizeRequest(sessionRequest{Mode: "unknown"}); err == nil {
 		t.Fatal("unsupported mode accepted")
 	}
+}
+
+func TestWatchLinkPublishesReadinessOnce(t *testing.T) {
+	m := newManagerAt(t.TempDir())
+	cmd := &exec.Cmd{}
+	ready := make(chan string, 2)
+	m.mu.Lock()
+	m.cmd = cmd
+	m.state = "running"
+	m.onLinkReady = func(link string) { ready <- link }
+	m.mu.Unlock()
+
+	go m.watchLink(cmd)
+	const link = "wbstream://test-ready-room"
+	if err := os.WriteFile(m.linkFile, []byte(link+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-ready:
+		if got != link {
+			t.Fatalf("callback link=%q", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ready-link callback was not delivered")
+	}
+
+	m.mu.Lock()
+	if m.link != link || m.state != "link-ready" {
+		t.Fatalf("manager readiness link=%q state=%q", m.link, m.state)
+	}
+	m.mu.Unlock()
+	select {
+	case duplicate := <-ready:
+		t.Fatalf("ready-link callback repeated: %q", duplicate)
+	case <-time.After(700 * time.Millisecond):
+	}
+	m.mu.Lock()
+	m.cmd = nil
+	m.mu.Unlock()
 }
 
 func TestEncodeMobileInvite(t *testing.T) {

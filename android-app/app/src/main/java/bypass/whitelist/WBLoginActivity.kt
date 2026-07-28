@@ -26,6 +26,7 @@ import com.google.android.material.materialswitch.MaterialSwitch
 import bypass.whitelist.tunnel.CallConfig
 import bypass.whitelist.tunnel.HeadlessSessionService
 import bypass.whitelist.tunnel.TunnelServiceState
+import bypass.whitelist.recovery.ManagerNetwork
 import bypass.whitelist.util.Prefs
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -57,6 +58,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 	private var autoCreateStartedAt = 0L
 	private var autoCreateClicked = false
 	private var pollCount = 0
+	private var consecutiveManagerFailures = 0
 	private val diagnosticLines = ArrayDeque<String>()
 	private val profileStartRetry = Runnable { requestSelectedProfileStart() }
 
@@ -98,7 +100,10 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 			prefs.edit().putBoolean(KEY_AUTO_CONNECT, checked).apply()
 		}
         val freshPairing = validPairing(server, token)
-		trace("boot", "version=${appVersion()} mode=${if (freshPairing) "pair" else "resume"}")
+		trace(
+			"boot",
+			"version=${appVersion()} mode=${if (freshPairing) "pair" else "resume"} manager=${managerLabel(server.ifBlank { prefs.getString(KEY_SERVER, "").orEmpty() })}",
+		)
         if (freshPairing) {
             serverOrigin = server
         } else {
@@ -166,6 +171,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
         executor.execute {
             val response = post("/api/wb-creator/pair", body, pairingToken, "")
             mainHandler.post {
+				recordManagerResponse(response)
 				trace("pair", "http=${response.code}${response.transportError.takeIf { it.isNotEmpty() }?.let { " error=$it" }.orEmpty()}")
                 if (response.code !in 200..299) {
                     fail(response.message.ifBlank { getString(R.string.wb_creator_pair_failed) })
@@ -222,6 +228,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 			val response = post("/api/wb-creator/profiles/$requestedProfileId/start", "", deviceSecret, creatorId)
 			mainHandler.post {
 				requestRunning.set(false)
+				recordManagerResponse(response)
 				trace("client", "start-http=${response.code}${response.transportError.takeIf { it.isNotEmpty() }?.let { " error=$it" }.orEmpty()}")
 				when (response.code) {
 					HttpURLConnection.HTTP_ACCEPTED -> {
@@ -239,7 +246,9 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 						}
 					}
 					else -> {
-						status.text = response.message.ifBlank { getString(R.string.wb_creator_profile_start_failed) }
+						if (response.code != 0 || consecutiveManagerFailures < MANAGER_OFFLINE_THRESHOLD) {
+							status.text = response.message.ifBlank { getString(R.string.wb_creator_profile_start_failed) }
+						}
 						if (response.code == 0 || response.code >= 500) {
 							scheduleProfileStartRetry(PROFILE_START_ERROR_RETRY_MS)
 						}
@@ -261,6 +270,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
             val response = post("/api/wb-creator/commands/next", "", deviceSecret, creatorId)
             mainHandler.post {
                 requestRunning.set(false)
+				recordManagerResponse(response)
 				pollCount++
 				if (response.code == HttpURLConnection.HTTP_NO_CONTENT) {
 					if (pollCount == 1 || pollCount % 10 == 0) trace("poll", "http=204 count=$pollCount")
@@ -358,6 +368,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
         executor.execute {
             val response = post("/api/wb-creator/commands/$requestId/invite", body, deviceSecret, creatorId)
             mainHandler.post {
+				recordManagerResponse(response)
 				trace("invite", "http=${response.code}${response.transportError.takeIf { it.isNotEmpty() }?.let { " error=$it" }.orEmpty()}")
                 requestRunning.set(false)
                 inviteSubmit.isEnabled = true
@@ -377,7 +388,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 						status.setText(R.string.wb_creator_waiting_for_relay)
 						if (autoConnect.isChecked) scheduleProfileStartRetry()
 					}
-                } else {
+				} else if (response.code != 0 || consecutiveManagerFailures < MANAGER_OFFLINE_THRESHOLD) {
                     status.text = response.message.ifBlank { getString(R.string.wb_creator_invite_failed) }
                 }
             }
@@ -420,7 +431,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 
     private fun post(path: String, body: String, secret: String, id: String): ApiResponse {
         return runCatching {
-            val connection = URL(serverOrigin + path).openConnection() as HttpURLConnection
+			val connection = ManagerNetwork.open(this, URL(serverOrigin + path))
             connection.requestMethod = "POST"
             connection.connectTimeout = 15_000
             connection.readTimeout = 25_000
@@ -447,6 +458,21 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 		while (diagnosticLines.size > MAX_DIAGNOSTIC_LINES) diagnosticLines.removeFirst()
 		if (::diagnostics.isInitialized) diagnostics.text = diagnosticLines.joinToString("\n")
 		Log.i("WB_CREATOR", line)
+	}
+
+	private fun recordManagerResponse(response: ApiResponse) {
+		if (response.code != 0) {
+			if (consecutiveManagerFailures >= MANAGER_OFFLINE_THRESHOLD) {
+				trace("manager", "online host=${managerLabel(serverOrigin)}")
+			}
+			consecutiveManagerFailures = 0
+			return
+		}
+		consecutiveManagerFailures++
+		if (consecutiveManagerFailures == MANAGER_OFFLINE_THRESHOLD) {
+			trace("manager", "offline host=${managerLabel(serverOrigin)} retries=$consecutiveManagerFailures")
+			status.text = getString(R.string.wb_creator_manager_offline, managerLabel(serverOrigin))
+		}
 	}
 
 	@Suppress("DEPRECATION")
@@ -482,6 +508,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 		private const val PROFILE_START_RETRY_MS = 1_500L
 		private const val PROFILE_START_BUSY_RETRY_MS = 500L
 		private const val PROFILE_START_ERROR_RETRY_MS = 5_000L
+		private const val MANAGER_OFFLINE_THRESHOLD = 3
 		private const val MAX_DIAGNOSTIC_LINES = 7
         private const val PREFS = "wb_creator"
         private const val KEY_SERVER = "server"
@@ -503,6 +530,9 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
             return uri.scheme == "https" && !uri.host.isNullOrBlank() && uri.userInfo == null &&
                 (uri.path.isNullOrEmpty() || uri.path == "/") && uri.query == null && uri.fragment == null
         }
+
+		private fun managerLabel(server: String): String =
+			runCatching { Uri.parse(server).host.orEmpty() }.getOrDefault("").ifBlank { "unknown" }.take(253)
 
 		private fun isTrustedWBPage(value: String): Boolean {
 			val uri = runCatching { Uri.parse(value) }.getOrNull() ?: return false
