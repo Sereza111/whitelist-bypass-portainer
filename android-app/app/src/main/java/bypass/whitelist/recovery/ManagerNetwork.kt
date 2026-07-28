@@ -35,7 +35,6 @@ object ManagerNetwork {
 		if (TunnelServiceState.isAnyTunnelComponentRunning(context)) {
 			try {
 				return synchronized(proxyLock) {
-					val previous = Authenticator.getDefault()
 					try {
 						Authenticator.setDefault(object : Authenticator() {
 							override fun getPasswordAuthentication(): PasswordAuthentication? =
@@ -49,7 +48,7 @@ object ManagerNetwork {
 						)
 						request(url.openConnection(proxy) as HttpURLConnection)
 					} finally {
-						Authenticator.setDefault(previous)
+						Authenticator.setDefault(null)
 					}
 				}
 			} catch (_: IOException) {
