@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
+	"sync"
 	"syscall"
 
 	"whitelist-bypass/relay/common"
@@ -24,7 +25,7 @@ func main() {
 	socksUser := flag.String("socks-user", "", "SOCKS5 username (optional)")
 	socksPass := flag.String("socks-pass", "", "SOCKS5 password (optional)")
 	resources := flag.String("resources", "default", "resource mode: moderate, default, unlimited")
-	tunnelMode := flag.String("tunnel-mode", "video", "tunnel mode: video, dc")
+	tunnelMode := flag.String("tunnel-mode", "smart", "tunnel mode: smart, video, dc")
 	vp8FPS := flag.Int("vp8-fps", 24, "VP8 frame rate (video mode only)")
 	vp8Batch := flag.Int("vp8-batch", 30, "VP8 batch multiplier (video mode only)")
 	dualTrack := flag.Bool("dual-track", false, "publish a second VP8 track as ScreenShare and shard outbound across both (video mode only)")
@@ -32,6 +33,9 @@ func main() {
 
 	if *roomFlag == "" {
 		log.Fatal("--room is required")
+	}
+	if *tunnelMode != wbstream.TunnelModeSmart && *tunnelMode != wbstream.TunnelModeVideo && *tunnelMode != wbstream.TunnelModeDC {
+		log.Fatalf("[config] unknown --tunnel-mode %q", *tunnelMode)
 	}
 
 	var memLimit int64
@@ -74,13 +78,24 @@ func main() {
 		ScreenShare: *dualTrack,
 		IsJoiner:    true,
 	})
+	var bridge *tunnel.RelayBridge
+	var bridgeMu sync.Mutex
 	sess.OnConnected = func(tun tunnel.DataTunnel) {
 		readBuf := common.VP8BufSize
 		if _, ok := tun.(*tunnel.DCTunnel); ok {
 			readBuf = common.DCBufSize
 		}
-		bridge := tunnel.NewRelayBridgeWithAuth(tun, "joiner", readBuf, log.Printf, *socksUser, *socksPass)
+		bridgeMu.Lock()
+		defer bridgeMu.Unlock()
+		if bridge != nil {
+			bridge.SwapTunnelWithReadBuf(tun, readBuf)
+			bridge.SetOnConfigAck(sess.MarkConfigAcked)
+			log.Printf("[smart] persistent SOCKS bridge switched carrier")
+			return
+		}
+		bridge = tunnel.NewRelayBridgeWithAuth(tun, "joiner", readBuf, log.Printf, *socksUser, *socksPass)
 		bridge.SetOnConfigAck(sess.MarkConfigAcked)
+		bridge.SetPersistentListener(true)
 		bridge.MarkReady()
 		addr := fmt.Sprintf("%s:%d", *socksHost, *socksPort)
 		go func() {
@@ -100,4 +115,9 @@ func main() {
 	<-sig
 	log.Printf("[main] shutting down")
 	sess.Close()
+	bridgeMu.Lock()
+	if bridge != nil {
+		bridge.Close()
+	}
+	bridgeMu.Unlock()
 }

@@ -54,8 +54,8 @@ class JsHookJoinFragment : Fragment(), JoinSessionShutdown {
     private val host: JoinFragmentHost?
         get() = activity as? JoinFragmentHost
 
-    private val tunnelMode: TunnelMode
-        get() = Prefs.activeTunnelMode
+    private fun tunnelMode(platform: CallPlatform): TunnelMode =
+        Prefs.activeTunnelMode.forPlatform(platform)
 
     private val hooks = mapOf(
         HookKey(false, CallPlatform.VK) to lazy { loadAsset("dc-joiner-vk.js") },
@@ -101,7 +101,7 @@ class JsHookJoinFragment : Fragment(), JoinSessionShutdown {
         )
 
         val platform = CallPlatform.fromUrl(requireArguments().getString(ARG_URL, ""))
-        relay.start(tunnelMode, platform)
+        relay.start(tunnelMode(platform), platform)
 
         toggleButton.setOnClickListener { setExpanded(!expanded) }
 
@@ -231,7 +231,7 @@ class JsHookJoinFragment : Fragment(), JoinSessionShutdown {
     }
 
     private fun hookForPlatform(platform: CallPlatform): String =
-        hooks[HookKey(tunnelMode.isPion, platform)]!!.value
+        hooks[HookKey(tunnelMode(platform).isPion, platform)]!!.value
 
     private fun stripCsp(url: String, request: WebResourceRequest): WebResourceResponse? {
         return try {
@@ -332,4 +332,3 @@ class JsHookJoinFragment : Fragment(), JoinSessionShutdown {
         }
     }
 }
-

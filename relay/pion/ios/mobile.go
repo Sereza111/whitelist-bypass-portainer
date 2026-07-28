@@ -39,7 +39,7 @@ type iosStatusEmitter struct {
 	statusFn func(string)
 }
 
-func (e *iosStatusEmitter) EmitStatus(status string)  { e.statusFn(status) }
+func (e *iosStatusEmitter) EmitStatus(status string)   { e.statusFn(status) }
 func (e *iosStatusEmitter) EmitStatusError(msg string) { e.statusFn("ERROR:" + msg) }
 
 type iosCacheStore struct {
@@ -47,10 +47,14 @@ type iosCacheStore struct {
 }
 
 func (c *iosCacheStore) Save(key string, value string) { c.callback.SaveCache(key, value) }
-func (c *iosCacheStore) Load(key string) string         { return c.callback.LoadCache(key) }
+func (c *iosCacheStore) Load(key string) string        { return c.callback.LoadCache(key) }
 
 func makeOnConnected(socksPort int, socksUser, socksPass string, logFn func(string, ...any), callback HeadlessCallback) func(tunnel.DataTunnel) {
 	return func(tun tunnel.DataTunnel) {
+		readBuf := common.VP8BufSize
+		if _, ok := tun.(*tunnel.DCTunnel); ok {
+			readBuf = common.DCBufSize
+		}
 		activeHeadless.Lock()
 		if activeHeadless.stopped {
 			activeHeadless.Unlock()
@@ -60,14 +64,9 @@ func makeOnConnected(socksPort int, socksUser, socksPass string, logFn func(stri
 		activeHeadless.Unlock()
 
 		if existing != nil {
-			existing.SwapTunnel(tun)
+			existing.SwapTunnelWithReadBuf(tun, readBuf)
 			logFn("ios: tunnel swapped after reconnect")
 			return
-		}
-
-		readBuf := common.VP8BufSize
-		if _, ok := tun.(*tunnel.DCTunnel); ok {
-			readBuf = common.DCBufSize
 		}
 		bridge := tunnel.NewRelayBridgeWithAuth(tun, "joiner", readBuf, logFn, socksUser, socksPass)
 		bridge.SetPersistentListener(true)

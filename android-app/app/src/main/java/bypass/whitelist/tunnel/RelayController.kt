@@ -32,7 +32,8 @@ class RelayController(
     fun start(mode: TunnelMode, platform: CallPlatform) {
         stop()
         isRunning = true
-        if (mode.isPion) startPion(mode, platform) else startDc()
+        val effectiveMode = mode.forPlatform(platform)
+        if (effectiveMode.isPion) startPion(effectiveMode, platform) else startDc()
     }
 
     @Synchronized

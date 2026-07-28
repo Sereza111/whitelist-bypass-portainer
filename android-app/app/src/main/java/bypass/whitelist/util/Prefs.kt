@@ -14,6 +14,11 @@ object Prefs {
 
     fun init(context: Context) {
         prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+		val stored = CallConfig.listFromJson(prefs.getString(PrefsKeys.SAVED_DESTINATIONS, "") ?: "")
+		val migrated = stored.map { it.migrateManagedWbTransportDefault() }
+		if (migrated != stored) {
+			prefs.edit { putString(PrefsKeys.SAVED_DESTINATIONS, CallConfig.listToJson(migrated)) }
+		}
     }
 
     var connectOnStart: Boolean

@@ -107,7 +107,7 @@ func main() {
 	socksUser := flag.String("socks-user", "", "optional SOCKS5 username")
 	socksPass := flag.String("socks-pass", "", "optional SOCKS5 password")
 	resources := flag.String("resources", "default", "moderate | default | unlimited")
-	tunnelMode := flag.String("tunnel-mode", "video", "tunnel mode for WB Stream: video | dc")
+	tunnelMode := flag.String("tunnel-mode", "smart", "tunnel mode: smart | video | dc (smart is WB-specific)")
 	vp8FPS := flag.Int("vp8-fps", 24, "VP8 frame rate")
 	vp8Batch := flag.Int("vp8-batch", 30, "VP8 batch multiplier")
 	dns := flag.String("dns", "1.1.1.1,8.8.8.8", "comma-separated DNS servers for the tunnel adapter")
@@ -352,7 +352,7 @@ func main() {
 		// Reconnect: swap the new tunnel behind the persistent SOCKS
 		// listener instead of binding a second one
 		if bridge != nil {
-			bridge.SwapTunnel(t)
+			bridge.SwapTunnelWithReadBuf(t, readBuf)
 			configureAdaptive()
 			log.Printf("[socks] tunnel swapped after reconnect")
 			return
@@ -377,6 +377,9 @@ func main() {
 
 	switch strings.ToLower(*platform) {
 	case "wbstream", "wb":
+		if *tunnelMode != wbstream.TunnelModeSmart && *tunnelMode != wbstream.TunnelModeVideo && *tunnelMode != wbstream.TunnelModeDC {
+			log.Fatalf("[config] unknown WB --tunnel-mode %q", *tunnelMode)
+		}
 		runWBStream(*link, *displayName, *tunnelMode, *vp8FPS, *vp8Batch, *dualTrack,
 			onConnected, addCandidate)
 	case "telemost", "tm":
@@ -384,7 +387,11 @@ func main() {
 			onConnected, addCandidate)
 	case "vk":
 		selfHealReconnect = true
-		runVK(*link, *displayName, *tunnelMode, *vp8FPS, *vp8Batch, *dualTrack,
+		vkTunnelMode := *tunnelMode
+		if vkTunnelMode == wbstream.TunnelModeSmart {
+			vkTunnelMode = wbstream.TunnelModeVideo
+		}
+		runVK(*link, *displayName, vkTunnelMode, *vp8FPS, *vp8Batch, *dualTrack,
 			onConnected, addCandidate, func(fn func(string)) { requestCarrierReconnect = fn })
 	case "dion", "dn":
 		runDion(*link, *displayName, onConnected, addCandidate)

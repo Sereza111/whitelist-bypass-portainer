@@ -149,7 +149,7 @@ func main() {
 				}()
 				return
 			}
-			bridge.SwapTunnel(tun)
+			bridge.SwapTunnelWithReadBuf(tun, readBuf)
 			if onConfigAck != nil {
 				bridge.SetOnConfigAck(onConfigAck)
 			}

@@ -24,17 +24,20 @@ type chunkBuf struct {
 }
 
 type DCTunnel struct {
-	dc       *webrtc.DataChannel
-	raw      datachannel.ReadWriteCloser
-	writeRaw datachannel.ReadWriteCloser
-	logFn    func(string, ...any)
-	onData   func([]byte)
-	onClose  func()
-	obf      *TunnelObfuscator
-	chunked  bool
-	readBuf  int
-	maxBuf   uint64
-	sendMu   sync.Mutex
+	dc              *webrtc.DataChannel
+	raw             datachannel.ReadWriteCloser
+	writeRaw        datachannel.ReadWriteCloser
+	logFn           func(string, ...any)
+	callbackMu      sync.RWMutex
+	onData          func([]byte)
+	onClose         func()
+	onInternalClose func()
+	closeOnce       sync.Once
+	obf             *TunnelObfuscator
+	chunked         bool
+	readBuf         int
+	maxBuf          uint64
+	sendMu          sync.Mutex
 
 	recvBufs  sync.Map
 	sendMsgID uint32
@@ -57,9 +60,7 @@ func NewDCTunnel(dc *webrtc.DataChannel, obf *TunnelObfuscator, readBuf int, log
 			t.deliverMessage(msg.Data)
 		})
 		dc.OnClose(func() {
-			if t.onClose != nil {
-				t.onClose()
-			}
+			t.notifyClose()
 		})
 		go t.statsLoop()
 		return t
@@ -105,9 +106,7 @@ func (t *DCTunnel) readLoop() {
 			if err != io.EOF {
 				t.logFn("dctunnel: read error: %v", err)
 			}
-			if t.onClose != nil {
-				t.onClose()
-			}
+			t.notifyClose()
 			return
 		}
 		if isString {
@@ -167,12 +166,33 @@ func (t *DCTunnel) deliverMessage(data []byte) {
 		}
 		data = pt
 	}
-	if t.onData != nil && len(data) > 0 {
+	t.callbackMu.RLock()
+	onData := t.onData
+	t.callbackMu.RUnlock()
+	if onData != nil && len(data) > 0 {
 		frame := make([]byte, 4+len(data))
 		binary.BigEndian.PutUint32(frame[0:4], uint32(len(data)))
 		copy(frame[4:], data)
-		t.onData(frame)
+		onData(frame)
 	}
+}
+
+func (t *DCTunnel) notifyClose() {
+	t.closeOnce.Do(func() {
+		t.callbackMu.RLock()
+		internal := t.onInternalClose
+		public := t.onClose
+		t.callbackMu.RUnlock()
+		// Close the bridge's old flows before the session switches carriers.
+		// The separate lifecycle hook means RelayBridge.SetOnClose still cannot
+		// accidentally disable transport failover.
+		if public != nil {
+			public()
+		}
+		if internal != nil {
+			internal()
+		}
+	})
 }
 
 func (t *DCTunnel) sendChunked(data []byte) {
@@ -256,9 +276,26 @@ func (t *DCTunnel) SendData(data []byte) {
 	})
 }
 
-func (t *DCTunnel) SetOnData(fn func([]byte))         { t.onData = fn }
-func (t *DCTunnel) OnData() func([]byte)              { return t.onData }
-func (t *DCTunnel) SetOnClose(fn func())              { t.onClose = fn }
+func (t *DCTunnel) SetOnData(fn func([]byte)) {
+	t.callbackMu.Lock()
+	t.onData = fn
+	t.callbackMu.Unlock()
+}
+func (t *DCTunnel) OnData() func([]byte) {
+	t.callbackMu.RLock()
+	defer t.callbackMu.RUnlock()
+	return t.onData
+}
+func (t *DCTunnel) SetOnClose(fn func()) {
+	t.callbackMu.Lock()
+	t.onClose = fn
+	t.callbackMu.Unlock()
+}
+func (t *DCTunnel) SetOnInternalClose(fn func()) {
+	t.callbackMu.Lock()
+	t.onInternalClose = fn
+	t.callbackMu.Unlock()
+}
 func (t *DCTunnel) SetMaxBufferedAmount(value uint64) { t.maxBuf = value }
 func (t *DCTunnel) Reconfigure(fps, batch int)        {}
 

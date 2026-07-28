@@ -9,6 +9,7 @@ data class CallConfig(
     val name: String,
     val url: String,
     val tunnelMode: TunnelMode? = null,
+	val tunnelModeExplicit: Boolean = false,
     val vp8Fps: Int? = null,
     val vp8Batch: Int? = null,
     val dualTrack: Boolean? = null,
@@ -19,6 +20,11 @@ data class CallConfig(
 	val recoverySyncUrl: String? = null,
 ) {
     val platform: CallPlatform get() = CallPlatform.fromUrl(url)
+
+	fun migrateManagedWbTransportDefault(): CallConfig {
+		if (platform != CallPlatform.WBSTREAM || recoveryProfile.isNullOrBlank() || tunnelModeExplicit) return this
+		return if (tunnelMode == TunnelMode.VIDEO) copy(tunnelMode = TunnelMode.SMART) else this
+	}
 
     val platformGlyph: String get() = when (platform) {
         CallPlatform.VK -> "VK"
@@ -39,6 +45,7 @@ data class CallConfig(
         put("name", name)
         put("url", url)
         tunnelMode?.let { put("tunnelMode", it.name) }
+		if (tunnelModeExplicit) put("tunnelModeExplicit", true)
         vp8Fps?.let { put("vp8Fps", it) }
         vp8Batch?.let { put("vp8Batch", it) }
         dualTrack?.let { put("dualTrack", it) }
@@ -50,14 +57,60 @@ data class CallConfig(
     }
 
     companion object {
-        fun newWith(name: String, url: String): CallConfig =
-            CallConfig(id = UUID.randomUUID().toString(), name = name, url = url)
+        fun newWith(name: String, url: String): CallConfig {
+			val isWB = CallPlatform.fromUrl(url) == CallPlatform.WBSTREAM
+			return CallConfig(
+				id = UUID.randomUUID().toString(),
+				name = name,
+				url = url,
+				tunnelMode = if (isWB) TunnelMode.SMART else null,
+				dualTrack = if (isWB) true else null,
+			)
+		}
+
+		fun managedInvite(
+			existing: CallConfig?,
+			name: String,
+			url: String,
+			profile: String,
+			key: String,
+			generation: Int,
+			syncUrl: String?,
+		): CallConfig {
+			val platform = CallPlatform.fromUrl(url)
+			val mode = when {
+				existing?.tunnelModeExplicit == true -> existing.tunnelMode
+				// DC was never an automatic WB default, so a legacy saved DC is
+				// necessarily a user's A/B choice even before the explicit marker.
+				existing?.tunnelMode == TunnelMode.DC -> TunnelMode.DC
+				platform == CallPlatform.WBSTREAM -> TunnelMode.SMART
+				else -> existing?.tunnelMode ?: TunnelMode.VIDEO
+			}
+			return (existing ?: newWith(name, url)).copy(
+				name = name,
+				url = url,
+				// A refreshed Manager invite changes the room, not the user's
+				// transport choice. In particular, do not silently turn WB DC
+				// experiments back into Video on every creator handoff.
+				// Alpha.26 saved every managed WB profile as Video even when the
+				// user had not selected it. Unmarked legacy Video therefore migrates
+				// once to Smart; all choices made in alpha.27+ carry the marker.
+				tunnelMode = mode,
+				dualTrack = existing?.dualTrack ?: (platform == CallPlatform.WBSTREAM),
+				recoveryProfile = profile,
+				recoveryKey = key,
+				recoveryGeneration = generation,
+				recoveryPending = false,
+				recoverySyncUrl = syncUrl,
+			)
+		}
 
         fun fromJson(obj: JSONObject): CallConfig = CallConfig(
             id = obj.getString("id"),
             name = obj.getString("name"),
             url = obj.getString("url"),
             tunnelMode = if (obj.has("tunnelMode")) try { TunnelMode.valueOf(obj.getString("tunnelMode")) } catch(e: Exception) { null } else null,
+			tunnelModeExplicit = obj.optBoolean("tunnelModeExplicit", false),
             vp8Fps = if (obj.has("vp8Fps")) obj.getInt("vp8Fps") else null,
             vp8Batch = if (obj.has("vp8Batch")) obj.getInt("vp8Batch") else null,
             dualTrack = if (obj.has("dualTrack")) obj.getBoolean("dualTrack") else null,

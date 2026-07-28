@@ -563,16 +563,10 @@ class MainActivity :
 			return
 		}
 		val existing = Prefs.savedDestinations.firstOrNull { it.recoveryProfile == invite.profile }
-		val config = (existing ?: CallConfig.newWith(invite.name, invite.link)).copy(
-			name = invite.name,
-			url = invite.link,
-			tunnelMode = TunnelMode.VIDEO,
-			dualTrack = existing?.dualTrack ?: (CallPlatform.fromUrl(invite.link) == CallPlatform.WBSTREAM),
-			recoveryProfile = invite.profile,
-			recoveryKey = invite.key,
-			recoveryGeneration = invite.generation,
-			recoveryPending = false,
-			recoverySyncUrl = invite.syncUrl,
+		val config = CallConfig.managedInvite(
+			existing = existing, name = invite.name, url = invite.link,
+			profile = invite.profile, key = invite.key, generation = invite.generation,
+			syncUrl = invite.syncUrl,
 		)
 		MaterialAlertDialogBuilder(this)
 			.setTitle(R.string.mobile_invite_title)
@@ -857,7 +851,7 @@ class MainActivity :
         if (url.isEmpty()) return
 
         val platform = config.platform
-        if (Prefs.activeTunnelMode == TunnelMode.DC &&
+        if (Prefs.activeTunnelMode.forPlatform(platform) == TunnelMode.DC &&
             (platform == CallPlatform.TELEMOST || platform == CallPlatform.DION)
         ) {
             Toast.makeText(this, R.string.dc_mode_not_supported, Toast.LENGTH_SHORT).show()

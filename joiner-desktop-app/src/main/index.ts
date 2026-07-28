@@ -140,6 +140,9 @@ function spawnJoiner(settings: JoinerSettings): { ok: boolean; error?: string } 
 		return { ok: false, error: `phone gateway TUN is not supported on ${process.platform}` };
 	}
 	const noTun = phoneMode ? false : (tunSupported ? settings.noTun : true);
+	const effectiveTunnelMode = settings.platform === 'wbstream'
+		? settings.tunnelMode
+		: (settings.platform === 'vk' && settings.tunnelMode === 'dc' ? 'dc' : 'video');
   if (process.platform !== 'win32' && !noTun && process.getuid && process.getuid() !== 0) {
     send(IPC.LOG, `[main] WARNING: ${process.platform} TUN routing needs root; relaunch with sudo or untick the TUN option\n`);
   }
@@ -154,7 +157,7 @@ function spawnJoiner(settings: JoinerSettings): { ok: boolean; error?: string } 
 		'--link', settings.link,
 		'--name', settings.displayName,
 		'--socks-port', String(settings.socksPort),
-		'--tunnel-mode', settings.tunnelMode,
+		'--tunnel-mode', effectiveTunnelMode,
 		'--video-reliability', settings.videoReliability,
 		'--kcp-profile', settings.kcpProfile,
 		'--vp8-fps', String(settings.vp8Fps),

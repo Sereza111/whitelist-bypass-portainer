@@ -194,11 +194,17 @@ class MainFragment : Fragment(R.layout.fragment_main_screen) {
         ChoiceActionSheet.show(
             manager = parentFragmentManager,
             title = getString(R.string.settings_row_tunnel_mode),
-            options = TunnelMode.entries.filter { it == TunnelMode.VIDEO || (config.platform != CallPlatform.TELEMOST && config.platform != CallPlatform.DION) }.map { ChoiceActionSheet.Option(it.name, it.label) },
+            options = TunnelMode.entries.filter {
+                when (config.platform) {
+                    CallPlatform.WBSTREAM -> true
+                    CallPlatform.VK -> it == TunnelMode.DC || it == TunnelMode.VIDEO
+                    CallPlatform.TELEMOST, CallPlatform.DION -> it == TunnelMode.VIDEO
+                }
+            }.map { ChoiceActionSheet.Option(it.name, it.label) },
             selectedId = current.name,
         ) { picked ->
             val newMode = TunnelMode.valueOf(picked.id)
-            Prefs.updateDestination(config.copy(tunnelMode = newMode))
+            Prefs.updateDestination(config.copy(tunnelMode = newMode, tunnelModeExplicit = true))
             onDestinationsChanged()
             if (Prefs.activeDestinationId == config.id) {
                 (activity as? SettingsScreenFragment.Host)?.onTunnelModeChanged(newMode)

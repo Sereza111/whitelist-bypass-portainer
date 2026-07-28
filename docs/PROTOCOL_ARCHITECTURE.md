@@ -104,6 +104,7 @@ CONNECT и интерактивный трафик.
 | Telemost Video | VP8/RTP | нет дополнительной ARQ |
 | WB Stream DC | SCTP DataChannel | reliable/ordered |
 | WB Stream Video | VP8/RTP + KCP | KCP |
+| WB Stream Smart | DC, fallback VP8/RTP + KCP | automatic, wire-compatible |
 | Dion Video | VP8/RTP | нет дополнительной ARQ |
 
 Для TCP потеря raw VP8 frame означает потерю байтов внутри логического TCP
@@ -120,6 +121,14 @@ Legacy WB KCP сохраняет прежний wire path и используе�
 alpha.12 или более ранний получает совместимый Balanced, а не неизвестный
 wire-код. MTU adaptive-сегмента выровнен так, чтобы обычный relay frame
 помещался в один carrier frame.
+
+WB Smart не вводит новый payload protocol. Joiner готовит оба существующих
+carrier, даёт reliable DataChannel 1.5 секунды на готовность и выбирает его без
+KCP; если DC не готов, выбирается Video+KCP. До выбора Video его config frame не
+отправляется, поэтому Creator с пустым `TunnelMode` определяет тот же carrier по
+первому реальному payload. При закрытии выбранного DC Joiner сохраняет локальный
+SOCKS/VPN listener, очищает старые flows и переключает RelayBridge на заранее
+подготовленный Video+KCP; Creator повторно включает first-payload detection.
 
 Над KCP работает DRR scheduler. После полевого alpha.11 теста его буферы
 ограничены `64 KiB` на logical flow и `512 KiB` суммарно. При удалённом CLOSE

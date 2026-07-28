@@ -114,9 +114,10 @@ advanced options не мешают основному сценарию.
 - battery/thermal pacing policy.
 
 **Статус:** capability transport, provider-aware deep link, VPN/Apps/SOCKS
-routing, split tunneling, matching metrics, signed recovery, gothic tokens и
-device-assisted WB WebView реализованы. Battery/thermal pacing, встроенный QR
-scanner и полноценный profile sync с Manager остаются открытыми.
+routing, split tunneling, matching metrics, signed recovery, gothic tokens,
+device-assisted WB WebView и WB Smart DC→Video failover реализованы.
+Battery/thermal pacing и встроенный QR scanner остаются открытыми; WB
+profile-sync с Manager работает для device-assisted client profiles.
 
 ## Первый практический спринт
 

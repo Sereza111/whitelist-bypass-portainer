@@ -17,6 +17,7 @@ import android.widget.ImageButton
 import androidx.core.view.isVisible
 import androidx.fragment.app.Fragment
 import bypass.whitelist.R
+import bypass.whitelist.tunnel.CallPlatform
 import bypass.whitelist.tunnel.HeadlessRelayController
 import bypass.whitelist.tunnel.VpnStatus
 import bypass.whitelist.util.BLANK_URL
@@ -129,7 +130,7 @@ class HeadlessVkFragment : Fragment(), JoinSessionShutdown {
             },
         )
         relay.start()
-        relay.sendAuth(url, displayName, Prefs.activeTunnelMode.relayArg)
+        relay.sendAuth(url, displayName, Prefs.activeTunnelMode.forPlatform(CallPlatform.VK).relayArg)
     }
 
     override fun onDestroyView() {

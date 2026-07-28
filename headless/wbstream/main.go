@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"runtime/debug"
+	"sync"
 
 	"whitelist-bypass/relay/common"
 	"whitelist-bypass/relay/tunnel"
@@ -82,6 +83,7 @@ func main() {
 	log.Printf("[obf] ready localEpoch=0x%08x", obf.LocalEpoch())
 
 	var activeBridge *tunnel.RelayBridge
+	var bridgeMu sync.Mutex
 	makeSession := func(token, access, server string) *wbstream.Session {
 		sess := wbstream.NewSession(wbstream.SessionConfig{
 			RoomToken:   token,
@@ -94,8 +96,10 @@ func main() {
 			ReadBuf:     readBuf,
 		})
 		sess.OnConnected = func(tun tunnel.DataTunnel) {
+			bridgeMu.Lock()
+			defer bridgeMu.Unlock()
 			if activeBridge != nil {
-				activeBridge.Reset()
+				activeBridge.Close()
 			}
 			bridgeReadBuf := common.VP8BufSize
 			mode := "video"
@@ -114,6 +118,8 @@ func main() {
 			fmt.Printf("\n  TUNNEL CONNECTED mode=%s\n", mode)
 		}
 		sess.OnPeerRestart = func() {
+			bridgeMu.Lock()
+			defer bridgeMu.Unlock()
 			if activeBridge != nil {
 				log.Printf("[creator] new peer detected, resetting relay bridge")
 				activeBridge.Reset()
@@ -135,8 +141,10 @@ func main() {
 	<-sess.Done()
 	log.Printf("[session] call ended; Manager must request a fresh Android invitation")
 	sess.Close()
+	bridgeMu.Lock()
 	if activeBridge != nil {
-		activeBridge.Reset()
+		activeBridge.Close()
 	}
+	bridgeMu.Unlock()
 	os.Exit(1)
 }

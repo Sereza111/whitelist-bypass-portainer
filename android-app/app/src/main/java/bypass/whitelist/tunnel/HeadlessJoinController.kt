@@ -57,7 +57,7 @@ class HeadlessJoinController(
             CallPlatform.TELEMOST -> put("joinLink", url)
             CallPlatform.WBSTREAM -> {
                 put("roomId", CallPlatform.extractRoomId(url))
-                put("tunnelMode", Prefs.activeTunnelMode.relayArg)
+                put("tunnelMode", Prefs.activeTunnelMode.forPlatform(platform).relayArg)
             }
             CallPlatform.DION -> put("roomId", CallPlatform.extractRoomId(url))
             CallPlatform.VK -> error("VK headless flow uses HeadlessVkFragment for captcha UI")
@@ -73,4 +73,3 @@ class HeadlessJoinController(
         const val LOG_TAG = "HeadlessJoinController"
     }
 }
-

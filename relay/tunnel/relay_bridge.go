@@ -75,7 +75,7 @@ type RelayBridge struct {
 	nextID      atomic.Uint32
 	logFn       func(string, ...any)
 	mode        string
-	readBuf     int
+	readBuf     atomic.Int64
 	ready       chan struct{}
 	once        sync.Once
 	socksUser   string
@@ -205,11 +205,11 @@ func NewRelayBridge(tunnel DataTunnel, mode string, readBuf int, logFn func(stri
 		tunnel:      tunnel,
 		logFn:       logFn,
 		mode:        mode,
-		readBuf:     readBuf,
 		ready:       make(chan struct{}),
 		startedAt:   time.Now(),
 		metricsStop: make(chan struct{}),
 	}
+	rb.readBuf.Store(int64(readBuf))
 	rb.fairSender = newFairSender(func(frame []byte) { rb.sendFrame(frame, false) })
 	tunnel.SetOnData(rb.handleTunnelData)
 	tunnel.SetOnClose(rb.handleTunnelClose)
@@ -228,18 +228,34 @@ func (rb *RelayBridge) SetUpstreamSocks(addr, user, pass string) {
 }
 
 func (rb *RelayBridge) SwapTunnel(newTunnel DataTunnel) {
+	rb.SwapTunnelWithReadBuf(newTunnel, int(rb.readBuf.Load()))
+}
+
+// SwapTunnelWithReadBuf preserves the listener while changing both the
+// carrier and its mux read size. DC can carry larger messages than VP8/KCP,
+// so failover must update these values together.
+func (rb *RelayBridge) SwapTunnelWithReadBuf(newTunnel DataTunnel, readBuf int) {
 	if rb.fairSender != nil {
 		rb.fairSender.Reset()
 	}
+	if readBuf < 1 {
+		readBuf = common.VP8BufSize
+	}
 	rb.tunnelMu.Lock()
+	oldTunnel := rb.tunnel
 	rb.tunnel = newTunnel
 	rb.tunnelMu.Unlock()
+	if oldTunnel != nil && oldTunnel != newTunnel {
+		oldTunnel.SetOnData(nil)
+		oldTunnel.SetOnClose(nil)
+	}
+	rb.readBuf.Store(int64(readBuf))
 	newTunnel.SetOnData(rb.handleTunnelData)
 	newTunnel.SetOnClose(rb.handleTunnelClose)
 	rb.closeAll()
 	rb.handshakeMu.Lock()
 	capabilities := rb.localHello.Capabilities
-	rb.localHello = newLocalHello(newTunnel, rb.readBuf)
+	rb.localHello = newLocalHello(newTunnel, readBuf)
 	rb.localHello.Capabilities = capabilities
 	rb.peerHello = nil
 	rb.handshakeResult = nil
@@ -817,7 +833,7 @@ func (rb *RelayBridge) connectTCP(connID uint32, addr string) {
 	rb.send(connID, MsgConnectOK, nil)
 	rb.logFn("relay: CONNECTED %d -> %s", connID, common.MaskAddr(addr))
 
-	buf := make([]byte, rb.readBuf)
+	buf := make([]byte, int(rb.readBuf.Load()))
 	var totalRead int64
 	var reads int
 	for {
@@ -978,7 +994,7 @@ func (rb *RelayBridge) handleSOCKS(conn net.Conn) {
 	rb.logFn("relay: SOCKS CONNECTED %d -> %s rdy_wait=%s", id, common.MaskAddr(host), time.Since(rdyStart))
 
 	go func() {
-		readBuf := make([]byte, rb.readBuf)
+		readBuf := make([]byte, int(rb.readBuf.Load()))
 		var totalSent int64
 		var sends int
 		for {

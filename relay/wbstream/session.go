@@ -28,6 +28,7 @@ type peerEntry struct {
 const (
 	TunnelModeVideo = "video"
 	TunnelModeDC    = "dc"
+	TunnelModeSmart = "smart"
 )
 
 type SessionConfig struct {
@@ -45,10 +46,10 @@ type SessionConfig struct {
 	RoomID         string
 	AccessToken    string
 	ReadBuf        int
-	ScreenShare    bool // when true, publish a second VP8 track as ScreenShare and shard outbound across both
-	IsJoiner       bool // when true, run the configPingPong loop; only the joiner sends VP8 config to the peer
+	ScreenShare    bool          // when true, publish a second VP8 track as ScreenShare and shard outbound across both
+	IsJoiner       bool          // when true, run the configPingPong loop; only the joiner sends VP8 config to the peer
+	SmartDCGrace   time.Duration // optional test/tuning override; zero uses the bounded default
 }
-
 
 type Session struct {
 	cfg SessionConfig
@@ -61,13 +62,16 @@ type Session struct {
 	pubReliableDCReady bool
 	subReliableDC      *webrtc.DataChannel
 
-	vp8tun       *tunnel.MultiTrackTunnel
-	kcptun       *tunnel.KCPTunnel
-	dctun        *tunnel.DCTunnel
-	mu           sync.Mutex
-	tunFired     bool
-	remoteTracks int
-	done         chan struct{}
+	vp8tun            *tunnel.MultiTrackTunnel
+	kcptun            *tunnel.KCPTunnel
+	dctun             *tunnel.DCTunnel
+	smart             *smartTransportSelector
+	mu                sync.Mutex
+	tunFired          bool
+	activeTunnel      tunnel.DataTunnel
+	configPingStarted bool
+	remoteTracks      int
+	done              chan struct{}
 
 	peersBySID map[string]peerEntry // SID -> first-seen time + state
 	kickedSIDs map[string]bool      // SIDs we kicked; SFU may still echo them as Active until it processes the kick
@@ -88,11 +92,19 @@ func NewSession(cfg SessionConfig) *Session {
 	if cfg.LogFn == nil {
 		cfg.LogFn = log.Printf
 	}
-	return &Session{
+	sess := &Session{
 		cfg:         cfg,
 		done:        make(chan struct{}),
 		configAcked: make(chan struct{}),
 	}
+	if cfg.TunnelMode == TunnelModeSmart {
+		grace := cfg.SmartDCGrace
+		if grace <= 0 {
+			grace = defaultSmartDCGrace
+		}
+		sess.smart = newSmartTransportSelector(grace, sess.onSmartSelected)
+	}
+	return sess
 }
 
 func (s *Session) MarkConfigAcked() {
@@ -151,7 +163,11 @@ func (s *Session) stopTunnels() {
 	s.mu.Lock()
 	vp8 := s.vp8tun
 	kcptun := s.kcptun
+	smart := s.smart
 	s.mu.Unlock()
+	if smart != nil {
+		smart.stop()
+	}
 	if kcptun != nil {
 		kcptun.Stop()
 	}
@@ -268,21 +284,34 @@ func (s *Session) startTunnel() {
 	tun := s.vp8tun
 	s.mu.Unlock()
 	s.cfg.LogFn("[lk] vp8 tunnel writer started tracks=%d", len(subs))
-	var active tunnel.DataTunnel = tun
 	if s.cfg.TunnelMode == TunnelModeVideo {
-		active = s.maybeWrapReliable(tun)
-	}
-	if s.cfg.IsJoiner && s.cfg.TunnelMode != TunnelModeDC {
-		go s.configPingPong(active, len(subs))
-	}
-
-	if s.cfg.TunnelMode == TunnelModeVideo {
+		active := s.maybeWrapReliable(tun)
+		s.startConfigPing(active, len(subs))
 		s.fireOnConnected(active)
+		return
+	}
+	if s.cfg.TunnelMode == TunnelModeSmart {
+		active := s.maybeWrapReliable(tun)
+		s.smart.videoReady(active)
 		return
 	}
 	if s.cfg.TunnelMode == "" {
 		tun.SetOnData(func(payload []byte) { s.activate(tun, payload) })
 	}
+}
+
+func (s *Session) startConfigPing(tun tunnel.DataTunnel, trackCount int) {
+	if !s.cfg.IsJoiner {
+		return
+	}
+	s.mu.Lock()
+	if s.configPingStarted {
+		s.mu.Unlock()
+		return
+	}
+	s.configPingStarted = true
+	s.mu.Unlock()
+	go s.configPingPong(tun, trackCount)
 }
 
 func (s *Session) configPingPong(tun tunnel.DataTunnel, trackCount int) {
@@ -342,14 +371,65 @@ func (s *Session) maybeStartDCTunnel() {
 	s.mu.Lock()
 	s.dctun = dctun
 	s.mu.Unlock()
+	dctun.SetOnInternalClose(func() { s.onDCTunnelClosed(dctun) })
 	s.cfg.LogFn("[lk] dc tunnel ready (pub+sub _reliable)")
 
 	if s.cfg.TunnelMode == TunnelModeDC {
 		s.fireOnConnected(dctun)
 		return
 	}
+	if s.cfg.TunnelMode == TunnelModeSmart {
+		s.smart.dcReady(dctun)
+		return
+	}
 	if s.cfg.TunnelMode == "" {
 		dctun.SetOnData(func(payload []byte) { s.activate(dctun, payload) })
+	}
+}
+
+func (s *Session) onSmartSelected(selection smartSelection) {
+	select {
+	case <-s.done:
+		return
+	default:
+	}
+	if selection.kind == smartTransportVideo {
+		trackCount := 1
+		s.mu.Lock()
+		if s.vp8tun != nil {
+			trackCount = s.vp8tun.SubTunnelCount()
+		}
+		s.mu.Unlock()
+		s.startConfigPing(selection.tunnel, trackCount)
+	}
+	s.mu.Lock()
+	previous := s.activeTunnel
+	s.activeTunnel = selection.tunnel
+	s.tunFired = true
+	s.mu.Unlock()
+	action := "selected"
+	if previous != nil && previous != selection.tunnel {
+		action = "failover"
+	}
+	s.cfg.LogFn("[lk] smart %s=%s reason=%s", action, selection.kind, selection.reason)
+	if s.OnConnected != nil {
+		s.OnConnected(selection.tunnel)
+	}
+}
+
+func (s *Session) onDCTunnelClosed(dc *tunnel.DCTunnel) {
+	if s.smart != nil {
+		s.smart.dcClosed(dc)
+	}
+	if s.cfg.TunnelMode != "" {
+		return
+	}
+	s.mu.Lock()
+	wasActive := s.activeTunnel == dc
+	s.mu.Unlock()
+	if wasActive {
+		s.cfg.LogFn("[lk] active data-channel closed; rearming video auto-detect")
+		s.rearmAutoDetect()
 	}
 }
 
@@ -360,6 +440,7 @@ func (s *Session) fireOnConnected(tun tunnel.DataTunnel) {
 		return
 	}
 	s.tunFired = true
+	s.activeTunnel = tun
 	s.mu.Unlock()
 	if s.OnConnected != nil {
 		s.OnConnected(tun)
@@ -375,6 +456,9 @@ func (s *Session) activate(tun tunnel.DataTunnel, payload []byte) {
 	s.tunFired = true
 	s.mu.Unlock()
 	delivered := s.maybeWrapReliable(tun)
+	s.mu.Lock()
+	s.activeTunnel = delivered
+	s.mu.Unlock()
 	s.cfg.LogFn("[lk] auto-detected active tunnel: %T", delivered)
 	if s.OnConnected != nil {
 		s.OnConnected(delivered)
@@ -398,6 +482,13 @@ func (s *Session) maybeWrapReliable(tun tunnel.DataTunnel) tunnel.DataTunnel {
 	if !ok {
 		return tun
 	}
+	s.mu.Lock()
+	if s.kcptun != nil {
+		wrapped := s.kcptun
+		s.mu.Unlock()
+		return wrapped
+	}
+	s.mu.Unlock()
 	wrapped := tunnel.NewKCPTunnel(vp8, s.cfg.LogFn)
 	s.mu.Lock()
 	s.kcptun = wrapped
@@ -530,9 +621,15 @@ func (s *Session) rearmAutoDetect() {
 	}
 	s.mu.Lock()
 	s.tunFired = false
+	s.activeTunnel = nil
 	vp8 := s.vp8tun
 	dc := s.dctun
+	kcp := s.kcptun
+	s.kcptun = nil
 	s.mu.Unlock()
+	if kcp != nil {
+		kcp.Stop()
+	}
 	if vp8 != nil {
 		vp8.SetOnData(func(payload []byte) { s.activate(vp8, payload) })
 	}

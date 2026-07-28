@@ -25,7 +25,6 @@ import com.google.android.material.button.MaterialButton
 import com.google.android.material.materialswitch.MaterialSwitch
 import bypass.whitelist.tunnel.CallConfig
 import bypass.whitelist.tunnel.HeadlessSessionService
-import bypass.whitelist.tunnel.TunnelMode
 import bypass.whitelist.tunnel.TunnelServiceState
 import bypass.whitelist.util.Prefs
 import org.json.JSONObject
@@ -375,16 +374,9 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 			// here would make its next sync poll incorrectly return 204.
 			return existing
 		}
-		val config = (existing ?: CallConfig.newWith(name, link)).copy(
-			name = name,
-			url = link,
-			tunnelMode = TunnelMode.VIDEO,
-			dualTrack = true,
-			recoveryProfile = profile,
-			recoveryKey = key,
-			recoveryGeneration = generation,
-			recoveryPending = false,
-			recoverySyncUrl = syncURL,
+		val config = CallConfig.managedInvite(
+			existing = existing, name = name, url = link,
+			profile = profile, key = key, generation = generation, syncUrl = syncURL,
 		)
 		Prefs.addDestination(config)
 		return config

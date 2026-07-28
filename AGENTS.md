@@ -14,6 +14,29 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
+## Active handoff (2026-07-28, alpha.27 WB Smart carrier candidate)
+
+- Matching alpha.26 Android field traces that the user labelled DC and Video
+  were both actually `kcp-vp8-balanced`: every refreshed Manager invitation
+  silently overwrote the saved WB mode with Video. The traces are external-only
+  and must never be committed.
+- Manager invitation refresh now preserves an existing explicit transport.
+  New Android-managed and manually added WB profiles default to Smart with dual
+  track; alpha.26 managed profiles whose Video value was unmarked/forced migrate
+  once to Smart. Manual DC and marked DC/Video remain available for controlled
+  A/B tests.
+- Smart prepares WB DC and Video+KCP without changing either wire format. It
+  gives DC a bounded 1.5-second grace period, selects Video only after timeout,
+  delays the Video config ping until Video wins, and logs the selected carrier
+  and reason.
+- A selected DC closing triggers in-session failover to the prepared Video+KCP
+  carrier. RelayBridge keeps the local SOCKS/VPN listener, swaps the carrier and
+  its mux read size together, detaches callbacks from the old carrier, clears
+  old flows, and restarts the compatibility handshake. The server rearms its
+  existing first-payload auto-detection after the active DC closes.
+- Do not research or reproduce WBAAS or `slide-v3`. WB account cookies and
+  tokens remain on Android; Manager accepts only a validated invitation link.
+
 ## Active handoff (2026-07-28, alpha.26 WB one-tap client candidate)
 
 - Matching alpha.24 Android/server field logs are external-only. Auto removed
