@@ -72,7 +72,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
         val token = input?.getQueryParameter("token").orEmpty()
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
         val freshPairing = validPairing(server, token)
-		trace("boot", "version=${BuildConfig.VERSION_NAME} mode=${if (freshPairing) "pair" else "resume"}")
+		trace("boot", "version=${appVersion()} mode=${if (freshPairing) "pair" else "resume"}")
         if (freshPairing) {
             serverOrigin = server
         } else {
@@ -248,6 +248,11 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 		if (::diagnostics.isInitialized) diagnostics.text = diagnosticLines.joinToString("\n")
 		Log.i("WB_CREATOR", line)
 	}
+
+	@Suppress("DEPRECATION")
+	private fun appVersion(): String = runCatching {
+		packageManager.getPackageInfo(packageName, 0).versionName.orEmpty().ifBlank { "unknown" }
+	}.getOrDefault("unknown")
 
     private fun fail(message: String) {
         mainHandler.removeCallbacks(commandPoll)
