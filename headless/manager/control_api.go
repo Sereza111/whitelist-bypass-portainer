@@ -248,7 +248,7 @@ func registerControlAPIRoutes(mux *http.ServeMux, cp *controlPlane, vkLogin *vkL
 		if !decodeRequest(w, r, &input) {
 			return
 		}
-		if profile.InviteGeneration <= input.AfterGeneration || profile.CurrentInvite == "" {
+		if !profileInviteReady(profile) || profile.InviteGeneration <= input.AfterGeneration {
 			w.Header().Set("Cache-Control", "no-store")
 			w.WriteHeader(http.StatusNoContent)
 			return

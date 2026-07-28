@@ -36,6 +36,10 @@ type clientProfile struct {
 	InviteUpdatedAt    *time.Time     `json:"inviteUpdatedAt,omitempty"`
 }
 
+func profileInviteReady(profile clientProfile) bool {
+	return profile.CurrentInvite != "" && profile.InviteGeneration == profile.RecoveryGeneration
+}
+
 type panelSettings struct {
 	RecoveryRecipient  string     `json:"recoveryRecipient,omitempty"`
 	RecoveryVerifiedAt *time.Time `json:"recoveryVerifiedAt,omitempty"`

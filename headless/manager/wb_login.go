@@ -509,12 +509,14 @@ func registerWBLoginRoutes(mux *http.ServeMux, login *wbLoginManager, username, 
 		for _, session := range cp.listSessions() {
 			if session.ClientID == profileID && isActiveState(session.Status.State) {
 				w.Header().Set("Cache-Control", "no-store")
-				response := map[string]any{"state": "already-running"}
-				if profile.CurrentInvite != "" {
-					response["inviteLink"] = profile.CurrentInvite
-					response["clientProfile"] = wbClientProfileHandoff(profile)
+				if !profileInviteReady(profile) {
+					writeJSON(w, http.StatusAccepted, map[string]string{"state": "relay-starting"})
+					return
 				}
-				writeJSON(w, http.StatusOK, response)
+				writeJSON(w, http.StatusOK, map[string]any{
+					"state": "ready", "inviteLink": profile.CurrentInvite,
+					"clientProfile": wbClientProfileHandoff(profile),
+				})
 				return
 			}
 		}
@@ -542,14 +544,19 @@ func registerWBLoginRoutes(mux *http.ServeMux, login *wbLoginManager, username, 
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
-		response := map[string]any{"inviteLink": link}
+		response := map[string]any{"state": "relay-starting"}
+		status := http.StatusAccepted
 		if cp != nil {
-			if profile, ok := cp.profile(profileID); ok && profile.Config.Mode == "wbstream" {
+			if profile, ok := cp.profile(profileID); ok && profile.Config.Mode == "wbstream" &&
+				profileInviteReady(profile) && profile.CurrentInvite == link {
+				status = http.StatusOK
+				response["state"] = "ready"
+				response["inviteLink"] = profile.CurrentInvite
 				response["clientProfile"] = wbClientProfileHandoff(profile)
 			}
 		}
 		w.Header().Set("Cache-Control", "no-store")
-		writeJSON(w, http.StatusOK, response)
+		writeJSON(w, status, response)
 	})
 	mux.Handle("POST /api/wb-login/cancel", mutate(func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, login.cancelLogin("Привязка Android отменена"))

@@ -846,27 +846,59 @@ func TestWBDevicePairingAndCallExchangeOnlyInvite(t *testing.T) {
 	invite.Header.Set("X-WLB-Creator-ID", paired.CreatorID)
 	response = httptest.NewRecorder()
 	mux.ServeHTTP(response, invite)
-	if response.Code != http.StatusOK {
+	if response.Code != http.StatusAccepted {
 		t.Fatalf("invite submit=%d body=%s", response.Code, response.Body.String())
 	}
-	var handoff struct {
-		ClientProfile struct {
-			Profile    string `json:"profile"`
-			Key        string `json:"key"`
-			Provider   string `json:"provider"`
-			Generation int    `json:"generation"`
-		} `json:"clientProfile"`
-	}
-	if err := json.Unmarshal(response.Body.Bytes(), &handoff); err != nil {
-		t.Fatal(err)
-	}
-	if handoff.ClientProfile.Profile != profile.ID || handoff.ClientProfile.Key != profile.RecoveryKey ||
-		handoff.ClientProfile.Provider != "wbstream" {
-		t.Fatal("creator response did not include the expected provider-bound client handoff")
+	if strings.Contains(response.Body.String(), "clientProfile") || strings.Contains(response.Body.String(), "inviteLink") {
+		t.Fatal("creator received a client handoff before the server relay became ready")
 	}
 	result := <-callResult
 	if result.err != nil || result.link != "wbstream://room_123" {
 		t.Fatalf("unexpected call result: %#v", result)
+	}
+
+	cp.mu.Lock()
+	storedProfile := cp.profiles[profile.ID]
+	storedProfile.RecoveryGeneration = 1
+	storedProfile.CurrentInvite = "wbstream://stale-room"
+	storedProfile.InviteGeneration = 0
+	cp.profiles[profile.ID] = storedProfile
+	fakeManager := newManagerAt(t.TempDir())
+	fakeManager.state = "waiting-for-client"
+	cp.sessions["session-wb-ready"] = &managedSession{
+		ID: "session-wb-ready", ClientID: profile.ID, ClientName: profile.Name,
+		CreatedAt: time.Now().UTC(), Manager: fakeManager, Generation: 1,
+	}
+	cp.mu.Unlock()
+
+	startProfile := func() *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, "/api/wb-creator/profiles/"+profile.ID+"/start", nil)
+		request.Header.Set("Authorization", "Bearer "+paired.DeviceSecret)
+		request.Header.Set("X-WLB-Creator-ID", paired.CreatorID)
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, request)
+		return response
+	}
+	response = startProfile()
+	if response.Code != http.StatusAccepted || strings.Contains(response.Body.String(), "stale-room") {
+		t.Fatalf("stale generation escaped readiness barrier: %d %s", response.Code, response.Body.String())
+	}
+	cp.updateProfileInvite(profile.ID, result.link)
+	response = startProfile()
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"clientProfile"`) ||
+		!strings.Contains(response.Body.String(), `"inviteLink":"wbstream://room_123"`) {
+		t.Fatalf("ready relay handoff=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestProfileInviteReadyRequiresCurrentGeneration(t *testing.T) {
+	profile := clientProfile{CurrentInvite: "wbstream://room", RecoveryGeneration: 3, InviteGeneration: 2}
+	if profileInviteReady(profile) {
+		t.Fatal("stale invitation was considered ready")
+	}
+	profile.InviteGeneration = profile.RecoveryGeneration
+	if !profileInviteReady(profile) {
+		t.Fatal("current invitation was not considered ready")
 	}
 }
 

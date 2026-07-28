@@ -26,29 +26,31 @@ type peerEntry struct {
 }
 
 const (
-	TunnelModeVideo = "video"
-	TunnelModeDC    = "dc"
-	TunnelModeSmart = "smart"
+	TunnelModeVideo         = "video"
+	TunnelModeDC            = "dc"
+	TunnelModeSmart         = "smart"
+	smartDCValidationPeriod = 5 * time.Second
 )
 
 type SessionConfig struct {
-	RoomToken      string
-	ServerURL      string
-	DisplayName    string
-	TunnelMode     string
-	Obfuscator     *tunnel.TunnelObfuscator
-	LogFn          func(string, ...any)
-	SettingEngine  *webrtc.SettingEngine
-	NetDialContext func(ctx context.Context, network, addr string) (net.Conn, error)
-	ResolveICEHost func(host string) (string, error)
-	VP8FPS         int
-	VP8Batch       int
-	RoomID         string
-	AccessToken    string
-	ReadBuf        int
-	ScreenShare    bool          // when true, publish a second VP8 track as ScreenShare and shard outbound across both
-	IsJoiner       bool          // when true, run the configPingPong loop; only the joiner sends VP8 config to the peer
-	SmartDCGrace   time.Duration // optional test/tuning override; zero uses the bounded default
+	RoomToken         string
+	ServerURL         string
+	DisplayName       string
+	TunnelMode        string
+	Obfuscator        *tunnel.TunnelObfuscator
+	LogFn             func(string, ...any)
+	SettingEngine     *webrtc.SettingEngine
+	NetDialContext    func(ctx context.Context, network, addr string) (net.Conn, error)
+	ResolveICEHost    func(host string) (string, error)
+	VP8FPS            int
+	VP8Batch          int
+	RoomID            string
+	AccessToken       string
+	ReadBuf           int
+	ScreenShare       bool          // when true, publish a second VP8 track as ScreenShare and shard outbound across both
+	IsJoiner          bool          // when true, run the configPingPong loop; only the joiner sends VP8 config to the peer
+	SmartDCGrace      time.Duration // optional test/tuning override; zero uses the bounded default
+	SmartDCValidation time.Duration // optional test override for initial bidirectional DC validation
 }
 
 type Session struct {
@@ -62,16 +64,18 @@ type Session struct {
 	pubReliableDCReady bool
 	subReliableDC      *webrtc.DataChannel
 
-	vp8tun            *tunnel.MultiTrackTunnel
-	kcptun            *tunnel.KCPTunnel
-	dctun             *tunnel.DCTunnel
-	smart             *smartTransportSelector
-	mu                sync.Mutex
-	tunFired          bool
-	activeTunnel      tunnel.DataTunnel
-	configPingStarted bool
-	remoteTracks      int
-	done              chan struct{}
+	vp8tun                 *tunnel.MultiTrackTunnel
+	kcptun                 *tunnel.KCPTunnel
+	dctun                  *tunnel.DCTunnel
+	smart                  *smartTransportSelector
+	mu                     sync.Mutex
+	tunFired               bool
+	activeTunnel           tunnel.DataTunnel
+	configPingStarted      bool
+	smartDCValidationTimer *time.Timer
+	dcFailureReason        string
+	remoteTracks           int
+	done                   chan struct{}
 
 	peersBySID map[string]peerEntry // SID -> first-seen time + state
 	kickedSIDs map[string]bool      // SIDs we kicked; SFU may still echo them as Active until it processes the kick
@@ -164,9 +168,18 @@ func (s *Session) stopTunnels() {
 	vp8 := s.vp8tun
 	kcptun := s.kcptun
 	smart := s.smart
+	dc := s.dctun
+	validationTimer := s.smartDCValidationTimer
+	s.smartDCValidationTimer = nil
 	s.mu.Unlock()
+	if validationTimer != nil {
+		validationTimer.Stop()
+	}
 	if smart != nil {
 		smart.stop()
+	}
+	if dc != nil {
+		dc.Close()
 	}
 	if kcptun != nil {
 		kcptun.Stop()
@@ -394,6 +407,7 @@ func (s *Session) onSmartSelected(selection smartSelection) {
 	default:
 	}
 	if selection.kind == smartTransportVideo {
+		s.cancelSmartDCValidation()
 		trackCount := 1
 		s.mu.Lock()
 		if s.vp8tun != nil {
@@ -415,11 +429,73 @@ func (s *Session) onSmartSelected(selection smartSelection) {
 	if s.OnConnected != nil {
 		s.OnConnected(selection.tunnel)
 	}
+	if selection.kind == smartTransportDC {
+		if dc, ok := selection.tunnel.(*tunnel.DCTunnel); ok {
+			s.scheduleSmartDCValidation(dc)
+		}
+	}
+}
+
+func (s *Session) scheduleSmartDCValidation(dc *tunnel.DCTunnel) {
+	delay := s.cfg.SmartDCValidation
+	if delay <= 0 {
+		delay = smartDCValidationPeriod
+	}
+	s.mu.Lock()
+	if s.smartDCValidationTimer != nil {
+		s.smartDCValidationTimer.Stop()
+	}
+	s.smartDCValidationTimer = time.AfterFunc(delay, func() { s.validateSmartDC(dc) })
+	s.mu.Unlock()
+}
+
+func (s *Session) cancelSmartDCValidation() {
+	s.mu.Lock()
+	if s.smartDCValidationTimer != nil {
+		s.smartDCValidationTimer.Stop()
+		s.smartDCValidationTimer = nil
+	}
+	s.mu.Unlock()
+}
+
+func (s *Session) validateSmartDC(dc *tunnel.DCTunnel) {
+	s.mu.Lock()
+	if s.activeTunnel != dc || s.smart == nil {
+		s.mu.Unlock()
+		return
+	}
+	s.smartDCValidationTimer = nil
+	s.mu.Unlock()
+	metrics := dc.TunnelMetrics()
+	if metrics.ReceivedBytes > 0 {
+		s.cfg.LogFn("[lk] smart data-channel validated inbound_bytes=%d", metrics.ReceivedBytes)
+		return
+	}
+	s.mu.Lock()
+	if s.activeTunnel != dc {
+		s.mu.Unlock()
+		return
+	}
+	s.dcFailureReason = "dc-no-inbound-data"
+	s.mu.Unlock()
+	s.cfg.LogFn("[lk] smart data-channel unhealthy reason=no-inbound-data; forcing video failover")
+	dc.Close()
 }
 
 func (s *Session) onDCTunnelClosed(dc *tunnel.DCTunnel) {
+	s.mu.Lock()
+	reason := s.dcFailureReason
+	s.dcFailureReason = ""
+	if s.smartDCValidationTimer != nil {
+		s.smartDCValidationTimer.Stop()
+		s.smartDCValidationTimer = nil
+	}
+	s.mu.Unlock()
+	if reason == "" {
+		reason = "dc-closed"
+	}
 	if s.smart != nil {
-		s.smart.dcClosed(dc)
+		s.smart.dcFailed(dc, reason)
 	}
 	if s.cfg.TunnelMode != "" {
 		return
@@ -449,9 +525,15 @@ func (s *Session) fireOnConnected(tun tunnel.DataTunnel) {
 
 func (s *Session) activate(tun tunnel.DataTunnel, payload []byte) {
 	s.mu.Lock()
+	switchingFromDC := false
 	if s.tunFired {
-		s.mu.Unlock()
-		return
+		_, activeDC := s.activeTunnel.(*tunnel.DCTunnel)
+		_, incomingVideo := tun.(*tunnel.MultiTrackTunnel)
+		if s.cfg.TunnelMode != "" || !activeDC || !incomingVideo {
+			s.mu.Unlock()
+			return
+		}
+		switchingFromDC = true
 	}
 	s.tunFired = true
 	s.mu.Unlock()
@@ -459,7 +541,11 @@ func (s *Session) activate(tun tunnel.DataTunnel, payload []byte) {
 	s.mu.Lock()
 	s.activeTunnel = delivered
 	s.mu.Unlock()
-	s.cfg.LogFn("[lk] auto-detected active tunnel: %T", delivered)
+	if switchingFromDC {
+		s.cfg.LogFn("[lk] auto failover: incoming video payload replaced active data-channel")
+	} else {
+		s.cfg.LogFn("[lk] auto-detected active tunnel: %T", delivered)
+	}
 	if s.OnConnected != nil {
 		s.OnConnected(delivered)
 	}

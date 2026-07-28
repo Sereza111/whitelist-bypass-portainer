@@ -31,3 +31,16 @@ func TestDCTunnelInternalCloseSurvivesPublicCallbackReplacement(t *testing.T) {
 		t.Fatalf("close order=%v, want [public internal]", order)
 	}
 }
+
+func TestDCTunnelCloseNotifiesOnce(t *testing.T) {
+	tun := &DCTunnel{}
+	calls := 0
+	tun.SetOnClose(func() { calls++ })
+
+	tun.Close()
+	tun.Close()
+
+	if calls != 1 {
+		t.Fatalf("close calls=%d, want 1", calls)
+	}
+}

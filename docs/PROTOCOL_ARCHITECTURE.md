@@ -124,11 +124,13 @@ wire-код. MTU adaptive-сегмента выровнен так, чтобы �
 
 WB Smart не вводит новый payload protocol. Joiner готовит оба существующих
 carrier, даёт reliable DataChannel 1.5 секунды на готовность и выбирает его без
-KCP; если DC не готов, выбирается Video+KCP. До выбора Video его config frame не
-отправляется, поэтому Creator с пустым `TunnelMode` определяет тот же carrier по
-первому реальному payload. При закрытии выбранного DC Joiner сохраняет локальный
-SOCKS/VPN listener, очищает старые flows и переключает RelayBridge на заранее
-подготовленный Video+KCP; Creator повторно включает first-payload detection.
+KCP; если DC не готов, выбирается Video+KCP. Выбранный DC дополнительно должен
+получить peer payload за пять секунд: состояние `open` само по себе не доказывает
+двустороннюю передачу через WB. При нулевом входящем трафике Joiner закрывает DC
+и переключает постоянный RelayBridge на Video+KCP. До выбора Video его config
+frame не отправляется. Creator с пустым `TunnelMode` повторно включает
+first-payload detection при закрытии DC, а также разрешает первому реальному
+Video payload напрямую заменить активный DC, если событие close не дошло.
 
 Над KCP работает DRR scheduler. После полевого alpha.11 теста его буферы
 ограничены `64 KiB` на logical flow и `512 KiB` суммарно. При удалённом CLOSE

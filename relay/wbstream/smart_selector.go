@@ -75,6 +75,10 @@ func (s *smartTransportSelector) dcReady(dc tunnel.DataTunnel) {
 }
 
 func (s *smartTransportSelector) dcClosed(dc tunnel.DataTunnel) {
+	s.dcFailed(dc, "dc-closed")
+}
+
+func (s *smartTransportSelector) dcFailed(dc tunnel.DataTunnel, reason string) {
 	var selection *smartSelection
 	s.mu.Lock()
 	if !s.stopped && s.dc == dc {
@@ -82,10 +86,10 @@ func (s *smartTransportSelector) dcClosed(dc tunnel.DataTunnel) {
 		if s.selected == smartTransportDC {
 			s.selected = ""
 			if s.video != nil {
-				selection = s.selectLocked(s.video, smartTransportVideo, "dc-closed")
+				selection = s.selectLocked(s.video, smartTransportVideo, reason)
 			}
 		} else if s.selected == "" && s.video != nil {
-			selection = s.selectLocked(s.video, smartTransportVideo, "dc-closed")
+			selection = s.selectLocked(s.video, smartTransportVideo, reason)
 		}
 	}
 	s.mu.Unlock()

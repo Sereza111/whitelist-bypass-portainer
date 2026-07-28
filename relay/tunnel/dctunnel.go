@@ -24,20 +24,21 @@ type chunkBuf struct {
 }
 
 type DCTunnel struct {
-	dc              *webrtc.DataChannel
-	raw             datachannel.ReadWriteCloser
-	writeRaw        datachannel.ReadWriteCloser
-	logFn           func(string, ...any)
-	callbackMu      sync.RWMutex
-	onData          func([]byte)
-	onClose         func()
-	onInternalClose func()
-	closeOnce       sync.Once
-	obf             *TunnelObfuscator
-	chunked         bool
-	readBuf         int
-	maxBuf          uint64
-	sendMu          sync.Mutex
+	dc                 *webrtc.DataChannel
+	raw                datachannel.ReadWriteCloser
+	writeRaw           datachannel.ReadWriteCloser
+	logFn              func(string, ...any)
+	callbackMu         sync.RWMutex
+	onData             func([]byte)
+	onClose            func()
+	onInternalClose    func()
+	closeOnce          sync.Once
+	closeResourcesOnce sync.Once
+	obf                *TunnelObfuscator
+	chunked            bool
+	readBuf            int
+	maxBuf             uint64
+	sendMu             sync.Mutex
 
 	recvBufs  sync.Map
 	sendMsgID uint32
@@ -193,6 +194,24 @@ func (t *DCTunnel) notifyClose() {
 			internal()
 		}
 	})
+}
+
+// Close tears down both detached directions and notifies lifecycle listeners.
+// Smart WB uses this to make an unusable-but-still-open DataChannel observable
+// to the peer, which can then rearm its Video auto-detection path.
+func (t *DCTunnel) Close() {
+	t.closeResourcesOnce.Do(func() {
+		if t.raw != nil {
+			_ = t.raw.Close()
+		}
+		if t.writeRaw != nil {
+			_ = t.writeRaw.Close()
+		}
+		if t.raw == nil && t.dc != nil {
+			_ = t.dc.Close()
+		}
+	})
+	t.notifyClose()
 }
 
 func (t *DCTunnel) sendChunked(data []byte) {

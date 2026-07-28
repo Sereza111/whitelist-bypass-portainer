@@ -14,6 +14,28 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
+## Active handoff (2026-07-28, alpha.28 WB readiness + DC validation candidate)
+
+- The external-only alpha.27 field log `relay (25).log` reached Smart DC and
+  opened real SOCKS flows, but received exactly zero tunnel bytes for 20s.
+  Handshake fell back to legacy, every CONNECT timed out, and no internet was
+  possible. Never commit that log or its accompanying screenshots.
+- Smart now validates initial DC bidirectionality for five seconds. A DC with
+  no inbound peer payload is closed and replaced by the already prepared
+  Video+KCP candidate. Server auto-detection also accepts the first real Video
+  payload as an explicit DC replacement, so failover does not depend solely on
+  WB delivering a DataChannel close event.
+- Manager returns a WB client handoff only when `InviteGeneration` equals the
+  current `RecoveryGeneration`. An active process with a stale/empty invite is
+  HTTP 202, never HTTP 200 with the previous room. Profile sync has the same
+  current-generation gate.
+- Android never connects an arbitrary saved WB profile after a start response.
+  It requires a fresh validated handoff, retries HTTP 202 and transient
+  transport/5xx failures, and remembers the command's profile id while waiting
+  for the server relay to enter the exact call.
+- Do not research or reproduce WBAAS or `slide-v3`. WB cookies/tokens stay on
+  Android and Manager continues to accept only validated invitation links.
+
 ## Active handoff (2026-07-28, alpha.27 WB Smart carrier candidate)
 
 - Matching alpha.26 Android field traces that the user labelled DC and Video

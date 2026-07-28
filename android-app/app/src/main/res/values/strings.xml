@@ -216,6 +216,7 @@
     <string name="wb_creator_auto_connect">Connect this phone automatically after creating the WB call</string>
     <string name="wb_creator_requesting_profile">Requesting this WB profile from Manager…</string>
     <string name="wb_creator_waiting_for_command">Manager is starting the WB profile. Waiting for the call request…</string>
+	<string name="wb_creator_waiting_for_relay">Invitation accepted. Waiting for the server relay to enter this exact call…</string>
     <string name="wb_creator_profile_start_failed">Manager could not start this WB profile.</string>
     <string name="wb_creator_invite_failed">Manager rejected the invitation. Create a fresh call and retry.</string>
     <string name="wb_login_cancel">Cancel</string>

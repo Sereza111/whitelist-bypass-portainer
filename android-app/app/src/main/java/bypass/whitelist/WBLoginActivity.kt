@@ -58,6 +58,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 	private var autoCreateClicked = false
 	private var pollCount = 0
 	private val diagnosticLines = ArrayDeque<String>()
+	private val profileStartRetry = Runnable { requestSelectedProfileStart() }
 
     private val commandPoll = object : Runnable {
         override fun run() {
@@ -195,6 +196,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 		setIntent(intent)
 		val profile = intent.getStringExtra(EXTRA_START_PROFILE).orEmpty().trim()
 		if (CREATOR_RE.matches(profile)) {
+			mainHandler.removeCallbacks(profileStartRetry)
 			requestedProfileId = profile
 			profileStartIssued = false
 			requestSelectedProfileStart()
@@ -203,8 +205,12 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 
 	private fun requestSelectedProfileStart() {
 		if (profileStartIssued || !CREATOR_RE.matches(requestedProfileId) ||
-			!CREATOR_RE.matches(creatorId) || !TOKEN_RE.matches(deviceSecret) || requestRunning.get()
+			!CREATOR_RE.matches(creatorId) || !TOKEN_RE.matches(deviceSecret)
 		) return
+		if (requestRunning.get()) {
+			scheduleProfileStartRetry(PROFILE_START_BUSY_RETRY_MS)
+			return
+		}
 		profileStartIssued = true
 		if (!requestRunning.compareAndSet(false, true)) {
 			profileStartIssued = false
@@ -218,19 +224,35 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 				requestRunning.set(false)
 				trace("client", "start-http=${response.code}${response.transportError.takeIf { it.isNotEmpty() }?.let { " error=$it" }.orEmpty()}")
 				when (response.code) {
-					HttpURLConnection.HTTP_ACCEPTED -> status.setText(R.string.wb_creator_waiting_for_command)
+					HttpURLConnection.HTTP_ACCEPTED -> {
+						status.setText(R.string.wb_creator_waiting_for_relay)
+						scheduleProfileStartRetry()
+					}
 					HttpURLConnection.HTTP_OK -> {
 						val body = runCatching { JSONObject(response.body) }.getOrNull()
 						val link = body?.optString("inviteLink").orEmpty()
-						if (link.isNotEmpty()) installClientProfile(response.body, link)
-						val local = Prefs.savedDestinations.firstOrNull { it.recoveryProfile == requestedProfileId }
-						if (local != null) openClientAndConnect()
-						else status.setText(R.string.wb_creator_waiting_for_command)
+						val fresh = if (link.isNotEmpty()) installClientProfile(response.body, link) else null
+						if (fresh != null) openClientAndConnect()
+						else {
+							status.setText(R.string.wb_creator_waiting_for_relay)
+							scheduleProfileStartRetry()
+						}
 					}
-					else -> status.text = response.message.ifBlank { getString(R.string.wb_creator_profile_start_failed) }
+					else -> {
+						status.text = response.message.ifBlank { getString(R.string.wb_creator_profile_start_failed) }
+						if (response.code == 0 || response.code >= 500) {
+							scheduleProfileStartRetry(PROFILE_START_ERROR_RETRY_MS)
+						}
+					}
 				}
 			}
 		}
+	}
+
+	private fun scheduleProfileStartRetry(delayMs: Long = PROFILE_START_RETRY_MS) {
+		profileStartIssued = false
+		mainHandler.removeCallbacks(profileStartRetry)
+		mainHandler.postDelayed(profileStartRetry, delayMs)
 	}
 
     private fun pollCommand() {
@@ -252,7 +274,11 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
                 if (response.code !in 200..299) return@post
                 val json = runCatching { JSONObject(response.body) }.getOrNull() ?: return@post
                 val requestId = json.optString("id")
-                if (!CREATOR_RE.matches(requestId)) return@post
+				val profileId = json.optString("profileId")
+				if (!CREATOR_RE.matches(requestId) || !CREATOR_RE.matches(profileId)) return@post
+				mainHandler.removeCallbacks(profileStartRetry)
+				requestedProfileId = profileId
+				profileStartIssued = false
                 pendingRequestId = requestId
 				autoCreateStartedAt = SystemClock.elapsedRealtime()
 				autoCreateClicked = false
@@ -348,7 +374,8 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 							openClientAndConnect()
 						}
 					} else {
-						status.setText(R.string.wb_creator_invite_sent)
+						status.setText(R.string.wb_creator_waiting_for_relay)
+						if (autoConnect.isChecked) scheduleProfileStartRetry()
 					}
                 } else {
                     status.text = response.message.ifBlank { getString(R.string.wb_creator_invite_failed) }
@@ -452,6 +479,9 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
         private const val POLL_INTERVAL_MS = 3_000L
 		private const val AUTO_CREATE_POLL_MS = 1_000L
 		private const val AUTO_CREATE_TIMEOUT_MS = 25_000L
+		private const val PROFILE_START_RETRY_MS = 1_500L
+		private const val PROFILE_START_BUSY_RETRY_MS = 500L
+		private const val PROFILE_START_ERROR_RETRY_MS = 5_000L
 		private const val MAX_DIAGNOSTIC_LINES = 7
         private const val PREFS = "wb_creator"
         private const val KEY_SERVER = "server"
