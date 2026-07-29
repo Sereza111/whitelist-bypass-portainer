@@ -6,12 +6,12 @@ Dion. Это уже не минимальная Docker-обёртка upstream: 
 клиенты, SOCKS5/TUN, автоматическое восстановление звонков, диагностику и
 multi-arch релизный pipeline.
 
-Текущий кандидат: **v0.5.0-alpha.36**. До публикации immutable tag используйте branch artifacts только для проверки matching Android + server.
+Текущий кандидат: **v0.5.0-alpha.37**. До публикации immutable tag используйте branch artifacts только для проверки matching Android + server.
 
 Docker image:
 
 ```text
-ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.36
+ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.37
 ```
 
 Проект основан на
@@ -33,6 +33,7 @@ ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.36
 - постоянные клиентские профили с поиском, копированием и контекстным меню;
 - отдельные лимиты, срок действия, enabled/disabled и KCP-профиль клиента;
 - несколько независимых Creator-процессов с общим лимитом `MAX_SESSIONS`;
+- восстановление профилей `Enabled + Всегда запущен` после обрыва, перезапуска контейнера или VPS;
 - отдельные каталоги, bounded logs и METRICS каждой сессии;
 - VK-вход серверного аккаунта через QR без передачи пароля панели;
 - WB-вход через QR на Android и сеть телефона вместо заблокированного VPS;
@@ -150,7 +151,7 @@ ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.36
 
 | Переменная | Рекомендуемое значение |
 |---|---|
-| `WLB_IMAGE` | `ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.36` |
+| `WLB_IMAGE` | `ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.37` |
 | `PANEL_USERNAME` | новый логин, по умолчанию `admin` |
 | `PANEL_PASSWORD` | уникальный пароль длиной от 12 символов |
 | `WLB_SECRETS_DIR` | `/opt/whitelist-bypass/secrets` |
@@ -240,7 +241,7 @@ WB Stream и Dion; тип провайдера связан с проверен�
 В логах клиента и сервера должны совпадать:
 
 ```text
-[build] version=0.5.0-alpha.36 commit=... built=...
+[build] version=0.5.0-alpha.37 commit=... built=...
 ```
 
 Если на телефоне осталась старая debug-signed `alpha.8`, её нужно удалить один

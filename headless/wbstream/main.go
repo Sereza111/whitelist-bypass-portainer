@@ -25,7 +25,9 @@ func main() {
 	upstreamSocks := flag.String("upstream-socks", "", "route tunneled egress through this SOCKS5 proxy (host:port), e.g. a local VPN client")
 	upstreamUser := flag.String("upstream-user", "", "upstream SOCKS5 username")
 	upstreamPass := flag.String("upstream-pass", "", "upstream SOCKS5 password")
+	trackCount := flag.Int("track-count", 4, "initial VP8 carrier count (1..4); peer config may reduce it")
 	flag.Parse()
+	*trackCount = wbstream.ClampTrackCount(*trackCount)
 
 	var readBuf int
 	var memLimit int64
@@ -84,6 +86,7 @@ func main() {
 			RoomID:      roomID,
 			AccessToken: access,
 			ReadBuf:     readBuf,
+			TrackCount:  *trackCount,
 		})
 		sess.OnConnected = func(tun tunnel.DataTunnel) {
 			bridgeMu.Lock()

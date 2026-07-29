@@ -650,6 +650,16 @@ func (s *Session) AdaptTrackCount(peerCount int) {
 	s.cfg.LogFn("[lk] adapt-track-count: renegotiation offer sent (%d bytes)", len(offer.SDP))
 }
 
+func ClampTrackCount(n int) int {
+	if n < 1 {
+		return 1
+	}
+	if n > 4 {
+		return 4
+	}
+	return n
+}
+
 // removePublisherTrack stops the trailing transceiver, drops its sub-tunnel
 // from the multi-track wrapper, and trims the bookkeeping slices. The SFU
 // sees the transceiver go inactive on the next renegotiation and stops

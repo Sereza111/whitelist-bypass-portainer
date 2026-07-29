@@ -25,6 +25,20 @@ class LogWriter(cacheDir: File, private val maxDisplayLines: Int = 2000) {
     }
 
     @Synchronized
+    fun beginSession() {
+        writer?.close()
+        val retained = if (logFile.exists()) {
+            logFile.readLines().takeLast((maxDisplayLines - 1).coerceAtLeast(0))
+        } else emptyList()
+        displayLines.clear()
+        retained.forEach { displayLines.addLast(it) }
+        writer = FileWriter(logFile, false)
+        retained.forEach { writer?.write("$it\n") }
+        writer?.flush()
+        append("========== NEW CARRIER SESSION ==========")
+    }
+
+    @Synchronized
     fun append(msg: String) {
         val ts = dateFormat.format(Date())
         val line = "$ts $msg"
@@ -46,4 +60,3 @@ class LogWriter(cacheDir: File, private val maxDisplayLines: Int = 2000) {
         writer = null
     }
 }
-

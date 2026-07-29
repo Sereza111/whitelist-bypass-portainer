@@ -687,6 +687,60 @@ func TestControlPlaneRejectsDisabledAndExpiredProfiles(t *testing.T) {
 	}
 }
 
+func TestProfileWantsPersistentSession(t *testing.T) {
+	now := time.Now()
+	future := now.Add(time.Hour)
+	past := now.Add(-time.Hour)
+	base := clientProfile{Enabled: true, AutoRestart: true}
+	if !profileWantsPersistentSession(base, now) {
+		t.Fatal("enabled auto-restart profile was not persistent")
+	}
+	if !profileWantsPersistentSession(func() clientProfile { p := base; p.ExpiresAt = &future; return p }(), now) {
+		t.Fatal("unexpired profile was not persistent")
+	}
+	for name, profile := range map[string]clientProfile{
+		"disabled": func() clientProfile { p := base; p.Enabled = false; return p }(),
+		"manual":   func() clientProfile { p := base; p.AutoRestart = false; return p }(),
+		"expired":  func() clientProfile { p := base; p.ExpiresAt = &past; return p }(),
+	} {
+		if profileWantsPersistentSession(profile, now) {
+			t.Fatalf("%s profile unexpectedly wants persistent session", name)
+		}
+	}
+}
+
+func TestRestorePersistentWBProfileWaitsForAndroidCreator(t *testing.T) {
+	dataDir := t.TempDir()
+	cp, err := newControlPlane(dataDir, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	login := newWBLoginManager(dataDir)
+	login.binding = &wbCreatorBinding{
+		CreatorID: "creator-restore", DeviceID: "device-restore", Name: "Android",
+		SecretHash: strings.Repeat("0", 64), PairedAt: time.Now().UTC(),
+	}
+	cp.setWBCreator(login)
+	enabled, autoRestart := true, true
+	profile, err := cp.createProfile(profileInput{
+		Name: "Always-on WB", Enabled: &enabled, AutoRestart: &autoRestart, MaxSessions: 1,
+		Config: sessionRequest{Mode: "wbstream"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cp.restorePersistentProfiles()
+	sessions := cp.listSessions()
+	if len(sessions) != 1 || sessions[0].ClientID != profile.ID || sessions[0].Status.State != "waiting-for-creator" {
+		t.Fatalf("persistent WB restore=%#v", sessions)
+	}
+	cp.restorePersistentProfiles()
+	if got := len(cp.listSessions()); got != 1 {
+		t.Fatalf("restore duplicated active profile: sessions=%d", got)
+	}
+	cp.stopAll()
+}
+
 func TestLatestMetricsAndRuntimeState(t *testing.T) {
 	lines := []string{
 		"headless: === TUNNEL CONNECTED ===",

@@ -14,6 +14,25 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
+## Active handoff (2026-07-29, alpha.37 WB downlink + always-on candidate)
+
+- Enabled profiles marked `AutoRestart` now represent desired always-on state.
+  Manager restores them after container/VPS restart and reconciles missing
+  sessions every 30 seconds. WB reuses a last validated invitation or waits for
+  the paired Android creator to produce a fresh one.
+- Headless WB Creator publishes four VP8 carrier tracks in its initial offer.
+  This targets the alpha.36 field asymmetry (about 0.31 Mbps down versus 8.73
+  Mbps up), where Android started four tracks but the server started one and
+  depended on later renegotiation.
+- Android retains the previous carrier log when switching WB/VK and inserts a
+  session separator, so a VK bootstrap no longer erases the WB metrics needed
+  for directional diagnosis.
+- Do not increase the KCP window from the alpha.36 VK trace: it already reached
+  255/256 with about 6.5 seconds maximum fair-queue wait. Verify matching
+  alpha.37 WB logs show `tracks=4` and balanced per-track counters first.
+- Do not research or reproduce WBAAS or `slide-v3`. WB cookies/tokens stay on
+  Android and Manager accepts only validated invitation links.
+
 ## Active handoff (2026-07-29, alpha.36 exact WB handoff + LAN no-auth)
 
 - Android now passes the exact destination id and recovery profile when

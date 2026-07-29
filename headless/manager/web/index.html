@@ -97,7 +97,7 @@
                 <label>Получатель VK для этого клиента <span class="optional">необязательно, заменяет глобальный</span><input id="profileRecoveryRecipient" inputmode="numeric" placeholder="ID или vk.com/id123"></label>
                 <label>Срок действия <span class="optional">необязательно</span><input id="expiresAt" type="datetime-local"></label>
                 <label class="switch-row"><input id="enabled" type="checkbox" checked><span><strong>Клиент активен</strong><small>может создавать новые сессии</small></span></label>
-                <label class="switch-row"><input id="autoRestart" type="checkbox" checked><span><strong>Автовосстановление</strong><small>пересоздавать звонок после обрыва</small></span></label>
+                <label class="switch-row"><input id="autoRestart" type="checkbox" checked><span><strong>Всегда запущен</strong><small>восстанавливать профиль после обрыва, перезапуска контейнера или сервера</small></span></label>
                 <div class="actions"><button class="primary" type="submit" id="saveProfile">Сохранить профиль</button><button class="ghost" type="button" id="cancelEdit" hidden>Отмена</button></div>
               </form>
             </aside>

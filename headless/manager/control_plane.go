@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -462,6 +463,45 @@ func (cp *controlPlane) deleteProfileFor(ownerID, id string, admin bool) error {
 
 func (cp *controlPlane) startSession(input sessionInput) (sessionView, error) {
 	return cp.startSessionFor("", input, true)
+}
+
+func profileWantsPersistentSession(profile clientProfile, now time.Time) bool {
+	return profile.Enabled && profile.AutoRestart &&
+		(profile.ExpiresAt == nil || !now.After(*profile.ExpiresAt))
+}
+
+func (cp *controlPlane) hasLiveSessionForProfile(profileID string) bool {
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+	for _, session := range cp.sessions {
+		if session.ClientID != profileID {
+			continue
+		}
+		state := session.Manager.status().State
+		if (state != "stopped" && state != "failed") || session.isRecovering() {
+			return true
+		}
+	}
+	return false
+}
+
+// restorePersistentProfiles reconciles the persisted desired state after a
+// Manager/container restart. AutoRestart already supervises a process once it
+// exists; this boot pass recreates the missing managedSession objects.
+func (cp *controlPlane) restorePersistentProfiles() {
+	now := time.Now()
+	for _, profile := range cp.listProfiles() {
+		if !profileWantsPersistentSession(profile, now) || cp.hasLiveSessionForProfile(profile.ID) {
+			continue
+		}
+		if _, err := cp.startSession(sessionInput{ClientID: profile.ID}); err != nil {
+			log.Printf("[manager] persistent profile restore skipped profile=%s mode=%s: %v", profile.ID, profile.Config.Mode, err)
+			cp.events.add("warn", "session", "Could not restore the always-on profile after Manager restart", profile.ID)
+			continue
+		}
+		log.Printf("[manager] restored persistent profile=%s mode=%s", profile.ID, profile.Config.Mode)
+		cp.events.add("info", "session", "Restored always-on profile after Manager restart", profile.ID)
+	}
 }
 
 func (cp *controlPlane) startSessionFor(ownerID string, input sessionInput, admin bool) (sessionView, error) {

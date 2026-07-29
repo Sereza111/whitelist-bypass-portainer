@@ -103,7 +103,7 @@ class HeadlessSessionService : Service() {
             return
         }
 
-        logWriter.reset()
+        logWriter.beginSession()
         logWriter.append("Loading: ${maskUrl(config.url.trim())}")
         controller?.close()
         sessionRunning = true

@@ -899,7 +899,7 @@ class MainActivity :
 
         activeJoinUrl = url
 		recoveryInProgress = false
-        logWriter.reset()
+        logWriter.beginSession()
         runOnUiThread { logsFragment()?.refresh() }
         appendLog("Loading: ${maskUrl(url)}")
         lastStatus = VpnStatus.CONNECTING

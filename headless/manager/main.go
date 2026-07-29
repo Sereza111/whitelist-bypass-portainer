@@ -25,7 +25,7 @@ import (
 )
 
 var (
-	Version     = "0.5.0-alpha.36"
+	Version     = "0.5.0-alpha.37"
 	BuildCommit = "unknown"
 	BuildTime   = "unknown"
 )
@@ -633,22 +633,30 @@ func main() {
 		}
 	}
 
-	// A strict whitelist cannot reach the public Manager before the tunnel is
-	// up. Keep the last validated WB room available as a bootstrap rendezvous so
-	// Android can restore the data path first and use it for later control-plane
-	// requests. Fresh profiles still require the normal one-time creator flow.
-	for _, profile := range cp.listProfiles() {
-		if !profile.Enabled || profileBootstrapInvite(profile) == "" {
-			continue
+	// Profiles marked enabled + automatic recovery represent desired running
+	// state, not merely a retry policy for processes created during this boot.
+	// Restore every such profile after container/VPS restart. WB reuses its last
+	// validated room when possible, otherwise it immediately waits for the
+	// paired Android creator to provide a fresh invitation.
+	cp.restorePersistentProfiles()
+	reconcileStop := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				cp.restorePersistentProfiles()
+			case <-reconcileStop:
+				return
+			}
 		}
-		if _, startErr := cp.startSession(sessionInput{ClientID: profile.ID}); startErr != nil {
-			log.Printf("[manager] WB bootstrap auto-start skipped profile=%s: %v", profile.ID, startErr)
-		}
-	}
+	}()
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 	<-sig
+	close(reconcileStop)
 	vkLogin.cancelLogin("Manager остановлен")
 	wbLogin.cancelLogin("Manager остановлен")
 	cp.stopAll()
