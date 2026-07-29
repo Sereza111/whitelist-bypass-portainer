@@ -564,6 +564,15 @@ class MainActivity :
 				Prefs.savedDestinations, destinationID, recoveryProfile,
 			)
 			target?.let { config ->
+				val targetURL = config.url.trim()
+				val sameCarrierBusy = targetURL.isNotEmpty() &&
+					(activeJoinUrl == targetURL || pendingConnectConfig?.url?.trim() == targetURL) &&
+					(connected || resetInProgress || lastStatus == VpnStatus.STARTING ||
+						lastStatus == VpnStatus.CONNECTING || lastStatus == VpnStatus.RECOVERING)
+				if (sameCarrierBusy) {
+					appendLog("Duplicate carrier start ignored while connection is already in progress")
+					return
+				}
 				Prefs.activeDestinationId = config.id
 				appendLog("Carrier target=${config.platformLabel}")
 				startDirectReplacement(config)

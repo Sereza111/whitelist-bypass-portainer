@@ -25,7 +25,7 @@ import (
 )
 
 var (
-	Version     = "0.5.0-alpha.37"
+	Version     = "0.5.0-alpha.38"
 	BuildCommit = "unknown"
 	BuildTime   = "unknown"
 )
@@ -513,23 +513,34 @@ func (m *manager) status() sessionStatus {
 	if status.State == "running" || status.State == "link-ready" {
 		status.State = deriveRuntimeState(status.State, status.Logs)
 	}
+	if !runtimeTunnelLive(status.Logs) {
+		// Do not present the last throughput sample as current after the peer or
+		// transport has already disconnected. The process may legitimately stay
+		// alive waiting for the client, but its old METRICS sample is stale.
+		status.Metrics = nil
+	}
 	return status
 }
 
 func latestMetrics(lines []string) map[string]string {
 	for i := len(lines) - 1; i >= 0; i-- {
 		marker := strings.Index(lines[i], "METRICS ")
-		if marker < 0 {
-			continue
-		}
-		values := make(map[string]string)
-		for _, field := range strings.Fields(lines[i][marker+len("METRICS "):]) {
-			key, value, ok := strings.Cut(field, "=")
-			if ok && key != "" {
-				values[key] = value
+		if marker >= 0 {
+			values := make(map[string]string)
+			for _, field := range strings.Fields(lines[i][marker+len("METRICS "):]) {
+				key, value, ok := strings.Cut(field, "=")
+				if ok && key != "" {
+					values[key] = value
+				}
 			}
+			return values
 		}
-		return values
+		if runtimeDisconnectLine(lines[i]) || strings.Contains(lines[i], "peer recovery attempt") ||
+			strings.Contains(lines[i], "TUNNEL CONNECTED") || strings.Contains(lines[i], "handshake status=ok") {
+			// Do not cross a carrier lifecycle boundary and reuse a sample from
+			// the previous connection.
+			return nil
+		}
 	}
 	return nil
 }
@@ -539,9 +550,10 @@ func deriveRuntimeState(fallback string, lines []string) string {
 		line := lines[i]
 		switch {
 		case strings.Contains(line, "stalled") || strings.Contains(line, "Rejoining") ||
-			strings.Contains(line, "peer connection unhealthy") || strings.Contains(line, "peer recovery attempt"):
+			strings.Contains(line, "peer connection unhealthy") || strings.Contains(line, "peer recovery attempt") ||
+			runtimeDisconnectLine(line):
 			return "degraded"
-		case strings.Contains(line, "=== TUNNEL CONNECTED ===") || strings.Contains(line, "handshake status=ok"):
+		case strings.Contains(line, "TUNNEL CONNECTED") || strings.Contains(line, "handshake status=ok"):
 			return "connected"
 		case strings.Contains(line, "CALL CREATED") || strings.Contains(line, "Wrote call link") ||
 			strings.Contains(line, "Wrote ready join link"):
@@ -549,6 +561,26 @@ func deriveRuntimeState(fallback string, lines []string) string {
 		}
 	}
 	return fallback
+}
+
+func runtimeTunnelLive(lines []string) bool {
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := lines[i]
+		if runtimeDisconnectLine(line) || strings.Contains(line, "peer recovery attempt") {
+			return false
+		}
+		if strings.Contains(line, "TUNNEL CONNECTED") || strings.Contains(line, "handshake status=ok") {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeDisconnectLine(line string) bool {
+	return strings.Contains(line, "Connection disconnected") ||
+		strings.Contains(line, "Connection failed") ||
+		strings.Contains(line, "Connection closed") ||
+		strings.Contains(line, "call ended; Manager must request")
 }
 
 func main() {

@@ -14,6 +14,24 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
+## Active handoff (2026-07-29, alpha.38 VK bootstrap regression fix)
+
+- The external alpha.37 log retained several sessions and proved that none of
+  the new attempts reached `TUNNEL CONNECTED` or emitted current `METRICS`.
+  Every failing VK control bootstrap used `dualTrack=true`, changed from
+  `DIRECT` to `SERVER`, and was then closed by the direct-only carrier. The
+  earlier successful alpha.36 sample used `dualTrack=false`.
+- Saved VK control bootstrap is forced back to one track. This does not change
+  WB: the headless WB Creator still publishes four tracks in its initial offer.
+- Android ignores duplicate start intents for the exact carrier already being
+  connected and the persistent session service cannot restart an old link
+  while it is waiting for or applying a fresh profile invite.
+- Manager clears stale throughput metrics after a peer disconnect and marks
+  that runtime degraded; an old Mbps sample is no longer presented as a live
+  tunnel. A later `TUNNEL CONNECTED` supersedes the disconnect normally.
+- Do not research or reproduce WBAAS or `slide-v3`. WB cookies/tokens stay on
+  Android and Manager accepts only validated invitation links.
+
 ## Active handoff (2026-07-29, alpha.37 WB downlink + always-on candidate)
 
 - Enabled profiles marked `AutoRestart` now represent desired always-on state.

@@ -131,9 +131,10 @@ class CallConfigTest {
 
 	@Test
 	fun wbControlBootstrapPrefersActiveThenManagedVkInvite() {
-		val manual = CallConfig.newWith("Manual VK", "https://vk.com/call/manual-room")
+		val manual = CallConfig.newWith("Manual VK", "https://vk.com/call/manual-room").copy(dualTrack = true)
 		val managed = CallConfig.newWith("Managed VK", "https://vk.com/call/managed-room").copy(
 			recoveryProfile = "client-vk-profile",
+			dualTrack = true,
 		)
 		val wb = CallConfig.newWith("WB", "wbstream://wb-room")
 		val invalid = CallConfig.newWith("Invalid", "https://attacker.example/call/not-vk")
@@ -141,6 +142,8 @@ class CallConfigTest {
 
 		assertEquals(manual.id, CallConfig.selectVKControlBootstrap(items, manual.id)?.id)
 		assertEquals(managed.id, CallConfig.selectVKControlBootstrap(items, "missing")?.id)
+		assertEquals(false, CallConfig.selectVKControlBootstrap(items, manual.id)?.dualTrack)
+		assertEquals(false, CallConfig.selectVKControlBootstrap(items, "missing")?.dualTrack)
 		assertEquals(null, CallConfig.selectVKControlBootstrap(listOf(wb, invalid), "")?.id)
 	}
 }

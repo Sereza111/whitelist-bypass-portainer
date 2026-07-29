@@ -76,7 +76,7 @@ class HeadlessSessionService : Service() {
 
 
     private fun startSession() {
-        if (stopInProgress || sessionRunning) return
+        if (stopInProgress || sessionRunning || awaitingFreshInvite || restartInProgress) return
         val config = Prefs.activeDestination
         if (config == null) {
             showToast(R.string.error_no_destination)

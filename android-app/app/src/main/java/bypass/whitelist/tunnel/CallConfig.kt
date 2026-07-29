@@ -69,9 +69,14 @@ data class CallConfig(
 			val candidates = items.filter {
 				it.platform == CallPlatform.VK && CallPlatform.isSafeInviteLink(CallPlatform.VK, it.url)
 			}
-			return candidates.firstOrNull { it.id == activeID }
+			val selected = candidates.firstOrNull { it.id == activeID }
 				?: candidates.firstOrNull { !it.recoveryProfile.isNullOrBlank() }
 				?: candidates.firstOrNull()
+			// VK switches the call from DIRECT to SERVER when the bootstrap
+			// publishes the extra screen-share track. The current carrier supports
+			// only the direct two-party topology, so keep this short-lived control
+			// path single-track. WB still uses its independent four-track path.
+			return selected?.copy(dualTrack = false)
 		}
 
         fun newWith(name: String, url: String): CallConfig {

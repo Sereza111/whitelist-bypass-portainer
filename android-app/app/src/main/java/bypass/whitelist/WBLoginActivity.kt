@@ -582,7 +582,6 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 		) return false
 		val destinations = Prefs.savedDestinations
 		val vkBootstrap = CallConfig.selectVKControlBootstrap(destinations, Prefs.activeDestinationId)
-			?.copy(dualTrack = true)
 		val savedWB = destinations.firstOrNull {
 			it.recoveryProfile == requestedProfileId && isSafeInvite(it.url)
 		}

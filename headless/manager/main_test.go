@@ -765,6 +765,39 @@ func TestLatestMetricsAndRuntimeState(t *testing.T) {
 	if state := deriveRuntimeState("running", peerLines); state != "degraded" {
 		t.Fatalf("peer recovery state=%q", state)
 	}
+	if runtimeTunnelLive(peerLines) {
+		t.Fatal("peer recovery incorrectly retained live tunnel state")
+	}
+	reconnected := append(peerLines, "  TUNNEL CONNECTED")
+	if !runtimeTunnelLive(reconnected) {
+		t.Fatal("new tunnel connection did not supersede prior recovery")
+	}
+	disconnected := []string{
+		"  TUNNEL CONNECTED",
+		"METRICS tx_kbps=2048.0 rx_kbps=1024.0",
+		"[p2p] Connection disconnected, kicking peer",
+	}
+	if state := deriveRuntimeState("running", disconnected); state != "degraded" {
+		t.Fatalf("disconnected state=%q", state)
+	}
+	if runtimeTunnelLive(disconnected) {
+		t.Fatal("disconnected peer retained live tunnel state")
+	}
+	if metrics := latestMetrics(disconnected); metrics != nil {
+		t.Fatalf("disconnected peer retained stale metrics: %#v", metrics)
+	}
+	if metrics := latestMetrics(append(disconnected, "  TUNNEL CONNECTED")); metrics != nil {
+		t.Fatalf("reconnected peer reused prior carrier metrics: %#v", metrics)
+	}
+	mgr := newManagerAt(t.TempDir())
+	mgr.state = "running"
+	for _, line := range disconnected {
+		mgr.logs.add("%s", line)
+	}
+	status := mgr.status()
+	if status.State != "degraded" || status.Metrics != nil {
+		t.Fatalf("manager disconnected status=%q metrics=%#v", status.State, status.Metrics)
+	}
 }
 
 func TestRecoveryDelayIsBounded(t *testing.T) {
