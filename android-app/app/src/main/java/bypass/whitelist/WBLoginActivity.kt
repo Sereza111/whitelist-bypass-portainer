@@ -24,6 +24,7 @@ import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.materialswitch.MaterialSwitch
 import bypass.whitelist.tunnel.CallConfig
+import bypass.whitelist.tunnel.CallPlatform
 import bypass.whitelist.tunnel.HeadlessSessionService
 import bypass.whitelist.tunnel.TunnelServiceState
 import bypass.whitelist.recovery.ManagerNetwork
@@ -62,6 +63,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 	private var bootstrapStarted = false
 	private var lastManagerRoute = ""
 	private var terminalFailure = false
+	private var offlineRecoveryStarted = false
 	private val diagnosticLines = ArrayDeque<String>()
 	private val profileStartRetry = Runnable { requestSelectedProfileStart() }
 
@@ -146,11 +148,11 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 				if (!terminalFailure && pendingRequestId.isEmpty() &&
 					CREATOR_RE.matches(creatorId) && TOKEN_RE.matches(deviceSecret)
 				) status.setText(R.string.wb_creator_ready_help)
-				maybeSubmitInvite(url)
-            }
+				if (!maybeSubmitInvite(url)) maybeRecoverCurrentInvite(url)
+			}
 
 			override fun onPageFinished(view: WebView, url: String) {
-				maybeSubmitInvite(url)
+				if (!maybeSubmitInvite(url)) maybeRecoverCurrentInvite(url)
 				if (pendingRequestId.isNotEmpty()) scheduleAutoCreate(0)
 			}
 
@@ -315,6 +317,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 	private fun tryCreateRequestedCall() {
 		val currentURL = webView.url.orEmpty()
 		if (maybeSubmitInvite(currentURL)) return
+		if (maybeRecoverCurrentInvite(currentURL)) return
 		if (!isTrustedWBPage(currentURL) || isWBLoginPage(currentURL)) {
 			// Login is intentionally completed by the user in the regular WebView.
 			// Do not consume the UI-automation timeout while waiting for it.
@@ -349,6 +352,38 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 		inviteInput.setText(candidate)
 		trace("call-ui", "invite-detected")
 		submitInvite(candidate)
+		return true
+	}
+
+	/**
+	 * If the first pairing POST is blocked, the phone can still finish the
+	 * already-open WB call. Reuse that exact invite for the one saved managed
+	 * profile so the user can hand the same link to the panel's emergency
+	 * bootstrap field. This keeps WB credentials local and avoids inventing a
+	 * second room or changing the relay protocol.
+	 */
+	private fun maybeRecoverCurrentInvite(candidate: String): Boolean {
+		if (!terminalFailure || offlineRecoveryStarted || !isSafeInvite(candidate)) return false
+		val managed = Prefs.savedDestinations.filter {
+			it.platform == CallPlatform.WBSTREAM &&
+				CREATOR_RE.matches(it.recoveryProfile.orEmpty()) &&
+				TOKEN_RE.matches(it.recoveryKey.orEmpty())
+		}
+		val selected = when {
+			CREATOR_RE.matches(requestedProfileId) -> managed.firstOrNull { it.recoveryProfile == requestedProfileId }
+			managed.any { it.id == Prefs.activeDestinationId } -> managed.first { it.id == Prefs.activeDestinationId }
+			managed.size == 1 -> managed.single()
+			else -> null
+		} ?: return false
+		offlineRecoveryStarted = true
+		Prefs.updateDestination(selected.copy(url = candidate, recoveryPending = false))
+		Prefs.activeDestinationId = selected.id
+		trace("recovery", "local-profile-updated")
+		status.setText(R.string.wb_creator_waiting_for_relay)
+		if (autoConnect.isChecked && !TunnelServiceState.isAnyTunnelComponentRunning(this)) {
+			trace("recovery", "auto-connect")
+			openClientAndConnect()
+		}
 		return true
 	}
 

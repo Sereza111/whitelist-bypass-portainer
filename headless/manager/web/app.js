@@ -429,6 +429,10 @@ async function renderDetail() {
   byId('detailEmpty').hidden = true;
   byId('selectedTitle').textContent = `${session.clientName} · ${friendlyState(status)}`;
   byId('sessionLink').value = status.sessionLink || '';
+  const emergency = byId('wbEmergency');
+  const emergencyReady = status.mode === 'wbstream' && status.state === 'waiting-for-creator';
+  emergency.hidden = !emergencyReady;
+  if (!emergencyReady) byId('wbEmergencyInput').value = '';
   byId('metrics').innerHTML = [
     metricCard('Download', metrics.rx_kbps, 'kbps'),
     metricCard('Upload', metrics.tx_kbps, 'kbps'),
@@ -442,6 +446,18 @@ async function renderDetail() {
   const atBottom = byId('logs').scrollTop + byId('logs').clientHeight >= byId('logs').scrollHeight - 24;
   byId('logs').textContent = (status.logs || []).join('\n') || 'Событий пока нет';
   if (atBottom) byId('logs').scrollTop = byId('logs').scrollHeight;
+}
+
+async function submitWbEmergencyInvite() {
+  if (!app.selected) return;
+  const field = byId('wbEmergencyInput');
+  const inviteLink = field.value.trim();
+  if (!inviteLink) throw new Error('Вставь ссылку приглашения WB.');
+  await api(`/api/sessions/${encodeURIComponent(app.selected)}/wb-invite`, {
+    method: 'POST', body: JSON.stringify({ inviteLink }),
+  });
+  field.value = '';
+  await refresh();
 }
 
 function bindDynamicActions() {
@@ -743,6 +759,7 @@ byId('reveal').addEventListener('click', () => {
 byId('copy').addEventListener('click', async () => {
   if (byId('sessionLink').value) await copyText(byId('sessionLink').value);
 });
+byId('wbEmergencySubmit').addEventListener('click', () => run(submitWbEmergencyInvite));
 byId('vkLoginOpen').addEventListener('click', () => run(openVKLogin));
 byId('vkLoginClose').addEventListener('click', closeVKLogin);
 byId('vkLoginStart').addEventListener('click', () => run(startVKLogin));

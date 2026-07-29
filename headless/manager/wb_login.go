@@ -364,6 +364,39 @@ func (login *wbLoginManager) submitInvite(requestID, raw string) (string, string
 	return link, request.ProfileID, nil
 }
 
+// submitPendingInvite is the deliberately narrow emergency bootstrap path.
+// It is used only by an authenticated panel operator when the Android control
+// request cannot reach Manager because the previous WB bootstrap room is dead.
+// The same validation as the creator endpoint applies; no WB credentials are
+// accepted or persisted here.
+func (login *wbLoginManager) submitPendingInvite(profileID, raw string) (string, error) {
+	link, err := normalizeWBInvite(raw)
+	if err != nil {
+		return "", err
+	}
+	profileID = strings.TrimSpace(profileID)
+	login.mu.Lock()
+	login.expireLocked(time.Now().UTC())
+	var selected *wbCallRequest
+	for _, request := range login.pending {
+		if request.ProfileID != profileID {
+			continue
+		}
+		if selected == nil || request.CreatedAt.Before(selected.CreatedAt) {
+			selected = request
+		}
+	}
+	if selected == nil {
+		login.mu.Unlock()
+		return "", errors.New("no pending WB call request for this profile")
+	}
+	delete(login.pending, selected.ID)
+	login.mu.Unlock()
+	selected.result <- wbCallResult{link: link}
+	login.addEvent("info", "Accepted panel WB bootstrap invitation", profileID)
+	return link, nil
+}
+
 func normalizeWBInvite(raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if len(raw) < 1 || len(raw) > 2048 {

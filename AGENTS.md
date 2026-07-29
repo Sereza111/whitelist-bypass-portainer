@@ -14,6 +14,22 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
+## Active handoff (2026-07-29, alpha.32 WB dead-channel recovery candidate)
+
+- Alpha.31 field evidence confirms the pairing request can fail with
+  `ConnectException` while the phone is behind the whitelist and the saved WB
+  room is already dead. This is a channel deadlock, not a WB transport-mode
+  failure: there is no route by which Manager can learn a first new room.
+- Alpha.32 adds an authenticated panel-only emergency endpoint for a pending
+  WB session. It accepts only a validated `stream.wb.ru/room/...` invitation and
+  starts the waiting relay; it never accepts or stores cookies/WB tokens.
+- Android alpha.32 can reuse the current WebView room locally when pairing is
+  blocked, updating the single active managed WB profile to that exact room.
+  The operator pastes the same link into the panel once; subsequent control
+  traffic uses the project's own WB tunnel again.
+- Do not research or reproduce WBAAS or `slide-v3`. WB cookies/tokens stay on
+  Android and Manager accepts only validated invitation links.
+
 ## Active handoff (2026-07-29, alpha.31 WB bootstrap invalidation candidate)
 
 - The external-only alpha.30 field logs/screenshots must never be committed.

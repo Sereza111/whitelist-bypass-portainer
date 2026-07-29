@@ -356,6 +356,44 @@ func registerControlAPIRoutes(mux *http.ServeMux, cp *controlPlane, vkLogin *vkL
 		}
 		writeJSON(w, http.StatusAccepted, session)
 	}))
+	mux.Handle("POST /api/sessions/{id}/wb-invite", mutate(func(w http.ResponseWriter, r *http.Request) {
+		var input struct {
+			InviteLink string `json:"inviteLink"`
+		}
+		if !decodeRequest(w, r, &input) {
+			return
+		}
+		cp.mu.Lock()
+		managed, ok := cp.sessions[r.PathValue("id")]
+		if ok {
+			// Copy the immutable request fields while holding the control-plane lock;
+			// Manager status has its own lock and is read after releasing this one.
+			managedConfig := managed.Config
+			cp.mu.Unlock()
+			if !strings.EqualFold(managed.Manager.status().State, "waiting-for-creator") ||
+				!strings.EqualFold(managedConfig.Mode, "wbstream") {
+				writeJSON(w, http.StatusConflict, map[string]string{"error": "WB session is not waiting for a creator invitation"})
+				return
+			}
+			profileID := strings.TrimSpace(managedConfig.RecoveryProfile)
+			if profileID == "" {
+				writeJSON(w, http.StatusConflict, map[string]string{"error": "WB session has no managed profile"})
+				return
+			}
+			if _, err := wbLogin.submitPendingInvite(profileID, input.InviteLink); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			cp.events.add("info", "wb-creator", "Accepted a manual WB bootstrap invitation", profileID)
+			writeJSON(w, http.StatusAccepted, map[string]string{"state": "starting"})
+			return
+		}
+		cp.mu.Unlock()
+		if !ok {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "session not found"})
+			return
+		}
+	}))
 	mux.Handle("GET /api/sessions/{id}", protect(func(w http.ResponseWriter, r *http.Request) {
 		session, ok := cp.session(r.PathValue("id"))
 		if !ok {

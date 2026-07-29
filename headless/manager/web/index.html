@@ -123,6 +123,11 @@
             <div id="detailEmpty" class="detail-empty">Открой сессию, чтобы увидеть ссылку, скорость, очереди KCP и безопасный журнал.</div>
             <div id="detail" hidden>
               <div class="link-vault"><label>Секретная ссылка подключения<div class="copy-row"><input id="sessionLink" readonly type="password"><button id="reveal" type="button" class="small">Показать</button><button id="copy" type="button" class="small">Копировать</button></div></label></div>
+              <div id="wbEmergency" class="inline-warning" hidden>
+                <strong>Нет канала до Android creator.</strong>
+                <span>Если телефон уже создал этот WB-звонок, скопируй его приглашение из WB и передай сюда один раз. Cookies и токены не нужны.</span>
+                <div class="copy-row"><input id="wbEmergencyInput" type="password" autocomplete="off" placeholder="https://stream.wb.ru/room/..."/><button id="wbEmergencySubmit" type="button" class="small">Передать</button></div>
+              </div>
               <div id="metrics" class="metrics-grid"></div><pre id="logs">Ожидание событий…</pre>
             </div>
           </article>

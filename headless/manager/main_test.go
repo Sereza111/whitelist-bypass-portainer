@@ -956,6 +956,63 @@ func TestWBDevicePairingAndCallExchangeOnlyInvite(t *testing.T) {
 	}
 }
 
+func TestPanelCanBreakDeadWBControlChannelWithValidatedInvite(t *testing.T) {
+	dataDir := t.TempDir()
+	login := newWBLoginManager(dataDir)
+	login.binding = &wbCreatorBinding{
+		CreatorID: "creator-offline", DeviceID: "device-offline", Name: "Offline Android",
+		SecretHash: strings.Repeat("0", 64), PairedAt: time.Now().UTC(),
+	}
+	cp, err := newControlPlane(dataDir, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cp.setWBCreator(login)
+	profileID := "client-offline-wb"
+	fakeManager := newManagerAt(t.TempDir())
+	fakeManager.state = "waiting-for-creator"
+	fakeManager.request = sessionRequest{Mode: "wbstream", RecoveryProfile: profileID}
+	cp.mu.Lock()
+	cp.sessions["session-offline-wb"] = &managedSession{
+		ID: "session-offline-wb", ClientID: profileID, ClientName: "Offline WB",
+		CreatedAt: time.Now().UTC(), Manager: fakeManager,
+		Config: sessionRequest{Mode: "wbstream", RecoveryProfile: profileID},
+	}
+	cp.mu.Unlock()
+
+	callResult := make(chan wbCallResult, 1)
+	go func() {
+		link, callErr := login.requestCall(context.Background(), profileID, "Offline WB")
+		callResult <- wbCallResult{link: link, err: callErr}
+	}()
+	deadline := time.Now().Add(time.Second)
+	for {
+		login.mu.Lock()
+		pending := len(login.pending)
+		login.mu.Unlock()
+		if pending == 1 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	mux := http.NewServeMux()
+	registerControlAPIRoutes(mux, cp, nil, login, "admin", testPanelPassword, t.TempDir())
+	response := controlAPIRequest(t, mux, http.MethodPost, "/api/sessions/session-offline-wb/wb-invite", `{"inviteLink":"https://stream.wb.ru/room/recovered_123"}`)
+	if response.Code != http.StatusAccepted || strings.Contains(response.Body.String(), "recovered_123") {
+		t.Fatalf("panel bootstrap=%d body=%s", response.Code, response.Body.String())
+	}
+	result := <-callResult
+	if result.err != nil || result.link != "wbstream://recovered_123" {
+		t.Fatalf("unexpected recovered call: %#v", result)
+	}
+
+	response = controlAPIRequest(t, mux, http.MethodPost, "/api/sessions/session-offline-wb/wb-invite", `{"inviteLink":"https://attacker.example/room/recovered_123"}`)
+	if response.Code != http.StatusBadRequest && response.Code != http.StatusConflict {
+		t.Fatalf("invalid panel bootstrap=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestProfileInviteReadyRequiresCurrentGeneration(t *testing.T) {
 	profile := clientProfile{CurrentInvite: "wbstream://room", RecoveryGeneration: 3, InviteGeneration: 2}
 	if profileInviteReady(profile) {
