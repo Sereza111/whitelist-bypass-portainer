@@ -65,3 +65,18 @@ func TestNewKCPTunnelEnablesInnerStriping(t *testing.T) {
 		t.Fatal("KCP wrapper did not enable packet striping on its inner tunnel")
 	}
 }
+
+func TestAdaptiveKCPEnablesInnerStripingOnlyWhenReliableModeWins(t *testing.T) {
+	inner := &stripingProbeTunnel{}
+	adaptive := NewAdaptiveKCPTunnel(inner, func(string, ...any) {})
+	defer adaptive.Stop()
+	if inner.enabled {
+		t.Fatal("adaptive wrapper enabled striping before KCP negotiation")
+	}
+	if !adaptive.EnableKCP() {
+		t.Fatal("failed to enable adaptive KCP")
+	}
+	if !inner.enabled {
+		t.Fatal("adaptive wrapper did not enable inner striping")
+	}
+}

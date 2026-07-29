@@ -28,9 +28,9 @@ type ScreenWriter struct {
 	stopOnce  sync.Once
 	running   atomic.Bool
 
-	cfgMu sync.Mutex
-	fps   int
-	batch int
+	cfgMu     sync.Mutex
+	fps       int
+	batch     int
 	sent      atomic.Uint64
 	sentBytes atomic.Uint64
 	sendWait  atomic.Uint64
@@ -194,6 +194,19 @@ type SymmetricScreenTunnel struct {
 	recv       atomic.Uint64
 	recvBytes  atomic.Uint64
 	trackCount atomic.Int32
+	striping   atomic.Bool
+	nextTrack  atomic.Uint64
+}
+
+// EnableRoundRobinStriping is enabled only after the adaptive reliability
+// layer selects KCP. Raw mux frames keep per-connection affinity, while KCP
+// segments may safely arrive out of order and can use both VK carriers.
+func (s *SymmetricScreenTunnel) EnableRoundRobinStriping() {
+	s.nextTrack.Store(0)
+	s.striping.Store(true)
+	if s.logFn != nil {
+		s.logFn("screen tunnel: round-robin KCP striping enabled")
+	}
 }
 
 func (s *SymmetricScreenTunnel) SetTrackCount(n int) {
@@ -232,15 +245,27 @@ func (s *SymmetricScreenTunnel) SendData(data []byte) {
 		s.cam.SendData(data)
 		return
 	}
-	tc := uint32(s.trackCount.Load())
-	if tc < 1 {
-		tc = 1
-	}
-	if connID%tc == 1 && s.screenUp() {
+	if s.selectTrack(data) == 1 && s.screenUp() {
 		s.screen.SendData(data)
 		return
 	}
 	s.cam.SendData(data)
+}
+
+func (s *SymmetricScreenTunnel) selectTrack(data []byte) uint32 {
+	var connID uint32
+	if len(data) >= 8 {
+		connID = binary.BigEndian.Uint32(data[4:8])
+	}
+	tc := uint32(s.trackCount.Load())
+	if tc < 1 {
+		tc = 1
+	}
+	track := connID % tc
+	if s.striping.Load() {
+		track = uint32(s.nextTrack.Add(1)-1) % tc
+	}
+	return track
 }
 
 func (s *SymmetricScreenTunnel) SetOnData(fn func([]byte)) {
@@ -250,7 +275,7 @@ func (s *SymmetricScreenTunnel) SetOnData(fn func([]byte)) {
 	s.cam.SetOnData(fn)
 }
 
-func (s *SymmetricScreenTunnel) SetOnClose(fn func())      { s.cam.SetOnClose(fn) }
+func (s *SymmetricScreenTunnel) SetOnClose(fn func()) { s.cam.SetOnClose(fn) }
 func (s *SymmetricScreenTunnel) Reconfigure(fps, batch int) {
 	s.cam.Reconfigure(fps, batch)
 	s.screen.Reconfigure(fps, batch)
@@ -296,15 +321,20 @@ func (s *SymmetricScreenTunnel) TunnelMetrics() TunnelMetrics {
 	cam := s.cam.TunnelMetrics()
 	screen := s.screen.TunnelMetrics()
 	return TunnelMetrics{
-		Kind:           "symmetric-screen",
-		SentBytes:      cam.SentBytes + screen.SentBytes,
-		ReceivedBytes:  cam.ReceivedBytes + s.recvBytes.Load(),
-		SentFrames:     cam.SentFrames + screen.SentFrames,
-		ReceivedFrames: cam.ReceivedFrames + s.recv.Load(),
-		QueueDepth:     cam.QueueDepth + screen.QueueDepth,
-		QueueCapacity:  cam.QueueCapacity + screen.QueueCapacity,
-		MaxQueueDepth:  cam.MaxQueueDepth + screen.MaxQueueDepth,
-		SendWaitNanos:  cam.SendWaitNanos + screen.SendWaitNanos,
-		TrackCount:     int(s.trackCount.Load()),
+		Kind:                "symmetric-screen",
+		SentBytes:           cam.SentBytes + screen.SentBytes,
+		ReceivedBytes:       cam.ReceivedBytes + s.recvBytes.Load(),
+		SentFrames:          cam.SentFrames + screen.SentFrames,
+		ReceivedFrames:      cam.ReceivedFrames + s.recv.Load(),
+		QueueDepth:          cam.QueueDepth + screen.QueueDepth,
+		QueueCapacity:       cam.QueueCapacity + screen.QueueCapacity,
+		MaxQueueDepth:       cam.MaxQueueDepth + screen.MaxQueueDepth,
+		SendWaitNanos:       cam.SendWaitNanos + screen.SendWaitNanos,
+		TrackCount:          int(s.trackCount.Load()),
+		TrackSentBytes:      []uint64{cam.SentBytes, screen.SentBytes},
+		TrackReceivedBytes:  []uint64{cam.ReceivedBytes, s.recvBytes.Load()},
+		TrackSentFrames:     []uint64{cam.SentFrames, screen.SentFrames},
+		TrackReceivedFrames: []uint64{cam.ReceivedFrames, s.recv.Load()},
+		TrackQueueDepths:    []int{cam.QueueDepth, screen.QueueDepth},
 	}
 }

@@ -20,6 +20,7 @@ import bypass.whitelist.util.LanProxy
 import bypass.whitelist.util.Prefs
 import bypass.whitelist.util.SocksAuth
 import bypass.whitelist.util.SocksAuthMode
+import bypass.whitelist.util.SocksCredentials
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.materialswitch.MaterialSwitch
@@ -57,9 +58,8 @@ class ProxyActionSheet : BottomSheetDialogFragment() {
 
 		fun selectedCredentials(): Pair<String, String> {
 			if (selectedAuth == SocksAuthMode.MANUAL) {
-				val user = userInput.text.toString().trim()
-				val pass = passInput.text.toString()
-				if (user.isNotBlank() && pass.isNotBlank()) return user to pass
+				val credentials = SocksCredentials.manual(userInput.text.toString(), passInput.text.toString())
+				return credentials.user to credentials.pass
 			}
 			return SocksAuth.generatedUser to SocksAuth.generatedPass
 		}
@@ -76,7 +76,11 @@ class ProxyActionSheet : BottomSheetDialogFragment() {
 				endpoints.joinToString("\n")
 			}
 			val (user, pass) = selectedCredentials()
-			lanCredentials.text = getString(R.string.proxy_lan_credentials, user, pass)
+			lanCredentials.text = if (user.isEmpty() && pass.isEmpty()) {
+				getString(R.string.proxy_lan_no_auth)
+			} else {
+				getString(R.string.proxy_lan_credentials, user, pass)
+			}
 		}
 
 		lanSwitch.setOnCheckedChangeListener { _, _ -> refreshLanDetails() }
@@ -127,8 +131,10 @@ class ProxyActionSheet : BottomSheetDialogFragment() {
 				appendLine("WhitelistBypass phone SOCKS5")
 				appendLine("Host: ${endpoints.firstOrNull()?.substringBeforeLast(':') ?: "<phone LAN IP>"}")
 				appendLine("Port: $port")
-				appendLine("User: $user")
-				append("Password: $pass")
+				if (user.isEmpty() && pass.isEmpty()) append("Authentication: none") else {
+					appendLine("User: $user")
+					append("Password: $pass")
+				}
 			}
 			val clipboard = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
 			clipboard.setPrimaryClip(ClipData.newPlainText("WhitelistBypass SOCKS5", text))
@@ -137,9 +143,8 @@ class ProxyActionSheet : BottomSheetDialogFragment() {
 
         view.findViewById<MaterialButton>(R.id.proxyCancelButton).setOnClickListener { dismiss() }
 		view.findViewById<MaterialButton>(R.id.proxySaveButton).setOnClickListener {
-			if (lanSwitch.isChecked && selectedAuth == SocksAuthMode.MANUAL &&
-				(userInput.text.isNullOrBlank() || passInput.text.isNullOrBlank())
-			) {
+			val manualCredentials = SocksCredentials.manual(userInput.text.toString(), passInput.text.toString())
+			if (selectedAuth == SocksAuthMode.MANUAL && !manualCredentials.isComplete) {
 				Toast.makeText(requireContext(), R.string.proxy_lan_manual_auth_required, Toast.LENGTH_LONG).show()
 				return@setOnClickListener
 			}

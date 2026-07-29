@@ -4,6 +4,17 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class CallConfigTest {
+	@Test
+	fun handoffUsesExactDestinationEvenWhileAnotherCarrierIsActive() {
+		val vk = CallConfig.newWith("VK bootstrap", "https://vk.com/call/bootstrap")
+		val wb = CallConfig.newWith("WB", "wbstream://room-id").copy(recoveryProfile = "profile-1")
+		val otherWB = CallConfig.newWith("Other WB", "wbstream://other-room").copy(recoveryProfile = "profile-2")
+
+		assertEquals(wb.id, CallConfig.selectHandoffTarget(listOf(vk, otherWB, wb), wb.id, "profile-1")?.id)
+		assertEquals(null, CallConfig.selectHandoffTarget(listOf(vk, wb), vk.id, "profile-1"))
+		assertEquals(null, CallConfig.selectHandoffTarget(listOf(vk, wb), "missing", "profile-1"))
+	}
+
 
     @Test
     fun managedWbRefreshPreservesExplicitDcMode() {

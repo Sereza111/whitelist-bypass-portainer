@@ -558,7 +558,17 @@ class MainActivity :
         intent.action = null
 		val useExistingWBInvite = intent.getBooleanExtra(EXTRA_USE_EXISTING_WB_INVITE, false)
 		if (useExistingWBInvite) {
-			Prefs.activeDestination?.let(::startDirectReplacement) ?: run {
+			val destinationID = intent.getStringExtra(EXTRA_DESTINATION_ID).orEmpty()
+			val recoveryProfile = intent.getStringExtra(EXTRA_RECOVERY_PROFILE).orEmpty()
+			val target = CallConfig.selectHandoffTarget(
+				Prefs.savedDestinations, destinationID, recoveryProfile,
+			)
+			target?.let { config ->
+				Prefs.activeDestinationId = config.id
+				appendLog("Carrier target=${config.platformLabel}")
+				startDirectReplacement(config)
+			} ?: run {
+				appendLog("Fresh WB target missing; refusing to restart the active bootstrap carrier")
 				Toast.makeText(this, R.string.error_no_destination, Toast.LENGTH_SHORT).show()
 			}
 			return
@@ -798,21 +808,24 @@ class MainActivity :
             val output = socket.getOutputStream()
             val input = socket.getInputStream()
 
-            output.write(byteArrayOf(0x05, 0x01, 0x02))
+			val authMethod = if (SocksAuth.requiresAuthentication) 0x02 else 0x00
+            output.write(byteArrayOf(0x05, 0x01, authMethod.toByte()))
             output.flush()
-            if (input.read() != 0x05 || input.read() != 0x02) return false
+			if (input.read() != 0x05 || input.read() != authMethod) return false
 
-            val userBytes = SocksAuth.user.toByteArray(Charsets.US_ASCII)
-            val passBytes = SocksAuth.pass.toByteArray(Charsets.US_ASCII)
-            val authPacket = ByteArray(3 + userBytes.size + passBytes.size)
-            authPacket[0] = 0x01
-            authPacket[1] = userBytes.size.toByte()
-            System.arraycopy(userBytes, 0, authPacket, 2, userBytes.size)
-            authPacket[2 + userBytes.size] = passBytes.size.toByte()
-            System.arraycopy(passBytes, 0, authPacket, 3 + userBytes.size, passBytes.size)
-            output.write(authPacket)
-            output.flush()
-            if (input.read() != 0x01 || input.read() != 0x00) return false
+			if (authMethod == 0x02) {
+				val userBytes = SocksAuth.user.toByteArray(Charsets.US_ASCII)
+				val passBytes = SocksAuth.pass.toByteArray(Charsets.US_ASCII)
+				val authPacket = ByteArray(3 + userBytes.size + passBytes.size)
+				authPacket[0] = 0x01
+				authPacket[1] = userBytes.size.toByte()
+				System.arraycopy(userBytes, 0, authPacket, 2, userBytes.size)
+				authPacket[2 + userBytes.size] = passBytes.size.toByte()
+				System.arraycopy(passBytes, 0, authPacket, 3 + userBytes.size, passBytes.size)
+				output.write(authPacket)
+				output.flush()
+				if (input.read() != 0x01 || input.read() != 0x00) return false
+			}
 
             val hostBytes = host.toByteArray(Charsets.US_ASCII)
             val request = ByteArray(4 + 1 + hostBytes.size + 2)
@@ -1090,6 +1103,8 @@ class MainActivity :
 		private const val MOBILE_INVITE_HOST = "import"
         const val ACTION_AUTO_START = "bypass.whitelist.AUTO_START"
 		const val EXTRA_USE_EXISTING_WB_INVITE = "bypass.whitelist.extra.USE_EXISTING_WB_INVITE"
+		const val EXTRA_DESTINATION_ID = "bypass.whitelist.extra.DESTINATION_ID"
+		const val EXTRA_RECOVERY_PROFILE = "bypass.whitelist.extra.RECOVERY_PROFILE"
 		const val ACTION_RECOVERY_UPDATE = "bypass.whitelist.OPEN_RECOVERY"
         private const val SUB_PAGE_TAG = "sub_page"
         private const val STATE_CURRENT_TAB_ID = "current_tab_id"

@@ -82,7 +82,7 @@ class RelayController(
                 if (isRunning) onLog("Relay error: ${e.message}")
             }
         }.also { it.start() }
-        onLog("Relay started DC mode (SOCKS5 ${SocksAuth.user}:[REDACTED]@${Prefs.effectiveSocksHost}:${Prefs.socksPort}, WS :${Ports.DC_WS})")
+		onLog("Relay started DC mode (SOCKS5 ${SocksAuth.safeEndpoint(Prefs.effectiveSocksHost, Prefs.socksPort)}, WS :${Ports.DC_WS})")
     }
 
     private fun startPion(mode: TunnelMode, platform: CallPlatform) {
@@ -112,7 +112,7 @@ class RelayController(
                 pb.redirectErrorStream(true)
                 val proc = pb.start()
                 synchronized(this) { pionProcess = proc }
-                onLog("Pion relay started mode=$relayMode (signaling :${Ports.PION_SIGNALING}, SOCKS5 ${SocksAuth.user}:[REDACTED]@${Prefs.effectiveSocksHost}:${Prefs.socksPort})")
+				onLog("Pion relay started mode=$relayMode (signaling :${Ports.PION_SIGNALING}, SOCKS5 ${SocksAuth.safeEndpoint(Prefs.effectiveSocksHost, Prefs.socksPort)})")
                 val stdinWriter = BufferedWriter(OutputStreamWriter(proc.outputStream))
                 proc.inputStream.bufferedReader().forEachLine { line ->
                     if (line.startsWith("RESOLVE:")) {

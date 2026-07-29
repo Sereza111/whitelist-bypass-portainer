@@ -250,20 +250,21 @@
     <string name="proxy_host_field_label">SOCKS5 host</string>
 	<string name="proxy_host_hint">127.0.0.1</string>
 	<string name="proxy_lan_title">Share SOCKS5 over LAN</string>
-	<string name="proxy_lan_sub">Allow trusted Wi-Fi/hotspot devices to use this tunnel. Authentication is required. Reconnect after changing.</string>
+	<string name="proxy_lan_sub">Allow trusted Wi-Fi/hotspot devices to use this tunnel. Empty Manual fields expose it without authentication. Reconnect after changing.</string>
 	<string name="proxy_lan_endpoint_label">PC connection settings</string>
 	<string name="proxy_lan_no_address">Connect to Wi-Fi or enable the phone hotspot to get a LAN address.</string>
 	<string name="proxy_lan_credentials">User: %1$s\nPass: %2$s</string>
+	<string name="proxy_lan_no_auth">Authentication: none — every device on this LAN can use the proxy</string>
 	<string name="proxy_lan_copy">Copy PC configuration</string>
 	<string name="proxy_lan_copied">SOCKS5 configuration copied</string>
-	<string name="proxy_lan_manual_auth_required">LAN sharing requires a non-empty user and password</string>
+	<string name="proxy_lan_manual_auth_required">Enter both user and password, or leave both empty</string>
     <string name="proxy_auth_field_label">Authentication</string>
     <string name="proxy_user_field_label">User</string>
     <string name="proxy_pass_field_label">Pass</string>
     <string name="proxy_only_title">Proxy only</string>
     <string name="proxy_only_sub">Skip the VPN, expose SOCKS5 only</string>
     <string name="proxy_auth_auto_sub">Generated user / pass</string>
-    <string name="proxy_auth_manual_sub">Use the user / pass below</string>
+	<string name="proxy_auth_manual_sub">Use the fields below, or leave both empty for no authentication</string>
 
     <string name="activity_empty">No events yet</string>
     <string name="activity_copy">Copy raw</string>

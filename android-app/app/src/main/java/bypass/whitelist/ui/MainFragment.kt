@@ -85,8 +85,10 @@ class MainFragment : Fragment(R.layout.fragment_main_screen) {
                 appendLine("WhitelistBypass local SOCKS5")
                 appendLine("Host: 127.0.0.1")
                 appendLine("Port: ${Prefs.socksPort}")
-                appendLine("User: ${SocksAuth.user}")
-                append("Password: ${SocksAuth.pass}")
+				if (SocksAuth.requiresAuthentication) {
+					appendLine("User: ${SocksAuth.user}")
+					append("Password: ${SocksAuth.pass}")
+				} else append("Authentication: none")
             }
             val clipboard = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             clipboard.setPrimaryClip(ClipData.newPlainText("WhitelistBypass SOCKS5", text))

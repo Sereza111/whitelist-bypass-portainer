@@ -59,7 +59,12 @@ data class CallConfig(
 		recoverySyncUrl?.let { put("recoverySyncUrl", it) }
     }
 
-    companion object {
+	companion object {
+		fun selectHandoffTarget(items: List<CallConfig>, destinationID: String, profile: String): CallConfig? {
+			val exact = items.firstOrNull { it.id == destinationID } ?: return null
+			return exact.takeIf { profile.isEmpty() || it.recoveryProfile == profile }
+		}
+
 		fun selectVKControlBootstrap(items: List<CallConfig>, activeID: String): CallConfig? {
 			val candidates = items.filter {
 				it.platform == CallPlatform.VK && CallPlatform.isSafeInviteLink(CallPlatform.VK, it.url)

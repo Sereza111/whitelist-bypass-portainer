@@ -14,6 +14,26 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
+## Active handoff (2026-07-29, alpha.36 exact WB handoff + LAN no-auth)
+
+- Android now passes the exact destination id and recovery profile when
+  replacing the temporary VK bootstrap with a fresh WB invitation. MainActivity
+  rejects a mismatched target instead of restarting whichever profile happens
+  to be active. Carrier transition logs identify bootstrap and target without
+  exposing invitation links.
+- Manual SOCKS authentication accepts either both fields or neither. Both empty
+  means RFC 1928 no-auth; partial credentials are rejected. The UI and copied
+  configuration explicitly warn that every device on the trusted LAN can use
+  an unauthenticated listener. Auto remains the default.
+- Saved VK control bootstrap is upgraded to dual-track. Once negotiated KCP is
+  active, its segments are striped round-robin over camera VP8 and screen DC;
+  raw mux retains per-connection affinity. Per-track metrics expose balance.
+- The external alpha.35 field log measured single-track VK fallback, not WB:
+  it contained `vk.com/call`, `dualTrack=false`, `tracks=1` and no WB joiner.
+  Field validation must first confirm exact WB activation with `tracks=4`.
+- Do not research or reproduce WBAAS or `slide-v3`. WB cookies/tokens stay on
+  Android and Manager accepts only validated invitation links.
+
 ## Active handoff (2026-07-29, alpha.35 WB multi-track throughput candidate)
 
 - Alpha.32 field metrics showed dual-track enabled but only roughly

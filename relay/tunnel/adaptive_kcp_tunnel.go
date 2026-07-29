@@ -89,6 +89,9 @@ func (t *AdaptiveKCPTunnel) EnableKCP() bool {
 		}
 	}
 	t.once.Do(func() { close(t.ready) })
+	if striper, ok := t.inner.(interface{ EnableRoundRobinStriping() }); ok {
+		striper.EnableRoundRobinStriping()
+	}
 	if t.logFn != nil {
 		if previous == 1 {
 			t.logFn("adaptive-kcp: late handshake upgraded legacy raw fallback to reliable data path")

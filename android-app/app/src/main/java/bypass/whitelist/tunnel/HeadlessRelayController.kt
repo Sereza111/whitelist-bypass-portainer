@@ -74,7 +74,7 @@ class HeadlessRelayController(
                     pendingCommands.forEach { writeStdin(it) }
                     pendingCommands.clear()
                 }
-                onLog.invoke("Headless relay started (signaling :${Ports.PION_SIGNALING}, SOCKS5 ${SocksAuth.user}:[REDACTED]@${Prefs.effectiveSocksHost}:${Prefs.socksPort})")
+				onLog.invoke("Headless relay started (signaling :${Ports.PION_SIGNALING}, SOCKS5 ${SocksAuth.safeEndpoint(Prefs.effectiveSocksHost, Prefs.socksPort)})")
 
                 proc.inputStream.bufferedReader().forEachLine { line ->
                     if (line.startsWith("RESOLVE:")) {

@@ -15,6 +15,15 @@ object Ports {
 
 enum class SocksAuthMode { AUTO, MANUAL }
 
+data class SocksCredentials(val user: String, val pass: String) {
+	val isComplete: Boolean get() = user.isEmpty() == pass.isEmpty()
+	val requiresAuthentication: Boolean get() = user.isNotEmpty()
+
+	companion object {
+		fun manual(user: String, pass: String): SocksCredentials = SocksCredentials(user.trim(), pass)
+	}
+}
+
 object SocksAuth {
 	private fun randomString(length: Int): String {
 		val random = SecureRandom()
@@ -42,15 +51,26 @@ object SocksAuth {
 	val generatedUser: String get() = ensureAutoCredentials().first
 	val generatedPass: String get() = ensureAutoCredentials().second
 
-	val user: String
-		get() = if (Prefs.socksAuthMode == SocksAuthMode.MANUAL &&
-			Prefs.socksUser.isNotBlank() && Prefs.socksPass.isNotBlank()
-		) Prefs.socksUser else generatedUser
+	private val current: SocksCredentials
+		get() {
+			if (Prefs.socksAuthMode == SocksAuthMode.MANUAL) {
+				val manual = SocksCredentials.manual(Prefs.socksUser, Prefs.socksPass)
+				if (manual.isComplete) return manual
+			}
+			return SocksCredentials(generatedUser, generatedPass)
+		}
 
-	val pass: String
-		get() = if (Prefs.socksAuthMode == SocksAuthMode.MANUAL &&
-			Prefs.socksUser.isNotBlank() && Prefs.socksPass.isNotBlank()
-		) Prefs.socksPass else generatedPass
+	val user: String get() = current.user
+
+	val pass: String get() = current.pass
+
+	val requiresAuthentication: Boolean get() = user.isNotEmpty()
+
+	fun safeEndpoint(host: String, port: Long): String = if (requiresAuthentication) {
+		"${user}:[REDACTED]@$host:$port"
+	} else {
+		"$host:$port auth=none"
+	}
 }
 
 enum class DnsMode(val label: String) {

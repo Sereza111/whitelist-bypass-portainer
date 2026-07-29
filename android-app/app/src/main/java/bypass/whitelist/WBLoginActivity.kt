@@ -288,7 +288,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 						val body = runCatching { JSONObject(response.body) }.getOrNull()
 						val link = body?.optString("inviteLink").orEmpty()
 						val fresh = if (link.isNotEmpty()) installClientProfile(response.body, link) else null
-						if (fresh != null) openClientAndConnect()
+						if (fresh != null) openClientAndConnect(fresh)
 						else {
 							status.setText(R.string.wb_creator_waiting_for_relay)
 							scheduleProfileStartRetry()
@@ -428,7 +428,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 		status.setText(R.string.wb_creator_waiting_for_relay)
 		if (autoConnect.isChecked && !TunnelServiceState.isAnyTunnelComponentRunning(this)) {
 			trace("recovery", "auto-connect")
-			openClientAndConnect()
+			openClientAndConnect(selected)
 		}
 		return true
 	}
@@ -468,7 +468,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 						status.setText(R.string.wb_creator_client_ready)
 						if (autoConnect.isChecked) {
 							trace("client", "auto-connect")
-							openClientAndConnect()
+							openClientAndConnect(clientConfig)
 						}
 					} else {
 						status.setText(R.string.wb_creator_waiting_for_relay)
@@ -496,6 +496,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 			// The running service must observe the newer generation itself so it
 			// can close the old carrier and restart. Advancing the stored generation
 			// here would make its next sync poll incorrectly return 204.
+			Prefs.activeDestinationId = existing.id
 			return existing
 		}
 		val config = CallConfig.managedInvite(
@@ -503,13 +504,18 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 			profile = profile, key = key, generation = generation, syncUrl = syncURL,
 		)
 		Prefs.addDestination(config)
+		Prefs.activeDestinationId = config.id
 		return config
 	}
 
-	private fun openClientAndConnect() {
+	private fun openClientAndConnect(config: CallConfig) {
+		Prefs.activeDestinationId = config.id
+		trace("carrier", "target=${config.platformLabel} profile=${config.recoveryProfile?.takeLast(8).orEmpty()}")
 		val intent = Intent(this, MainActivity::class.java).apply {
 			action = MainActivity.ACTION_AUTO_START
 			putExtra(MainActivity.EXTRA_USE_EXISTING_WB_INVITE, true)
+			putExtra(MainActivity.EXTRA_DESTINATION_ID, config.id)
+			putExtra(MainActivity.EXTRA_RECOVERY_PROFILE, config.recoveryProfile.orEmpty())
 			addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP)
 		}
 		startActivity(intent)
@@ -576,11 +582,13 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 		) return false
 		val destinations = Prefs.savedDestinations
 		val vkBootstrap = CallConfig.selectVKControlBootstrap(destinations, Prefs.activeDestinationId)
+			?.copy(dualTrack = true)
 		val savedWB = destinations.firstOrNull {
 			it.recoveryProfile == requestedProfileId && isSafeInvite(it.url)
 		}
 		val saved = vkBootstrap ?: savedWB ?: return false
 		bootstrapStarted = true
+		Prefs.updateDestination(saved)
 		Prefs.activeDestinationId = saved.id
 		if (saved.platform == CallPlatform.VK) {
 			trace("bootstrap", "starting saved VK control path")
@@ -589,7 +597,8 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 			trace("bootstrap", "starting saved WB room before Manager control")
 			status.setText(R.string.wb_creator_bootstrap_starting)
 		}
-		openClientAndConnect()
+		trace("carrier", "bootstrap=${saved.platformLabel}")
+		openClientAndConnect(saved)
 		return true
 	}
 
