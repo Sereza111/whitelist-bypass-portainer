@@ -600,7 +600,7 @@ func TestControlPlaneMigratesRecoveryDefaults(t *testing.T) {
 		t.Fatalf("legacy recovery migration failed: %#v", profiles)
 	}
 	persisted, err := os.ReadFile(filepath.Join(dataDir, "control-plane.json"))
-	if err != nil || !strings.Contains(string(persisted), `"schema": 4`) {
+	if err != nil || !strings.Contains(string(persisted), fmt.Sprintf(`"schema": %d`, controlPlaneSchema)) {
 		t.Fatalf("migrated schema was not persisted: err=%v body=%s", err, persisted)
 	}
 }
@@ -621,7 +621,7 @@ func TestControlPlaneMigratesSchemaTwoToCurrent(t *testing.T) {
 		t.Fatalf("schema two profile changed unexpectedly: %#v", profiles)
 	}
 	persisted, err := os.ReadFile(filepath.Join(dataDir, "control-plane.json"))
-	if err != nil || !strings.Contains(string(persisted), `"schema": 4`) || !strings.Contains(string(persisted), `"settings"`) {
+	if err != nil || !strings.Contains(string(persisted), fmt.Sprintf(`"schema": %d`, controlPlaneSchema)) || !strings.Contains(string(persisted), `"settings"`) {
 		t.Fatalf("schema two migration not persisted: err=%v body=%s", err, persisted)
 	}
 }

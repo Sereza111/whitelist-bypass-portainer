@@ -6,12 +6,12 @@ Dion. Это уже не минимальная Docker-обёртка upstream: 
 клиенты, SOCKS5/TUN, автоматическое восстановление звонков, диагностику и
 multi-arch релизный pipeline.
 
-Текущий релиз: **[v0.5.0-alpha.22](https://github.com/Sereza111/whitelist-bypass-portainer/releases/tag/v0.5.0-alpha.22)**.
+Текущий релиз: **[v0.5.0-alpha.34](https://github.com/Sereza111/whitelist-bypass-portainer/releases/tag/v0.5.0-alpha.34)**.
 
 Docker image:
 
 ```text
-ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.22
+ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.34
 ```
 
 Проект основан на
@@ -150,7 +150,7 @@ ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.22
 
 | Переменная | Рекомендуемое значение |
 |---|---|
-| `WLB_IMAGE` | `ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.22` |
+| `WLB_IMAGE` | `ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.34` |
 | `PANEL_USERNAME` | новый логин, по умолчанию `admin` |
 | `PANEL_PASSWORD` | уникальный пароль длиной от 12 символов |
 | `WLB_SECRETS_DIR` | `/opt/whitelist-bypass/secrets` |
@@ -208,6 +208,12 @@ Manager сохраняет cookies в `/data/managed-secrets/cookies-vk.json` с
 
 ## Создание клиента
 
+Администратор может создать одноразовое приглашение в **Настройки →
+Приглашение в кабинет**. Пользователь регистрируется только по этой ссылке и на
+`/portal` видит исключительно свои профили и сессии. Provider-аккаунты остаются
+общими техническими ресурсами сервера; их cookies, раздел Providers, события и
+глобальные настройки в пользовательский API не выдаются.
+
 1. Откройте раздел **Клиенты**.
 2. Создайте профиль устройства/пользователя.
 3. Оставьте reliability `auto`, KCP `auto`, auto recovery включённым.
@@ -234,7 +240,7 @@ WB Stream и Dion; тип провайдера связан с проверен�
 В логах клиента и сервера должны совпадать:
 
 ```text
-[build] version=0.5.0-alpha.22 commit=... built=...
+[build] version=0.5.0-alpha.34 commit=... built=...
 ```
 
 Если на телефоне осталась старая debug-signed `alpha.8`, её нужно удалить один

@@ -201,6 +201,11 @@
     <string name="wb_login_invalid_pairing">This WB pairing link is invalid or expired. Create a new QR in the panel.</string>
     <string name="wb_creator_pairing">Pairing this Android creator with Manager…</string>
     <string name="wb_creator_pair_failed">Manager did not accept the device pairing.</string>
+    <string name="wb_pairing_manual_help">Enter the current Manager HTTPS address and one-time code from Providers → WB Stream.</string>
+    <string name="wb_pairing_manager_hint">Manager HTTPS address, e.g. https://panel.example:9443</string>
+    <string name="wb_pairing_code_hint">One-time pairing code</string>
+    <string name="wb_pairing_connect">Pair this Android creator</string>
+    <string name="wb_pairing_invalid_fields">Use a valid HTTPS Manager address and the complete one-time code.</string>
     <string name="wb_creator_ready_help">Sign in normally and leave this creator screen open. When Manager asks for a call, Android will use the regular WB interface and send the invitation.</string>
     <string name="wb_creator_unpaired">This creator is no longer paired. Create a new QR in Manager.</string>
     <string name="wb_creator_call_requested">Manager requested a WB call for “%1$s”. Opening it in the regular WB interface…</string>

@@ -42,7 +42,8 @@ flowchart LR
 Один долгоживущий процесс в контейнере:
 
 - HTTP API и встроенная web panel;
-- single-admin authentication в MVP;
+- Basic Auth для администратора и invite-only session auth для пользователей;
+- обязательная серверная изоляция профилей/сессий по владельцу;
 - CRUD профилей Creator;
 - запуск/остановка дочерних headless Creator;
 - state machine каждой сессии;

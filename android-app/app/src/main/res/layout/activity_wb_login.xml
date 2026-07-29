@@ -33,14 +33,30 @@
             android:textSize="26sp"
             android:textStyle="bold" />
 
-        <TextView
-            android:id="@+id/wbLoginStatus"
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="@string/wb_login_opening"
-            android:textColor="@color/ink_2"
-            android:textSize="12sp" />
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <ProgressBar
+                android:id="@+id/wbTransitionProgress"
+                style="?android:attr/progressBarStyleSmall"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:indeterminate="true" />
+
+            <TextView
+                android:id="@+id/wbLoginStatus"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
+                android:layout_weight="1"
+                android:text="@string/wb_login_opening"
+                android:textColor="@color/ink_2"
+                android:textSize="12sp" />
+        </LinearLayout>
 
         <TextView
             android:id="@+id/wbLoginDiagnostics"
@@ -51,13 +67,47 @@
             android:maxLines="7"
             android:textColor="@color/ink_2"
             android:textIsSelectable="true"
-            android:textSize="10sp" />
+            android:textSize="10sp"
+            android:visibility="gone" />
     </LinearLayout>
 
     <View
         android:layout_width="match_parent"
         android:layout_height="1dp"
         android:background="@color/hair" />
+
+    <LinearLayout
+        android:id="@+id/wbManualPairingPanel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp"
+        android:visibility="gone">
+
+        <EditText
+            android:id="@+id/wbManagerInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="@string/wb_pairing_manager_hint"
+            android:inputType="textUri"
+            android:maxLines="1" />
+
+        <EditText
+            android:id="@+id/wbPairingCodeInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:hint="@string/wb_pairing_code_hint"
+            android:inputType="textNoSuggestions"
+            android:maxLines="1" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/wbManualPairButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="@string/wb_pairing_connect" />
+    </LinearLayout>
 
     <WebView
         android:id="@+id/wbLoginWebView"

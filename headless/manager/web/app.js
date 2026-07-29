@@ -25,6 +25,7 @@ function setSection(section, updateHash = true) {
   closeContextMenu();
   if (section === 'events') run(refreshEvents);
   if (section === 'providers') run(refreshRecoverySettings);
+  if (section === 'settings') run(refreshUsers);
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -681,7 +682,10 @@ async function refreshWBLogin() {
   byId('wbLoginForget').hidden = !status.managed || active;
   byId('wbLoginScreen').hidden = !status.devicePairing;
   if (status.devicePairing && !byId('wbLoginModal').hidden) byId('wbLoginScreenshot').src = `/api/wb-login/device/qr?t=${Date.now()}`;
-  if (!status.devicePairing) byId('wbLoginOpenPhone').hidden = true;
+  if (!status.devicePairing) {
+    byId('wbLoginOpenPhone').hidden = true;
+    byId('wbManualPairing').hidden = true;
+  }
 }
 
 async function openWBLogin() {
@@ -700,7 +704,24 @@ async function startWBLogin() {
   const result = await api('/api/wb-login/device/start', {method:'POST',body:'{}'});
   byId('wbLoginOpenPhone').href = result.url;
   byId('wbLoginOpenPhone').hidden = false;
+  const pairing = new URL(result.url, location.origin);
+  byId('wbManagerAddress').value = pairing.origin;
+  byId('wbPairingCode').value = pairing.hash.slice(1);
+  byId('wbManualPairing').hidden = false;
   await refreshWBLogin();
+}
+
+async function refreshUsers() {
+  const users = await api('/api/users');
+  byId('userCount').textContent = users.length;
+}
+
+async function createUserInvite() {
+  const result = await api('/api/users/invites', { method: 'POST', body: '{}' });
+  byId('userInviteURL').value = result.url;
+  byId('userInviteExpiry').textContent = `Действует до ${new Date(result.expiresAt).toLocaleString()}`;
+  byId('userInviteResult').hidden = false;
+  await copyText(result.url);
 }
 
 async function cancelWBLogin() { await api('/api/wb-login/cancel',{method:'POST',body:'{}'}); await refreshWBLogin(); }
@@ -773,6 +794,10 @@ byId('wbLoginClose').addEventListener('click', closeWBLogin);
 byId('wbLoginStart').addEventListener('click', () => run(startWBLogin));
 byId('wbLoginCancel').addEventListener('click', () => run(cancelWBLogin));
 byId('wbLoginForget').addEventListener('click', () => run(forgetWBLogin));
+byId('wbCopyPairing').addEventListener('click', () => run(() => copyText(`Manager: ${byId('wbManagerAddress').value}\nКод: ${byId('wbPairingCode').value}`)));
+byId('createUserInvite').addEventListener('click', () => run(createUserInvite));
+byId('copyUserInvite').addEventListener('click', () => run(() => copyText(byId('userInviteURL').value)));
+byId('openUserPortal').addEventListener('click', () => window.open('/portal', '_blank', 'noopener'));
 byId('wbLoginModal').addEventListener('click', (event) => { if (event.target === byId('wbLoginModal')) closeWBLogin(); });
 document.addEventListener('keydown', (event) => {
 	if (event.key !== 'Escape') return;

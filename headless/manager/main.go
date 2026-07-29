@@ -25,7 +25,7 @@ import (
 )
 
 var (
-	Version     = "0.5.0-alpha.33"
+	Version     = "0.5.0-alpha.34"
 	BuildCommit = "unknown"
 	BuildTime   = "unknown"
 )
@@ -567,6 +567,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("control plane: %v", err)
 	}
+	users, err := newUserAccountStore(dataDir)
+	if err != nil {
+		log.Fatalf("user accounts: %v", err)
+	}
 	webRoot, err := fs.Sub(webFiles, "web")
 	if err != nil {
 		log.Fatal(err)
@@ -580,6 +584,7 @@ func main() {
 	wbLogin := newWBLoginManager(dataDir)
 	cp.setWBCreator(wbLogin)
 	registerControlAPIRoutes(mux, cp, vkLogin, wbLogin, username, password, envOr("SECRETS_DIR", "/run/secrets/wlb"))
+	registerUserPortalRoutes(mux, cp, users, wbLogin, username, password, envOr("SECRETS_DIR", "/run/secrets/wlb"))
 	registerVKLoginRoutes(mux, vkLogin, username, password)
 	registerWBLoginRoutes(mux, wbLogin, username, password, cp)
 	mux.Handle("/", requireAuth(username, password, http.FileServer(http.FS(webRoot))))

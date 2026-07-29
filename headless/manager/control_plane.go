@@ -15,10 +15,11 @@ import (
 	"time"
 )
 
-const controlPlaneSchema = 4
+const controlPlaneSchema = 5
 
 type clientProfile struct {
 	ID                 string         `json:"id"`
+	OwnerID            string         `json:"ownerId,omitempty"`
 	Name               string         `json:"name"`
 	Enabled            bool           `json:"enabled"`
 	MaxSessions        int            `json:"maxSessions"`
@@ -99,6 +100,7 @@ type sessionInput struct {
 
 type managedSession struct {
 	ID           string
+	OwnerID      string
 	ClientID     string
 	ClientName   string
 	CreatedAt    time.Time
@@ -247,10 +249,17 @@ func (cp *controlPlane) saveLocked() error {
 }
 
 func (cp *controlPlane) listProfiles() []clientProfile {
+	return cp.listProfilesFor("", true)
+}
+
+func (cp *controlPlane) listProfilesFor(ownerID string, admin bool) []clientProfile {
 	cp.mu.Lock()
 	defer cp.mu.Unlock()
 	result := make([]clientProfile, 0, len(cp.profiles))
 	for _, profile := range cp.profiles {
+		if !admin && profile.OwnerID != ownerID {
+			continue
+		}
 		result = append(result, profile)
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].CreatedAt.Before(result[j].CreatedAt) })
@@ -258,9 +267,16 @@ func (cp *controlPlane) listProfiles() []clientProfile {
 }
 
 func (cp *controlPlane) profile(id string) (clientProfile, bool) {
+	return cp.profileFor("", id, true)
+}
+
+func (cp *controlPlane) profileFor(ownerID, id string, admin bool) (clientProfile, bool) {
 	cp.mu.Lock()
 	defer cp.mu.Unlock()
 	profile, ok := cp.profiles[id]
+	if ok && !admin && profile.OwnerID != ownerID {
+		return clientProfile{}, false
+	}
 	return profile, ok
 }
 
@@ -311,6 +327,7 @@ func (cp *controlPlane) normalizeProfile(input profileInput, previous *clientPro
 	}
 	if previous != nil {
 		profile.ID = previous.ID
+		profile.OwnerID = previous.OwnerID
 		profile.CreatedAt = previous.CreatedAt
 		profile.AutoRestart = previous.AutoRestart
 		profile.RecoveryKey = previous.RecoveryKey
@@ -339,12 +356,17 @@ func (cp *controlPlane) normalizeProfile(input profileInput, previous *clientPro
 }
 
 func (cp *controlPlane) createProfile(input profileInput) (clientProfile, error) {
+	return cp.createProfileFor("", input)
+}
+
+func (cp *controlPlane) createProfileFor(ownerID string, input profileInput) (clientProfile, error) {
 	cp.mu.Lock()
 	defer cp.mu.Unlock()
 	profile, err := cp.normalizeProfile(input, nil)
 	if err != nil {
 		return clientProfile{}, err
 	}
+	profile.OwnerID = ownerID
 	cp.profiles[profile.ID] = profile
 	if err := cp.saveLocked(); err != nil {
 		delete(cp.profiles, profile.ID)
@@ -355,10 +377,14 @@ func (cp *controlPlane) createProfile(input profileInput) (clientProfile, error)
 }
 
 func (cp *controlPlane) updateProfile(id string, input profileInput) (clientProfile, error) {
+	return cp.updateProfileFor("", id, input, true)
+}
+
+func (cp *controlPlane) updateProfileFor(ownerID, id string, input profileInput, admin bool) (clientProfile, error) {
 	cp.mu.Lock()
 	defer cp.mu.Unlock()
 	previous, ok := cp.profiles[id]
-	if !ok {
+	if !ok || (!admin && previous.OwnerID != ownerID) {
 		return clientProfile{}, os.ErrNotExist
 	}
 	profile, err := cp.normalizeProfile(input, &previous)
@@ -375,10 +401,14 @@ func (cp *controlPlane) updateProfile(id string, input profileInput) (clientProf
 }
 
 func (cp *controlPlane) duplicateProfile(id string) (clientProfile, error) {
+	return cp.duplicateProfileFor("", id, true)
+}
+
+func (cp *controlPlane) duplicateProfileFor(ownerID, id string, admin bool) (clientProfile, error) {
 	cp.mu.Lock()
 	defer cp.mu.Unlock()
 	source, ok := cp.profiles[id]
-	if !ok {
+	if !ok || (!admin && source.OwnerID != ownerID) {
 		return clientProfile{}, os.ErrNotExist
 	}
 	now := time.Now().UTC()
@@ -404,9 +434,14 @@ func (cp *controlPlane) duplicateProfile(id string) (clientProfile, error) {
 }
 
 func (cp *controlPlane) deleteProfile(id string) error {
+	return cp.deleteProfileFor("", id, true)
+}
+
+func (cp *controlPlane) deleteProfileFor(ownerID, id string, admin bool) error {
 	cp.mu.Lock()
 	defer cp.mu.Unlock()
-	if _, ok := cp.profiles[id]; !ok {
+	profile, ok := cp.profiles[id]
+	if !ok || (!admin && profile.OwnerID != ownerID) {
 		return os.ErrNotExist
 	}
 	for _, session := range cp.sessions {
@@ -426,9 +461,13 @@ func (cp *controlPlane) deleteProfile(id string) error {
 }
 
 func (cp *controlPlane) startSession(input sessionInput) (sessionView, error) {
+	return cp.startSessionFor("", input, true)
+}
+
+func (cp *controlPlane) startSessionFor(ownerID string, input sessionInput, admin bool) (sessionView, error) {
 	cp.mu.Lock()
 	profile, ok := cp.profiles[input.ClientID]
-	if !ok {
+	if !ok || (!admin && profile.OwnerID != ownerID) {
 		cp.mu.Unlock()
 		return sessionView{}, fmt.Errorf("client profile not found")
 	}
@@ -492,7 +531,7 @@ func (cp *controlPlane) startSession(input sessionInput) (sessionView, error) {
 	}
 	created := time.Now().UTC()
 	session := &managedSession{
-		ID: id, ClientID: input.ClientID, ClientName: profile.Name, CreatedAt: created,
+		ID: id, OwnerID: profile.OwnerID, ClientID: input.ClientID, ClientName: profile.Name, CreatedAt: created,
 		Manager: mgr, Config: config, AutoRestart: profile.AutoRestart,
 		StopCh: make(chan struct{}), Generation: profile.RecoveryGeneration,
 	}
@@ -607,9 +646,16 @@ func recoveryDelay(attempt int) time.Duration {
 }
 
 func (cp *controlPlane) listSessions() []sessionView {
+	return cp.listSessionsFor("", true)
+}
+
+func (cp *controlPlane) listSessionsFor(ownerID string, admin bool) []sessionView {
 	cp.mu.Lock()
 	sessions := make([]*managedSession, 0, len(cp.sessions))
 	for _, session := range cp.sessions {
+		if !admin && session.OwnerID != ownerID {
+			continue
+		}
 		sessions = append(sessions, session)
 	}
 	cp.mu.Unlock()
@@ -622,10 +668,14 @@ func (cp *controlPlane) listSessions() []sessionView {
 }
 
 func (cp *controlPlane) session(id string) (sessionView, bool) {
+	return cp.sessionFor("", id, true)
+}
+
+func (cp *controlPlane) sessionFor(ownerID, id string, admin bool) (sessionView, bool) {
 	cp.mu.Lock()
 	session, ok := cp.sessions[id]
 	cp.mu.Unlock()
-	if !ok {
+	if !ok || (!admin && session.OwnerID != ownerID) {
 		return sessionView{}, false
 	}
 	return cp.view(session), true
@@ -648,10 +698,14 @@ func (cp *controlPlane) view(session *managedSession) sessionView {
 }
 
 func (cp *controlPlane) stopSession(id string) (sessionView, error) {
+	return cp.stopSessionFor("", id, true)
+}
+
+func (cp *controlPlane) stopSessionFor(ownerID, id string, admin bool) (sessionView, error) {
 	cp.mu.Lock()
 	session, ok := cp.sessions[id]
 	cp.mu.Unlock()
-	if !ok {
+	if !ok || (!admin && session.OwnerID != ownerID) {
 		return sessionView{}, os.ErrNotExist
 	}
 	session.StopOnce.Do(func() { close(session.StopCh) })
@@ -666,9 +720,13 @@ func (cp *controlPlane) stopSession(id string) (sessionView, error) {
 }
 
 func (cp *controlPlane) deleteSession(id string) error {
+	return cp.deleteSessionFor("", id, true)
+}
+
+func (cp *controlPlane) deleteSessionFor(ownerID, id string, admin bool) error {
 	cp.mu.Lock()
 	session, ok := cp.sessions[id]
-	if !ok {
+	if !ok || (!admin && session.OwnerID != ownerID) {
 		cp.mu.Unlock()
 		return os.ErrNotExist
 	}

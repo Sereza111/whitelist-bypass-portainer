@@ -46,6 +46,11 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
     private lateinit var inviteInput: EditText
     private lateinit var inviteSubmit: MaterialButton
 	private lateinit var autoConnect: MaterialSwitch
+    private lateinit var manualPairingPanel: LinearLayout
+    private lateinit var managerInput: EditText
+    private lateinit var pairingCodeInput: EditText
+    private lateinit var manualPairButton: MaterialButton
+    private lateinit var transitionProgress: View
     private val mainHandler = Handler(Looper.getMainLooper())
     private val executor = Executors.newSingleThreadExecutor()
     private val requestRunning = AtomicBoolean(false)
@@ -92,8 +97,14 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
         inviteInput = findViewById(R.id.wbInviteInput)
         inviteSubmit = findViewById(R.id.wbInviteSubmit)
 		autoConnect = findViewById(R.id.wbAutoConnect)
+        manualPairingPanel = findViewById(R.id.wbManualPairingPanel)
+        managerInput = findViewById(R.id.wbManagerInput)
+        pairingCodeInput = findViewById(R.id.wbPairingCodeInput)
+        manualPairButton = findViewById(R.id.wbManualPairButton)
+        transitionProgress = findViewById(R.id.wbTransitionProgress)
         close.setOnClickListener { finish() }
         inviteSubmit.setOnClickListener { submitInvite() }
+        manualPairButton.setOnClickListener { startManualPairing() }
 
         val input = intent?.data
 		requestedProfileId = intent?.getStringExtra(EXTRA_START_PROFILE).orEmpty().trim()
@@ -109,27 +120,55 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 			"boot",
 			"version=${appVersion()} mode=${if (freshPairing) "pair" else "resume"} manager=${managerLabel(server.ifBlank { prefs.getString(KEY_SERVER, "").orEmpty() })}",
 		)
-        if (freshPairing) {
-            serverOrigin = server
+		configureWebView()
+		if (freshPairing) {
+            beginFreshPairing(server, token)
         } else {
             serverOrigin = prefs.getString(KEY_SERVER, "").orEmpty()
             creatorId = prefs.getString(KEY_CREATOR_ID, "").orEmpty()
             deviceSecret = prefs.getString(KEY_DEVICE_SECRET, "").orEmpty()
             if (!validServer(serverOrigin) || !CREATOR_RE.matches(creatorId) || !TOKEN_RE.matches(deviceSecret)) {
 				trace("binding", "missing-or-invalid")
-                fail(getString(R.string.wb_login_invalid_pairing))
+				showManualPairing()
                 return
             }
-        }
-        configureWebView()
-        if (freshPairing) {
-            pairCreator(token)
-            status.setText(R.string.wb_creator_pairing)
-        } else {
             status.setText(R.string.wb_creator_ready_help)
+            transitionProgress.visibility = View.GONE
             mainHandler.post(commandPoll)
 			requestSelectedProfileStart()
+            webView.loadUrl(WB_LOGIN_URL)
         }
+    }
+
+    private fun showManualPairing() {
+        status.setText(R.string.wb_pairing_manual_help)
+        manualPairingPanel.visibility = View.VISIBLE
+        webView.visibility = View.GONE
+        autoConnect.visibility = View.GONE
+        invitePanel.visibility = View.GONE
+        transitionProgress.visibility = View.GONE
+        managerInput.setText(serverOrigin.takeIf { validServer(it) }.orEmpty())
+    }
+
+    private fun startManualPairing() {
+        val server = managerInput.text.toString().trim().trimEnd('/')
+        val token = pairingCodeInput.text.toString().trim()
+        if (!validPairing(server, token)) {
+            status.setText(R.string.wb_pairing_invalid_fields)
+            return
+        }
+        beginFreshPairing(server, token)
+    }
+
+    private fun beginFreshPairing(server: String, token: String) {
+        terminalFailure = false
+        serverOrigin = server
+        manualPairingPanel.visibility = View.GONE
+        webView.visibility = View.VISIBLE
+        autoConnect.visibility = View.VISIBLE
+        status.setText(R.string.wb_creator_pairing)
+        transitionProgress.visibility = View.VISIBLE
+        pairCreator(token)
         webView.loadUrl(WB_LOGIN_URL)
     }
 
@@ -145,6 +184,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
         webView.webViewClient = object : WebViewClient() {
             override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
 				trace("webview", "page-start")
+				webView.visibility = if (isWBLoginPage(url)) View.VISIBLE else View.INVISIBLE
 				if (!terminalFailure && pendingRequestId.isEmpty() &&
 					CREATOR_RE.matches(creatorId) && TOKEN_RE.matches(deviceSecret)
 				) status.setText(R.string.wb_creator_ready_help)
@@ -198,6 +238,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
                     .apply()
 				trace("pair", "stored creator=${creatorId.takeLast(8)}")
                 status.setText(R.string.wb_creator_ready_help)
+                transitionProgress.visibility = View.GONE
                 mainHandler.post(commandPoll)
 				requestSelectedProfileStart()
             }
@@ -230,6 +271,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 			return
 		}
 		status.setText(R.string.wb_creator_requesting_profile)
+		transitionProgress.visibility = View.VISIBLE
 		trace("client", "start-request")
 		executor.execute {
 			val response = post("/api/wb-creator/profiles/$requestedProfileId/start", "", deviceSecret, creatorId)
@@ -297,6 +339,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 				requestedProfileId = profileId
 				profileStartIssued = false
                 pendingRequestId = requestId
+				transitionProgress.visibility = View.VISIBLE
 				autoCreateStartedAt = SystemClock.elapsedRealtime()
 				autoCreateClicked = false
 				trace("command", "received request=${requestId.takeLast(8)}")
@@ -304,6 +347,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 				status.text = getString(R.string.wb_creator_call_requested, profileName)
                 invitePanel.visibility = View.VISIBLE
                 inviteInput.setText("")
+				webView.visibility = View.INVISIBLE
 				scheduleAutoCreate(0)
             }
         }
@@ -328,6 +372,8 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 		}
 		if (SystemClock.elapsedRealtime() - autoCreateStartedAt >= AUTO_CREATE_TIMEOUT_MS) {
 			trace("call-ui", "manual-fallback")
+			webView.visibility = View.VISIBLE
+			transitionProgress.visibility = View.GONE
 			status.setText(R.string.wb_creator_manual_fallback)
 			return
 		}
@@ -554,6 +600,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 
     private fun fail(message: String) {
 		terminalFailure = true
+        transitionProgress.visibility = View.GONE
         mainHandler.removeCallbacks(commandPoll)
 		mainHandler.removeCallbacks(autoCreatePoll)
         invitePanel.visibility = View.GONE

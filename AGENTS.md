@@ -14,6 +14,24 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
+## Active handoff (2026-07-29, alpha.34 invite-only user portal)
+
+- Admin Basic Auth remains the operator boundary. Admin owns shared Providers,
+  cookies, all profiles/sessions, Android creator pairing and user invitations.
+- Invited users register through a one-time token stored only as SHA-256. Their
+  HttpOnly/SameSite session can access only profiles and sessions whose
+  persisted `ownerId` matches the account. Existing profiles migrate as
+  admin-owned. User APIs never expose provider cookies, recovery keys, events,
+  other profiles or global settings.
+- `/portal` lets a user create a profile from configured shared providers,
+  start/stop it and generate their own 15-minute Android enrollment link.
+  Public registration is intentionally unavailable.
+- Android creator pairing now also accepts `Manager HTTPS address + one-time
+  code`; QR remains available. The automatic WB flow hides raw diagnostics and
+  the WB page while automation is running, showing a compact animated status.
+- WB cookies/tokens remain on Android. Manager continues to accept only a
+  validated invitation link. Do not research or reproduce WBAAS or `slide-v3`.
+
 ## Active handoff (2026-07-29, alpha.33 VK-assisted WB bootstrap candidate)
 
 - Alpha.32 field evidence confirms the public Manager became reachable only

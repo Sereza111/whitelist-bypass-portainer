@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>WLB · Мои подключения</title>
+  <link rel="stylesheet" href="/portal.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="top"><div class="seal">VL</div><div><p>WHITELIST BYPASS</p><h1>Мои подключения</h1></div><button id="logout" class="quiet" hidden>Выйти</button></header>
+    <div id="notice" class="notice" hidden></div>
+
+    <section id="auth" class="auth-grid">
+      <article class="card" id="loginCard">
+        <p class="kicker">Личный кабинет</p><h2>Вход</h2>
+        <form id="loginForm"><label>Логин<input id="loginName" autocomplete="username" required></label><label>Пароль<input id="loginPassword" type="password" autocomplete="current-password" required></label><button>Войти</button></form>
+      </article>
+      <article class="card" id="signupCard" hidden>
+        <p class="kicker">Одноразовое приглашение</p><h2>Регистрация</h2>
+        <form id="signupForm"><label>Логин<input id="signupName" minlength="3" maxlength="32" autocomplete="username" required></label><label>Пароль · минимум 12 символов<input id="signupPassword" type="password" minlength="12" autocomplete="new-password" required></label><button>Создать аккаунт</button></form>
+        <p class="help">После регистрации приглашение перестанет действовать.</p>
+      </article>
+    </section>
+
+    <section id="workspace" hidden>
+      <div class="welcome"><div><p class="kicker">Изолированный доступ</p><h2>Здравствуйте, <span id="username"></span></h2><p>Здесь находятся только ваши профили и ваши запуски. Технические аккаунты провайдеров управляются администратором.</p></div><button id="newProfile">+ Новый профиль</button></div>
+      <article id="editor" class="card editor" hidden>
+        <div class="section-head"><div><p class="kicker">Подключение</p><h2 id="editorTitle">Новый профиль</h2></div><button id="closeEditor" class="quiet">Закрыть</button></div>
+        <form id="profileForm"><input id="profileId" type="hidden"><label>Название<input id="profileName" maxlength="80" placeholder="Мой телефон" required></label><label>Провайдер<select id="provider" required></select></label><button>Сохранить</button></form>
+      </article>
+      <section class="columns">
+        <article class="card"><div class="section-head"><div><p class="kicker">Ваши устройства</p><h2>Профили</h2></div><span id="profileCount" class="pill">0</span></div><div id="profiles" class="list"></div></article>
+        <article class="card"><div class="section-head"><div><p class="kicker">Текущая работа</p><h2>Сессии</h2></div><button id="refresh" class="quiet">Обновить</button></div><div id="sessions" class="list"></div></article>
+      </section>
+    </section>
+  </main>
+  <script src="/portal.js"></script>
+</body>
+</html>
