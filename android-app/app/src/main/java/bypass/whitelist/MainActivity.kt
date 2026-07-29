@@ -104,6 +104,7 @@ class MainActivity :
     @Volatile private var overlayVisible: Boolean = false
     @Volatile private var resetGeneration: Long = 0L
     private var pendingConnectConfig: CallConfig? = null
+	private var pendingConnectDirect = false
 	private var pendingHeadlessServiceConfig: CallConfig? = null
 	private var recoveryInProgress: Boolean = false
     private val navColorEvaluator = ArgbEvaluator()
@@ -349,12 +350,14 @@ class MainActivity :
         }
         if (resetInProgress) {
             pendingConnectConfig = config
+			pendingConnectDirect = false
             appendLog("Queued connect after previous session stops")
             mainFragment()?.onStatusTextChanged("Stopping previous session...")
             return
         }
         if (TunnelServiceState.isAnyTunnelComponentRunning(this) || !PortGuard.isPortAvailable(Prefs.socksPort)) {
             pendingConnectConfig = config
+			pendingConnectDirect = false
             appendLog("Waiting for previous local tunnel to stop")
             fullReset()
             return
@@ -380,6 +383,7 @@ class MainActivity :
 
     override fun onDisconnectPressed() {
         pendingConnectConfig = null
+		pendingConnectDirect = false
         if (resetInProgress) {
             forceUnlockReset("Stopped waiting for previous session")
             return
@@ -516,6 +520,7 @@ class MainActivity :
 
     override fun onJoinCancel() {
         pendingConnectConfig = null
+		pendingConnectDirect = false
         runOnUiThread { fullReset() }
     }
 
@@ -552,15 +557,20 @@ class MainActivity :
 		if (intent?.action != ACTION_AUTO_START) return
         intent.action = null
 		val useExistingWBInvite = intent.getBooleanExtra(EXTRA_USE_EXISTING_WB_INVITE, false)
+		if (useExistingWBInvite) {
+			Prefs.activeDestination?.let(::startDirectReplacement) ?: run {
+				Toast.makeText(this, R.string.error_no_destination, Toast.LENGTH_SHORT).show()
+			}
+			return
+		}
         val isConnecting = lastStatus == VpnStatus.CONNECTING
         if (!connected && !isConnecting && !TunnelServiceState.isAnyTunnelComponentRunning(this)) {
 			Prefs.activeDestination?.let { config ->
-				if (useExistingWBInvite && config.platform == CallPlatform.WBSTREAM) startJoinFor(config)
-				else onConnectPressed(config)
+				onConnectPressed(config)
 			} ?: run {
                 Toast.makeText(this, R.string.error_no_destination, Toast.LENGTH_SHORT).show()
             }
-        } else if (connected && !useExistingWBInvite) {
+		} else if (connected) {
             onDisconnectPressed()
         }
     }
@@ -655,10 +665,12 @@ class MainActivity :
 		mainFragment()?.onStatusChanged(VpnStatus.RECOVERING)
 		mainFragment()?.onStatusTextChanged(getString(R.string.vpn_recovering))
 		pendingConnectConfig = config
+		pendingConnectDirect = false
 		if (TunnelServiceState.isAnyTunnelComponentRunning(this) || !PortGuard.isPortAvailable(Prefs.socksPort)) {
 			fullReset()
 		} else {
 			pendingConnectConfig = null
+			pendingConnectDirect = false
 			startJoinFor(config)
 		}
 	}
@@ -840,15 +852,17 @@ class MainActivity :
         }
     }
 
-    private fun startJoinFor(config: CallConfig) {
+	private fun startJoinFor(config: CallConfig) {
         if (resetInProgress) {
             pendingConnectConfig = config
+			pendingConnectDirect = false
             appendLog("Queued connect after previous session stops")
             mainFragment()?.onStatusTextChanged("Stopping previous session...")
             return
         }
         if (TunnelServiceState.isAnyTunnelComponentRunning(this) || !PortGuard.isPortAvailable(Prefs.socksPort)) {
             pendingConnectConfig = config
+			pendingConnectDirect = false
             appendLog("Waiting for previous local tunnel to stop")
             fullReset()
             return
@@ -908,6 +922,21 @@ class MainActivity :
             .replace(R.id.joinOverlayContainer, joinFragment)
             .commit()
     }
+
+	private fun startDirectReplacement(config: CallConfig) {
+		if (resetInProgress || TunnelServiceState.isAnyTunnelComponentRunning(this) ||
+			!PortGuard.isPortAvailable(Prefs.socksPort)
+		) {
+			pendingConnectConfig = config
+			pendingConnectDirect = true
+			recoveryInProgress = true
+			appendLog("Replacing bootstrap carrier with fresh ${config.platformLabel} connection")
+			if (!resetInProgress) fullReset()
+			return
+		}
+		pendingConnectDirect = false
+		startJoinFor(config)
+	}
 
 	private fun startHeadlessSessionService(config: CallConfig) {
 		val exists = Prefs.savedDestinations.any { it.id == config.id }
@@ -1009,10 +1038,12 @@ class MainActivity :
         mainFragment()?.onConnectedChanged(false)
         mainFragment()?.onStatusChanged(VpnStatus.CALL_DISCONNECTED)
         val pendingConfig = pendingConnectConfig
+		val direct = pendingConnectDirect
         pendingConnectConfig = null
+		pendingConnectDirect = false
         if (pendingConfig != null) {
             appendLog("Previous session stopped, starting new connection")
-			onConnectPressed(pendingConfig)
+			if (direct) startJoinFor(pendingConfig) else onConnectPressed(pendingConfig)
         }
     }
 
@@ -1020,6 +1051,7 @@ class MainActivity :
         resetInProgress = false
 		recoveryInProgress = false
         pendingConnectConfig = null
+		pendingConnectDirect = false
         connected = false
         activeJoinUrl = ""
         lastStatus = if (PortGuard.isPortAvailable(Prefs.socksPort)) VpnStatus.CALL_DISCONNECTED else VpnStatus.PORT_BUSY

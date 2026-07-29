@@ -14,6 +14,23 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
+## Active handoff (2026-07-29, alpha.33 VK-assisted WB bootstrap candidate)
+
+- Alpha.32 field evidence confirms the public Manager became reachable only
+  while the user had a foreign VPN active. It also confirms Smart selects WB
+  DataChannel, receives no inbound payload for five seconds, and deterministically
+  fails over to Video+KCP. Do not treat that run as a successful WB bootstrap.
+- Android alpha.33 prefers the last safe saved VK invitation as a temporary
+  control bootstrap when a managed WB profile cannot reach Manager. Once VK is
+  up, creator polling uses the authenticated local SOCKS route, obtains the
+  fresh WB invitation, then queues an automatic VK-to-WB tunnel replacement.
+- Unmarked managed WB profiles now migrate from the unsuccessful automatic
+  Smart default to Video. Explicit user-selected Smart/DC modes remain intact
+  for controlled experiments.
+- This is an internal multi-carrier dependency only: no external VPN is part
+  of the product path. Cookies and WB tokens remain on Android; Manager accepts
+  only validated invitation links.
+
 ## Active handoff (2026-07-29, alpha.32 WB dead-channel recovery candidate)
 
 - Alpha.31 field evidence confirms the pairing request can fail with

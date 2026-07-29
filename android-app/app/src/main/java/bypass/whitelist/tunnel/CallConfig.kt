@@ -23,7 +23,10 @@ data class CallConfig(
 
 	fun migrateManagedWbTransportDefault(): CallConfig {
 		if (platform != CallPlatform.WBSTREAM || recoveryProfile.isNullOrBlank() || tunnelModeExplicit) return this
-		return if (tunnelMode == TunnelMode.VIDEO) copy(tunnelMode = TunnelMode.SMART) else this
+		// Field tests show WB's reliable DataChannel opens but remains one-way.
+		// Unmarked Smart values came from the old automatic default, so migrate
+		// those to the proven Video path. Explicit user A/B choices are preserved.
+		return if (tunnelMode == TunnelMode.SMART) copy(tunnelMode = TunnelMode.VIDEO) else this
 	}
 
     val platformGlyph: String get() = when (platform) {
@@ -57,13 +60,22 @@ data class CallConfig(
     }
 
     companion object {
+		fun selectVKControlBootstrap(items: List<CallConfig>, activeID: String): CallConfig? {
+			val candidates = items.filter {
+				it.platform == CallPlatform.VK && CallPlatform.isSafeInviteLink(CallPlatform.VK, it.url)
+			}
+			return candidates.firstOrNull { it.id == activeID }
+				?: candidates.firstOrNull { !it.recoveryProfile.isNullOrBlank() }
+				?: candidates.firstOrNull()
+		}
+
         fun newWith(name: String, url: String): CallConfig {
 			val isWB = CallPlatform.fromUrl(url) == CallPlatform.WBSTREAM
 			return CallConfig(
 				id = UUID.randomUUID().toString(),
 				name = name,
 				url = url,
-				tunnelMode = if (isWB) TunnelMode.SMART else null,
+				tunnelMode = if (isWB) TunnelMode.VIDEO else null,
 				dualTrack = if (isWB) true else null,
 			)
 		}
@@ -83,7 +95,7 @@ data class CallConfig(
 				// DC was never an automatic WB default, so a legacy saved DC is
 				// necessarily a user's A/B choice even before the explicit marker.
 				existing?.tunnelMode == TunnelMode.DC -> TunnelMode.DC
-				platform == CallPlatform.WBSTREAM -> TunnelMode.SMART
+				platform == CallPlatform.WBSTREAM -> TunnelMode.VIDEO
 				else -> existing?.tunnelMode ?: TunnelMode.VIDEO
 			}
 			return (existing ?: newWith(name, url)).copy(
@@ -92,9 +104,9 @@ data class CallConfig(
 				// A refreshed Manager invite changes the room, not the user's
 				// transport choice. In particular, do not silently turn WB DC
 				// experiments back into Video on every creator handoff.
-				// Alpha.26 saved every managed WB profile as Video even when the
-				// user had not selected it. Unmarked legacy Video therefore migrates
-				// once to Smart; all choices made in alpha.27+ carry the marker.
+				// Smart used to be the unmarked automatic default. Current field
+				// evidence proves its DC candidate is one-way, so new and unmarked
+				// managed profiles use Video; explicit Smart/DC choices remain intact.
 				tunnelMode = mode,
 				dualTrack = existing?.dualTrack ?: (platform == CallPlatform.WBSTREAM),
 				recoveryProfile = profile,

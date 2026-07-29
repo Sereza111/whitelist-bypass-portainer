@@ -53,9 +53,9 @@ class CallConfigTest {
 	}
 
 	@Test
-	fun legacyManagedWbVideoMigratesToSmart() {
+	fun automaticManagedWbSmartMigratesToVideo() {
 		val legacy = CallConfig.newWith("WB", "wbstream://old-room").copy(
-			tunnelMode = TunnelMode.VIDEO,
+			tunnelMode = TunnelMode.SMART,
 			tunnelModeExplicit = false,
 			recoveryProfile = "client-profile",
 		)
@@ -70,8 +70,8 @@ class CallConfigTest {
 			syncUrl = null,
 		)
 
-		assertEquals(TunnelMode.SMART, refreshed.tunnelMode)
-		assertEquals(TunnelMode.SMART, legacy.migrateManagedWbTransportDefault().tunnelMode)
+		assertEquals(TunnelMode.VIDEO, refreshed.tunnelMode)
+		assertEquals(TunnelMode.VIDEO, legacy.migrateManagedWbTransportDefault().tunnelMode)
 	}
 
 	@Test
@@ -92,7 +92,7 @@ class CallConfigTest {
 	}
 
     @Test
-    fun firstManagedWbInviteDefaultsToSmartDualTrack() {
+	fun firstManagedWbInviteDefaultsToVideoDualTrack() {
         val created = CallConfig.managedInvite(
             existing = null,
             name = "WB",
@@ -103,18 +103,33 @@ class CallConfigTest {
             syncUrl = null,
         )
 
-        assertEquals(TunnelMode.SMART, created.tunnelMode)
+		assertEquals(TunnelMode.VIDEO, created.tunnelMode)
         assertEquals(true, created.dualTrack)
     }
 
 	@Test
-	fun newWbDestinationDefaultsToSmartWithoutChangingOtherProviders() {
+	fun newWbDestinationDefaultsToVideoWithoutChangingOtherProviders() {
 		val wb = CallConfig.newWith("WB", "wbstream://room-id")
 		val vk = CallConfig.newWith("VK", "https://vk.com/call/example")
 
-		assertEquals(TunnelMode.SMART, wb.tunnelMode)
+		assertEquals(TunnelMode.VIDEO, wb.tunnelMode)
 		assertEquals(true, wb.dualTrack)
 		assertEquals(null, vk.tunnelMode)
 		assertEquals(null, vk.dualTrack)
+	}
+
+	@Test
+	fun wbControlBootstrapPrefersActiveThenManagedVkInvite() {
+		val manual = CallConfig.newWith("Manual VK", "https://vk.com/call/manual-room")
+		val managed = CallConfig.newWith("Managed VK", "https://vk.com/call/managed-room").copy(
+			recoveryProfile = "client-vk-profile",
+		)
+		val wb = CallConfig.newWith("WB", "wbstream://wb-room")
+		val invalid = CallConfig.newWith("Invalid", "https://attacker.example/call/not-vk")
+		val items = listOf(manual, managed, wb, invalid)
+
+		assertEquals(manual.id, CallConfig.selectVKControlBootstrap(items, manual.id)?.id)
+		assertEquals(managed.id, CallConfig.selectVKControlBootstrap(items, "missing")?.id)
+		assertEquals(null, CallConfig.selectVKControlBootstrap(listOf(wb, invalid), "")?.id)
 	}
 }

@@ -1,9 +1,9 @@
 package bypass.whitelist.tunnel
 
 enum class TunnelMode(val label: String, val relayArg: String, val isPion: Boolean) {
-    SMART("Smart · recommended", "smart", true),
+    SMART("Smart · experimental", "smart", true),
     DC("DC · experimental", "dc", false),
-    VIDEO("Video", "video", true);
+    VIDEO("Video · recommended", "video", true);
 
     fun relayMode(platform: CallPlatform): String {
         if (!isPion) return "dc-joiner"

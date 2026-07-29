@@ -420,7 +420,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 					if (clientConfig != null) {
 						trace("client", "profile-updated")
 						status.setText(R.string.wb_creator_client_ready)
-						if (autoConnect.isChecked && !TunnelServiceState.isAnyTunnelComponentRunning(this)) {
+						if (autoConnect.isChecked) {
 							trace("client", "auto-connect")
 							openClientAndConnect()
 						}
@@ -528,13 +528,21 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 		if (bootstrapStarted || !CREATOR_RE.matches(requestedProfileId) ||
 			TunnelServiceState.isAnyTunnelComponentRunning(this)
 		) return false
-		val saved = Prefs.savedDestinations.firstOrNull {
+		val destinations = Prefs.savedDestinations
+		val vkBootstrap = CallConfig.selectVKControlBootstrap(destinations, Prefs.activeDestinationId)
+		val savedWB = destinations.firstOrNull {
 			it.recoveryProfile == requestedProfileId && isSafeInvite(it.url)
-		} ?: return false
+		}
+		val saved = vkBootstrap ?: savedWB ?: return false
 		bootstrapStarted = true
 		Prefs.activeDestinationId = saved.id
-		trace("bootstrap", "starting saved WB room before Manager control")
-		status.setText(R.string.wb_creator_bootstrap_starting)
+		if (saved.platform == CallPlatform.VK) {
+			trace("bootstrap", "starting saved VK control path")
+			status.setText(R.string.wb_creator_vk_bootstrap_starting)
+		} else {
+			trace("bootstrap", "starting saved WB room before Manager control")
+			status.setText(R.string.wb_creator_bootstrap_starting)
+		}
 		openClientAndConnect()
 		return true
 	}
