@@ -14,6 +14,12 @@ type MultiTrackTunnel struct {
 	isClosed bool
 	fps      int
 	batch    int
+	// Raw mux frames are pinned by connection id so one TCP flow remains
+	// ordered on one carrier. Once KCP wraps this tunnel, the payload here is a
+	// KCP packet rather than a mux frame; KCP provides ordering itself and its
+	// packets must be striped to use every published video track.
+	roundRobinStriping bool
+	nextTrack          uint64
 }
 
 func NewMultiTrackTunnel(tunnels []*VP8DataTunnel) *MultiTrackTunnel {
@@ -98,17 +104,40 @@ func (m *MultiTrackTunnel) SubTunnelCount() int {
 
 func (m *MultiTrackTunnel) SendData(data []byte) {
 	m.mu.Lock()
-	tunnels := m.tunnels
-	m.mu.Unlock()
-	if len(tunnels) == 0 {
+	if len(m.tunnels) == 0 {
+		m.mu.Unlock()
 		return
+	}
+	idx := m.selectTrackIndexLocked(data, len(m.tunnels))
+	tun := m.tunnels[idx]
+	m.mu.Unlock()
+	tun.SendData(data)
+}
+
+// EnableRoundRobinStriping is called by a reliability wrapper whose packets
+// can safely arrive out of order. It deliberately remains opt-in: callers
+// sending raw mux frames retain per-connection affinity.
+func (m *MultiTrackTunnel) EnableRoundRobinStriping() {
+	m.mu.Lock()
+	m.roundRobinStriping = true
+	m.nextTrack = 0
+	m.mu.Unlock()
+}
+
+func (m *MultiTrackTunnel) selectTrackIndexLocked(data []byte, trackCount int) int {
+	if trackCount <= 1 {
+		return 0
+	}
+	if m.roundRobinStriping {
+		idx := int(m.nextTrack % uint64(trackCount))
+		m.nextTrack++
+		return idx
 	}
 	var connID uint32
 	if len(data) >= 8 {
 		connID = binary.BigEndian.Uint32(data[4:8])
 	}
-	idx := connID % uint32(len(tunnels))
-	tunnels[idx].SendData(data)
+	return int(connID % uint32(trackCount))
 }
 
 func (m *MultiTrackTunnel) SetOnData(fn func([]byte)) {
@@ -160,14 +189,25 @@ func (m *MultiTrackTunnel) Stop() {
 }
 
 func (m *MultiTrackTunnel) HandleFrame(frame []byte) {
+	m.HandleFrameForTrack(0, frame)
+}
+
+func (m *MultiTrackTunnel) HandleFrameForTrack(trackIndex int, frame []byte) {
 	m.mu.Lock()
-	var first *VP8DataTunnel
+	var selected *VP8DataTunnel
 	if len(m.tunnels) > 0 {
-		first = m.tunnels[0]
+		if trackIndex < 0 {
+			trackIndex = 0
+		}
+		// A reconnect can subscribe replacement tracks before old TrackRemote
+		// readers finish. Fold the monotonically assigned slot back onto the
+		// current carrier set instead of collapsing every replacement onto 0.
+		trackIndex %= len(m.tunnels)
+		selected = m.tunnels[trackIndex]
 	}
 	m.mu.Unlock()
-	if first != nil {
-		first.HandleFrame(frame)
+	if selected != nil {
+		selected.HandleFrame(frame)
 	}
 }
 
@@ -178,6 +218,11 @@ func (m *MultiTrackTunnel) TunnelMetrics() TunnelMetrics {
 	metrics := TunnelMetrics{Kind: "multi-vp8", TrackCount: len(tunnels)}
 	for _, tun := range tunnels {
 		item := tun.TunnelMetrics()
+		metrics.TrackSentBytes = append(metrics.TrackSentBytes, item.SentBytes)
+		metrics.TrackReceivedBytes = append(metrics.TrackReceivedBytes, item.ReceivedBytes)
+		metrics.TrackSentFrames = append(metrics.TrackSentFrames, item.SentFrames)
+		metrics.TrackReceivedFrames = append(metrics.TrackReceivedFrames, item.ReceivedFrames)
+		metrics.TrackQueueDepths = append(metrics.TrackQueueDepths, item.QueueDepth)
 		metrics.SentBytes += item.SentBytes
 		metrics.ReceivedBytes += item.ReceivedBytes
 		metrics.SentFrames += item.SentFrames

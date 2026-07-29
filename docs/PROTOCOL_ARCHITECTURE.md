@@ -232,6 +232,14 @@ RelayBridge каждые 10 секунд пишет строку `METRICS` с re
 control frames, временем блокировки `SendData`, активными TCP/UDP flows,
 результатом handshake и transport-specific queue/KCP counters.
 
+Для direct WB Video в alpha.35 одна KCP conversation распределяет выходные
+segments round-robin по 1..4 VP8 tracks. Это не меняет KCP wire format: KCP
+принимает segments в произвольном порядке и выполняет reassembly. Raw mux без
+KCP продолжает закреплять `connID` за одним track. Android передаёт новый
+опциональный JSON-параметр `trackCount`; при его отсутствии `dualTrack=true`
+остаётся совместимым двухтрековым режимом. Сторона Creator получает фактическое
+число tracks через существующий `MsgConfig` и динамически адаптирует publisher.
+
 ## Полевой результат alpha.11: живой carrier с чрезмерной очередью
 
 Matching Android и Creator согласовали `caps=0x1b`, `legacy=false` и

@@ -47,7 +47,8 @@ type SessionConfig struct {
 	RoomID            string
 	AccessToken       string
 	ReadBuf           int
-	ScreenShare       bool          // when true, publish a second VP8 track as ScreenShare and shard outbound across both
+	ScreenShare       bool          // legacy compatibility: when true and TrackCount is unset, publish two tracks
+	TrackCount        int           // desired VP8 carrier count; clamped to 1..4
 	IsJoiner          bool          // when true, run the configPingPong loop; only the joiner sends VP8 config to the peer
 	SmartDCGrace      time.Duration // optional test/tuning override; zero uses the bounded default
 	SmartDCValidation time.Duration // optional test override for initial bidirectional DC validation
@@ -204,9 +205,19 @@ func (s *Session) onLKReady() {
 		s.cfg.LogFn("[lk] create local cam track: %v", err)
 		return
 	}
+	trackCount := s.cfg.TrackCount
+	if trackCount < 1 {
+		trackCount = 1
+		if s.cfg.ScreenShare {
+			trackCount = 2
+		}
+	}
+	if trackCount > 4 {
+		trackCount = 4
+	}
 	tracks := []*webrtc.TrackLocalStaticSample{trackCam}
 
-	if s.cfg.ScreenShare {
+	for len(tracks) < trackCount {
 		screenID := "screenchannel-" + uuid.New().String()
 		trackScreen, err := webrtc.NewTrackLocalStaticSample(
 			webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8, ClockRate: 90000},
@@ -593,6 +604,10 @@ func (s *Session) AdaptTrackCount(peerCount int) {
 	if peerCount < 1 {
 		return
 	}
+	if peerCount > 4 {
+		s.cfg.LogFn("[lk] adapt-track-count: clamping peer request %d -> 4", peerCount)
+		peerCount = 4
+	}
 	pubPC := s.lk.PubPC()
 	if pubPC == nil {
 		return
@@ -740,17 +755,15 @@ func (s *Session) onRemoteTrack(track *webrtc.TrackRemote, _ *webrtc.RTPReceiver
 	s.remoteTracks++
 	count := s.remoteTracks
 	s.mu.Unlock()
+	// Participant updates, not track count, identify peer replacement. One WB
+	// participant may legitimately publish several carrier tracks.
 	if count > 1 {
-		s.cfg.LogFn("[wb] new peer track #%d, signalling peer-restart", count)
-		s.rearmAutoDetect()
-		if s.OnPeerRestart != nil {
-			s.OnPeerRestart()
-		}
+		s.cfg.LogFn("[wb] peer carrier track #%d subscribed", count)
 	}
-	go s.readVP8Track(track)
+	go s.readVP8Track(track, count-1)
 }
 
-func (s *Session) readVP8Track(track *webrtc.TrackRemote) {
+func (s *Session) readVP8Track(track *webrtc.TrackRemote, trackIndex int) {
 	var vp8Pkt codecs.VP8Packet
 	var frameBuf []byte
 	var lastSeq uint16
@@ -798,7 +811,7 @@ func (s *Session) readVP8Track(track *webrtc.TrackRemote) {
 
 		tun := s.currentVP8Tun()
 		if tun != nil {
-			tun.HandleFrame(frameBuf)
+			tun.HandleFrameForTrack(trackIndex, frameBuf)
 		}
 		frameBuf = frameBuf[:0]
 		frameValid = false
@@ -877,6 +890,11 @@ func (s *Session) onParticipantUpdate(updates []livekit.ParticipantInfo) {
 		}
 	}
 	s.mu.Unlock()
+
+	if len(stale) > 0 && s.OnPeerRestart != nil {
+		s.cfg.LogFn("[wb] participant generation changed; resetting relay state")
+		s.OnPeerRestart()
+	}
 
 	for _, e := range toPromote {
 		go s.promotePeer(e.sid, e.identity)

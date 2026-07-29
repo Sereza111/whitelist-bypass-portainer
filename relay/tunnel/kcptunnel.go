@@ -103,6 +103,11 @@ func newKCPTunnel(inner DataTunnel, segmentMTU int, logFn func(string, ...any)) 
 }
 
 func newKCPTunnelWithConversation(inner DataTunnel, segmentMTU int, conversationID uint32, logFn func(string, ...any)) *KCPTunnel {
+	stripingEnabled := false
+	if striper, ok := inner.(interface{ EnableRoundRobinStriping() }); ok {
+		striper.EnableRoundRobinStriping()
+		stripingEnabled = true
+	}
 	t := &KCPTunnel{
 		inner:    inner,
 		logFn:    logFn,
@@ -132,6 +137,9 @@ func newKCPTunnelWithConversation(inner DataTunnel, segmentMTU int, conversation
 	t.SetProfile(KCPProfileBalanced)
 	inner.SetOnData(t.handleInnerData)
 	inner.SetOnClose(t.handleInnerClose)
+	if stripingEnabled && logFn != nil {
+		logFn("kcptunnel: round-robin carrier striping enabled")
+	}
 	go t.outputLoop()
 	go t.updateLoop()
 	return t
@@ -340,7 +348,7 @@ func (t *KCPTunnel) TunnelMetrics() TunnelMetrics {
 	profile := t.profile
 	window := t.maxWaitSnd
 	t.mu.Unlock()
-	return TunnelMetrics{
+	metrics := TunnelMetrics{
 		Kind:                  "kcp-vp8-" + profile,
 		SentBytes:             t.sentBytes.Load(),
 		ReceivedBytes:         t.deliveredBytes.Load(),
@@ -361,6 +369,20 @@ func (t *KCPTunnel) TunnelMetrics() TunnelMetrics {
 		KCPLastAckAgeNanos:    uint64(time.Since(time.Unix(0, t.lastAckUnixNano.Load()))),
 		TrackCount:            1,
 	}
+	if provider, ok := t.inner.(tunnelMetricsProvider); ok {
+		inner := provider.TunnelMetrics()
+		metrics.QueueDepth = inner.QueueDepth
+		metrics.QueueCapacity = inner.QueueCapacity
+		metrics.MaxQueueDepth = inner.MaxQueueDepth
+		metrics.SendWaitNanos += inner.SendWaitNanos
+		metrics.TrackCount = inner.TrackCount
+		metrics.TrackSentBytes = inner.TrackSentBytes
+		metrics.TrackReceivedBytes = inner.TrackReceivedBytes
+		metrics.TrackSentFrames = inner.TrackSentFrames
+		metrics.TrackReceivedFrames = inner.TrackReceivedFrames
+		metrics.TrackQueueDepths = inner.TrackQueueDepths
+	}
+	return metrics
 }
 
 func (t *KCPTunnel) outputLoop() {

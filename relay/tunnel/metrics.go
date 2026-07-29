@@ -8,32 +8,37 @@ import (
 const defaultMetricsInterval = 10 * time.Second
 
 type TunnelMetrics struct {
-	Kind                     string `json:"kind"`
-	SentBytes                uint64 `json:"sentBytes"`
-	ReceivedBytes            uint64 `json:"receivedBytes"`
-	SentFrames               uint64 `json:"sentFrames"`
-	ReceivedFrames           uint64 `json:"receivedFrames"`
-	QueueDepth               int    `json:"queueDepth"`
-	QueueCapacity            int    `json:"queueCapacity"`
-	MaxQueueDepth            uint64 `json:"maxQueueDepth"`
-	SendWaitNanos            uint64 `json:"sendWaitNanos"`
-	KCPInputSegments         uint64 `json:"kcpInputSegments,omitempty"`
-	KCPOutputSegments        uint64 `json:"kcpOutputSegments,omitempty"`
-	KCPDroppedSegments       uint64 `json:"kcpDroppedSegments,omitempty"`
-	KCPWaitSnd               int    `json:"kcpWaitSnd,omitempty"`
-	KCPWindow                int    `json:"kcpWindow,omitempty"`
-	KCPBackpressureNanos     uint64 `json:"kcpBackpressureNanos,omitempty"`
-	KCPOutputQueueDepth      int    `json:"kcpOutputQueueDepth,omitempty"`
-	KCPOutputQueueCap        int    `json:"kcpOutputQueueCapacity,omitempty"`
-	KCPStallRecoveries       uint64 `json:"kcpStallRecoveries,omitempty"`
-	KCPAckStallRecoveries    uint64 `json:"kcpAckStallRecoveries,omitempty"`
-	KCPAutoWindowChanges     uint64 `json:"kcpAutoWindowChanges,omitempty"`
-	KCPLastInputAgeNanos     uint64 `json:"kcpLastInputAgeNanos,omitempty"`
-	KCPLastAckAgeNanos       uint64 `json:"kcpLastAckAgeNanos,omitempty"`
-	KCPControlWaitSnd        int    `json:"kcpControlWaitSnd,omitempty"`
-	KCPControlSentFrames     uint64 `json:"kcpControlSentFrames,omitempty"`
-	KCPControlReceivedFrames uint64 `json:"kcpControlReceivedFrames,omitempty"`
-	TrackCount               int    `json:"trackCount"`
+	Kind                     string   `json:"kind"`
+	SentBytes                uint64   `json:"sentBytes"`
+	ReceivedBytes            uint64   `json:"receivedBytes"`
+	SentFrames               uint64   `json:"sentFrames"`
+	ReceivedFrames           uint64   `json:"receivedFrames"`
+	QueueDepth               int      `json:"queueDepth"`
+	QueueCapacity            int      `json:"queueCapacity"`
+	MaxQueueDepth            uint64   `json:"maxQueueDepth"`
+	SendWaitNanos            uint64   `json:"sendWaitNanos"`
+	KCPInputSegments         uint64   `json:"kcpInputSegments,omitempty"`
+	KCPOutputSegments        uint64   `json:"kcpOutputSegments,omitempty"`
+	KCPDroppedSegments       uint64   `json:"kcpDroppedSegments,omitempty"`
+	KCPWaitSnd               int      `json:"kcpWaitSnd,omitempty"`
+	KCPWindow                int      `json:"kcpWindow,omitempty"`
+	KCPBackpressureNanos     uint64   `json:"kcpBackpressureNanos,omitempty"`
+	KCPOutputQueueDepth      int      `json:"kcpOutputQueueDepth,omitempty"`
+	KCPOutputQueueCap        int      `json:"kcpOutputQueueCapacity,omitempty"`
+	KCPStallRecoveries       uint64   `json:"kcpStallRecoveries,omitempty"`
+	KCPAckStallRecoveries    uint64   `json:"kcpAckStallRecoveries,omitempty"`
+	KCPAutoWindowChanges     uint64   `json:"kcpAutoWindowChanges,omitempty"`
+	KCPLastInputAgeNanos     uint64   `json:"kcpLastInputAgeNanos,omitempty"`
+	KCPLastAckAgeNanos       uint64   `json:"kcpLastAckAgeNanos,omitempty"`
+	KCPControlWaitSnd        int      `json:"kcpControlWaitSnd,omitempty"`
+	KCPControlSentFrames     uint64   `json:"kcpControlSentFrames,omitempty"`
+	KCPControlReceivedFrames uint64   `json:"kcpControlReceivedFrames,omitempty"`
+	TrackCount               int      `json:"trackCount"`
+	TrackSentBytes           []uint64 `json:"trackSentBytes,omitempty"`
+	TrackReceivedBytes       []uint64 `json:"trackReceivedBytes,omitempty"`
+	TrackSentFrames          []uint64 `json:"trackSentFrames,omitempty"`
+	TrackReceivedFrames      []uint64 `json:"trackReceivedFrames,omitempty"`
+	TrackQueueDepths         []int    `json:"trackQueueDepths,omitempty"`
 }
 
 type RelayMetrics struct {
@@ -141,7 +146,7 @@ func (rb *RelayBridge) metricsLoop() {
 			if m.FairScheduledFrames > 0 {
 				avgFairWait = float64(m.FairQueueWaitNanos) / float64(m.FairScheduledFrames) / float64(time.Millisecond)
 			}
-			rb.logFn("METRICS mode=%s uptime=%s tx_bytes=%d rx_bytes=%d tx_kbps=%.1f rx_kbps=%.1f tx_frames=%d rx_frames=%d control_tx=%d control_rx=%d send_wait_ms=%.2f max_send_wait_ms=%.2f tcp=%d udp=%d dns_queries=%d dns_retries=%d dns_reliable_queries=%d dns_reliable_replies=%d dns_avg_ms=%.1f dns_max_ms=%.1f fair_flows=%d fair_queue=%d/%dB fair_queue_limit=%dB fair_flow_limit=%dB fair_queue_max=%dB fair_avg_wait_ms=%.1f fair_max_wait_ms=%.1f wire=%d caps=0x%x legacy=%t tunnel=%s tunnel_tx=%d tunnel_rx=%d queue=%d/%d queue_max=%d kcp_wait_snd=%d kcp_window=%d kcp_auto_changes=%d kcp_control_wait_snd=%d kcp_control_tx=%d kcp_control_rx=%d kcp_out_queue=%d/%d kcp_dropped=%d kcp_backpressure_ms=%.2f kcp_stalls=%d kcp_ack_stalls=%d kcp_input_idle_ms=%.0f kcp_ack_idle_ms=%.0f",
+			rb.logFn("METRICS mode=%s uptime=%s tx_bytes=%d rx_bytes=%d tx_kbps=%.1f rx_kbps=%.1f tx_frames=%d rx_frames=%d control_tx=%d control_rx=%d send_wait_ms=%.2f max_send_wait_ms=%.2f tcp=%d udp=%d dns_queries=%d dns_retries=%d dns_reliable_queries=%d dns_reliable_replies=%d dns_avg_ms=%.1f dns_max_ms=%.1f fair_flows=%d fair_queue=%d/%dB fair_queue_limit=%dB fair_flow_limit=%dB fair_queue_max=%dB fair_avg_wait_ms=%.1f fair_max_wait_ms=%.1f wire=%d caps=0x%x legacy=%t tunnel=%s tunnel_tx=%d tunnel_rx=%d queue=%d/%d queue_max=%d tracks=%d track_tx_bytes=%v track_rx_bytes=%v track_tx_frames=%v track_rx_frames=%v track_queue=%v kcp_wait_snd=%d kcp_window=%d kcp_auto_changes=%d kcp_control_wait_snd=%d kcp_control_tx=%d kcp_control_rx=%d kcp_out_queue=%d/%d kcp_dropped=%d kcp_backpressure_ms=%.2f kcp_stalls=%d kcp_ack_stalls=%d kcp_input_idle_ms=%.0f kcp_ack_idle_ms=%.0f",
 				m.Mode, m.Uptime.Round(time.Second), m.SentBytes, m.ReceivedBytes,
 				txKbps, rxKbps,
 				m.SentFrames, m.ReceivedFrames, m.SentControlFrames, m.RecvControlFrames,
@@ -158,7 +163,10 @@ func (rb *RelayBridge) metricsLoop() {
 				m.NegotiatedWire, m.NegotiatedCaps,
 				m.LegacyCompatibility, m.Tunnel.Kind, m.Tunnel.SentBytes,
 				m.Tunnel.ReceivedBytes, m.Tunnel.QueueDepth, m.Tunnel.QueueCapacity,
-				m.Tunnel.MaxQueueDepth, m.Tunnel.KCPWaitSnd,
+				m.Tunnel.MaxQueueDepth, m.Tunnel.TrackCount,
+				m.Tunnel.TrackSentBytes, m.Tunnel.TrackReceivedBytes,
+				m.Tunnel.TrackSentFrames, m.Tunnel.TrackReceivedFrames,
+				m.Tunnel.TrackQueueDepths, m.Tunnel.KCPWaitSnd,
 				m.Tunnel.KCPWindow, m.Tunnel.KCPAutoWindowChanges,
 				m.Tunnel.KCPControlWaitSnd, m.Tunnel.KCPControlSentFrames, m.Tunnel.KCPControlReceivedFrames,
 				m.Tunnel.KCPOutputQueueDepth, m.Tunnel.KCPOutputQueueCap,

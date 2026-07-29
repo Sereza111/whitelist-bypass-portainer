@@ -56,8 +56,12 @@ class HeadlessJoinController(
         when (platform) {
             CallPlatform.TELEMOST -> put("joinLink", url)
             CallPlatform.WBSTREAM -> {
+				val mode = Prefs.activeTunnelMode.forPlatform(platform)
                 put("roomId", CallPlatform.extractRoomId(url))
-                put("tunnelMode", Prefs.activeTunnelMode.forPlatform(platform).relayArg)
+				put("tunnelMode", mode.relayArg)
+				// KCP restores packet order, so managed WB Video can stripe one
+				// conversation over four independently paced VP8 carriers.
+				put("trackCount", if (Prefs.activeDualTrack && mode != TunnelMode.DC) 4 else 1)
             }
             CallPlatform.DION -> put("roomId", CallPlatform.extractRoomId(url))
             CallPlatform.VK -> error("VK headless flow uses HeadlessVkFragment for captcha UI")

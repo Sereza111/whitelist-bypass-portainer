@@ -178,6 +178,28 @@ VLESS не исправляет loss, pacing или head-of-line blocking на V
 - METRICS содержит throughput, KCP output queue, drops, backpressure,
   `kcp_stalls` и `kcp_input_idle_ms`.
 
+## WB multi-track throughput pass (`0.5.0-alpha.35`)
+
+Полевой лог alpha.32 показал `dualTrack=true`, но при нагрузке direct WB KCP
+оставался примерно на 0.5–0.8 Мбит/с и заполнял bounded окно. Причина найдена
+выше SFU: `MultiTrackTunnel` пытался извлечь mux `connID` из байтов 4..8 уже
+сформированного KCP packet. В этом месте находятся KCP command/window fields,
+поэтому bulk segments систематически выбирали один carrier track.
+
+Alpha.35 включает round-robin только когда `MultiTrackTunnel` обёрнут KCP.
+Raw mux сохраняет прежнюю per-connection affinity, а KCP самостоятельно
+восстанавливает порядок пришедших с разных tracks segments. Android WB Video
+с включённым multi-track теперь запрашивает четыре независимо paced VP8
+tracks; параметр `trackCount` опционален, ограничен диапазоном 1..4, а старый
+`dualTrack` без него по-прежнему означает два tracks.
+
+Метрики теперь содержат `tracks`, per-track TX/RX bytes, frames и queue depth.
+Цель — убрать доказанный software bottleneck и приблизиться к 3 Мбит/с без
+раздувания KCP/DRR очередей. Это не обещание фиксированной полосы: если четыре
+tracks распределены равномерно, но их сумма остаётся ниже цели, ограничение уже
+на стороне WB SFU/carrier и следующий эксперимент — независимые KCP lanes с
+явной capability, а не увеличение окон.
+
 ## Полевой результат `0.5.0-alpha.2`: односторонний stall
 
 Matching Android-клиент и сервер успешно согласовали `wire=1`, `caps=0x3` и

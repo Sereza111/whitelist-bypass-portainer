@@ -14,6 +14,27 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
+## Active handoff (2026-07-29, alpha.35 WB multi-track throughput candidate)
+
+- Alpha.32 field metrics showed dual-track enabled but only roughly
+  0.5-0.8 Mbps under load. Root cause: `MultiTrackTunnel.SendData` parsed mux
+  `connID` from bytes 4..8 after the payload had become a KCP packet, so KCP
+  DATA/ACK segments systematically selected one VP8 track.
+- A KCP wrapper now explicitly enables round-robin segment striping; raw mux
+  mode retains per-connection track affinity. KCP wire format is unchanged and
+  provides cross-track reordering.
+- Managed Android WB Video requests four tracks when multi-track is enabled.
+  `trackCount` is optional and clamped to 1..4; older `dualTrack=true` clients
+  remain two-track compatible. Creator learns the count through existing
+  `MsgConfig` and dynamically adds matching publishers.
+- METRICS reports per-track TX/RX bytes, frames and queue depths. Field gate:
+  install matching alpha.35 Android + Docker, verify `tracks=4`, balanced
+  per-track counters, aggregate throughput and loaded latency. If all four are
+  balanced but total remains below 3 Mbps, investigate explicit independent
+  KCP lanes/SFU limits rather than increasing KCP or DRR buffers.
+- Do not research or reproduce WBAAS or `slide-v3`. WB cookies/tokens stay on
+  Android and Manager accepts only validated invitation links.
+
 ## Active handoff (2026-07-29, alpha.34 invite-only user portal)
 
 - Admin Basic Auth remains the operator boundary. Admin owns shared Providers,

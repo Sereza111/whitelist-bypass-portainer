@@ -225,6 +225,11 @@ func (t *AdaptiveKCPTunnel) TunnelMetrics() TunnelMetrics {
 		kcpMetrics.MaxQueueDepth = innerMetrics.MaxQueueDepth
 		kcpMetrics.SendWaitNanos += innerMetrics.SendWaitNanos
 		kcpMetrics.TrackCount = innerMetrics.TrackCount
+		kcpMetrics.TrackSentBytes = innerMetrics.TrackSentBytes
+		kcpMetrics.TrackReceivedBytes = innerMetrics.TrackReceivedBytes
+		kcpMetrics.TrackSentFrames = innerMetrics.TrackSentFrames
+		kcpMetrics.TrackReceivedFrames = innerMetrics.TrackReceivedFrames
+		kcpMetrics.TrackQueueDepths = innerMetrics.TrackQueueDepths
 	}
 	controlMetrics := t.controlKCP.TunnelMetrics()
 	kcpMetrics.KCPControlWaitSnd = controlMetrics.KCPWaitSnd

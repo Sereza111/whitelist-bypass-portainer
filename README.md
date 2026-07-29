@@ -6,12 +6,12 @@ Dion. Это уже не минимальная Docker-обёртка upstream: 
 клиенты, SOCKS5/TUN, автоматическое восстановление звонков, диагностику и
 multi-arch релизный pipeline.
 
-Текущий релиз: **[v0.5.0-alpha.34](https://github.com/Sereza111/whitelist-bypass-portainer/releases/tag/v0.5.0-alpha.34)**.
+Текущий кандидат: **v0.5.0-alpha.35**. До публикации immutable tag используйте branch artifacts только для проверки matching Android + server.
 
 Docker image:
 
 ```text
-ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.34
+ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.35
 ```
 
 Проект основан на
@@ -150,7 +150,7 @@ ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.34
 
 | Переменная | Рекомендуемое значение |
 |---|---|
-| `WLB_IMAGE` | `ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.34` |
+| `WLB_IMAGE` | `ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.35` |
 | `PANEL_USERNAME` | новый логин, по умолчанию `admin` |
 | `PANEL_PASSWORD` | уникальный пароль длиной от 12 символов |
 | `WLB_SECRETS_DIR` | `/opt/whitelist-bypass/secrets` |
@@ -240,7 +240,7 @@ WB Stream и Dion; тип провайдера связан с проверен�
 В логах клиента и сервера должны совпадать:
 
 ```text
-[build] version=0.5.0-alpha.34 commit=... built=...
+[build] version=0.5.0-alpha.35 commit=... built=...
 ```
 
 Если на телефоне осталась старая debug-signed `alpha.8`, её нужно удалить один
