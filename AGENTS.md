@@ -14,6 +14,25 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
+## Active handoff (2026-07-29, alpha.31 WB bootstrap invalidation candidate)
+
+- The external-only alpha.30 field logs/screenshots must never be committed.
+  They prove the saved WB bootstrap room is terminally dead: the server gets
+  `403 guests cannot create rooms` on every retry. Android's pairing request
+  also failed with `SocketException`; the visible "Sign in" text was a WebView
+  page-start overwrite, not a successful pairing.
+- Android Manager fallback now uses the system route when the app's own tunnel
+  is absent; it no longer pins traffic to a hand-selected non-VPN network. This
+  does not make an external VPN a product dependency; it simply respects the
+  device's normal route if one is present. When our tunnel is running, Manager
+  control still prefers the authenticated local SOCKS path.
+- A failed WB creator pairing remains visible as an error instead of being
+  overwritten by the WebView. A bootstrap relay that logs the terminal
+  `guests cannot create rooms` response clears its dead invite and requests a
+  fresh Android invitation instead of retrying the same room indefinitely.
+- Do not research or reproduce WBAAS or `slide-v3`. WB cookies/tokens stay on
+  Android and Manager accepts only validated invitation links.
+
 ## Active handoff (2026-07-28, alpha.30 WB whitelist bootstrap candidate)
 
 - The alpha.29 screenshot is external-only and must never be committed. It

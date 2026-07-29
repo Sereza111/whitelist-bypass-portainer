@@ -48,6 +48,15 @@ func profileBootstrapInvite(profile clientProfile) string {
 	return ""
 }
 
+func managerLogContains(mgr *manager, needle string) bool {
+	for _, line := range mgr.status().Logs {
+		if strings.Contains(strings.ToLower(line), strings.ToLower(needle)) {
+			return true
+		}
+	}
+	return false
+}
+
 type panelSettings struct {
 	RecoveryRecipient  string     `json:"recoveryRecipient,omitempty"`
 	RecoveryVerifiedAt *time.Time `json:"recoveryVerifiedAt,omitempty"`
@@ -547,6 +556,17 @@ func (cp *controlPlane) superviseSession(session *managedSession) {
 			session.StateMu.Lock()
 			config := session.Config
 			bootstrapInvite := profileBootstrapInvite(profile)
+			if bootstrapInvite != "" && managerLogContains(session.Manager, "guests cannot create rooms") {
+				// The old room is terminally invalid. Do not spend the recovery
+				// budget retrying it; move the profile back to creator-requesting
+				// state so Android can supply a fresh invitation.
+				profile.CurrentInvite = ""
+				profile.InviteGeneration = 0
+				profile.InviteUpdatedAt = nil
+				cp.profiles[profile.ID] = profile
+				bootstrapInvite = ""
+				cp.events.add("warn", "wb-creator", "Last WB bootstrap room was rejected; requesting a fresh Android invitation", profile.ID)
+			}
 			if bootstrapInvite == "" {
 				profile.RecoveryGeneration++
 				cp.profiles[profile.ID] = profile

@@ -61,6 +61,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 	private var consecutiveManagerFailures = 0
 	private var bootstrapStarted = false
 	private var lastManagerRoute = ""
+	private var terminalFailure = false
 	private val diagnosticLines = ArrayDeque<String>()
 	private val profileStartRetry = Runnable { requestSelectedProfileStart() }
 
@@ -142,7 +143,9 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
         webView.webViewClient = object : WebViewClient() {
             override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
 				trace("webview", "page-start")
-                if (pendingRequestId.isEmpty()) status.setText(R.string.wb_creator_ready_help)
+				if (!terminalFailure && pendingRequestId.isEmpty() &&
+					CREATOR_RE.matches(creatorId) && TOKEN_RE.matches(deviceSecret)
+				) status.setText(R.string.wb_creator_ready_help)
 				maybeSubmitInvite(url)
             }
 
@@ -154,7 +157,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
 				if (request.isForMainFrame) {
 					trace("webview", "main-frame-error=${error.errorCode}")
-					status.setText(R.string.wb_login_page_error)
+					if (!terminalFailure) status.setText(R.string.wb_login_page_error)
 				}
             }
         }
@@ -507,6 +510,7 @@ class WBLoginActivity : AppCompatActivity(R.layout.activity_wb_login) {
 	}.getOrDefault("unknown")
 
     private fun fail(message: String) {
+		terminalFailure = true
         mainHandler.removeCallbacks(commandPoll)
 		mainHandler.removeCallbacks(autoCreatePoll)
         invitePanel.visibility = View.GONE

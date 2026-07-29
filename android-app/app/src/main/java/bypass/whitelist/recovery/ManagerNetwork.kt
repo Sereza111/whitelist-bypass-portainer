@@ -1,9 +1,6 @@
 package bypass.whitelist.recovery
 
 import android.content.Context
-import android.net.ConnectivityManager
-import android.net.Network
-import android.net.NetworkCapabilities
 import bypass.whitelist.tunnel.TunnelServiceState
 import bypass.whitelist.util.Net
 import bypass.whitelist.util.Prefs
@@ -46,7 +43,7 @@ object ManagerNetwork {
 							Proxy.Type.SOCKS,
 							InetSocketAddress(Net.LOCALHOST, Prefs.socksPort.toInt()),
 						)
-						request(url.openConnection(proxy) as HttpURLConnection)
+							request(url.openConnection(proxy) as HttpURLConnection)
 					} finally {
 						Authenticator.setDefault(null)
 					}
@@ -57,29 +54,8 @@ object ManagerNetwork {
 			} catch (_: SecurityException) {
 			}
 		}
-		return request(openPhysical(context, url))
+		return request(openSystem(url))
 	}
 
-	private fun openPhysical(context: Context, url: URL): HttpURLConnection {
-		val physical = selectPhysicalNetwork(context)
-		val connection = physical?.openConnection(url) ?: url.openConnection()
-		return connection as HttpURLConnection
-	}
-
-	private fun selectPhysicalNetwork(context: Context): Network? = runCatching {
-		val manager = context.applicationContext.getSystemService(ConnectivityManager::class.java)
-			?: return@runCatching null
-		manager.allNetworks
-			.mapNotNull { network ->
-				val capabilities = manager.getNetworkCapabilities(network) ?: return@mapNotNull null
-				if (!capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) ||
-					capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
-				) return@mapNotNull null
-				val validated = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
-				network to validated
-			}
-			.sortedByDescending { (_, validated) -> if (validated) 1 else 0 }
-			.firstOrNull()
-			?.first
-	}.getOrNull()
+	private fun openSystem(url: URL): HttpURLConnection = url.openConnection() as HttpURLConnection
 }
