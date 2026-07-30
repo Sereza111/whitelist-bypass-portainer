@@ -155,6 +155,8 @@
     <string name="settings_row_headless_sub">Skip the visible browser join</string>
     <string name="settings_row_reconnect">Reconnect on app start</string>
     <string name="settings_row_reconnect_sub">Restore the last session automatically</string>
+	<string name="settings_row_live_logs">Show live logs</string>
+	<string name="settings_row_live_logs_sub">Off reduces UI load; the full diagnostic file is still recorded</string>
 	<string name="settings_row_recovery">Automatic recovery</string>
 	<string name="settings_row_recovery_sub">Allow signed VK updates to renew an expired call</string>
 	<string name="settings_row_recovery_on">Ready</string>
@@ -267,6 +269,7 @@
 	<string name="proxy_auth_manual_sub">Use the fields below, or leave both empty for no authentication</string>
 
     <string name="activity_empty">No events yet</string>
+    <string name="activity_live_logs_disabled">Live display is off. The full log is still being recorded and can be copied or shared below.</string>
     <string name="activity_copy">Copy raw</string>
     <string name="activity_share">Share file</string>
 </resources>

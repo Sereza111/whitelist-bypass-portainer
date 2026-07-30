@@ -171,6 +171,15 @@ class SettingsScreenFragment : Fragment(R.layout.fragment_settings_screen) {
         addSwitchRow(card, R.drawable.ic_setting_reconnect, getString(R.string.settings_row_reconnect), getString(R.string.settings_row_reconnect_sub), Prefs.connectOnStart) { checked ->
             Prefs.connectOnStart = checked
         }
+        addSwitchRow(
+            card,
+            R.drawable.ic_log_info,
+            getString(R.string.settings_row_live_logs),
+            getString(R.string.settings_row_live_logs_sub),
+            Prefs.liveLogDisplay,
+        ) { checked ->
+            Prefs.liveLogDisplay = checked
+        }
 		val recoveryAccess = NotificationManagerCompat.getEnabledListenerPackages(requireContext()).contains(requireContext().packageName)
 		addRow(
 			card, R.drawable.ic_setting_reconnect, getString(R.string.settings_row_recovery),

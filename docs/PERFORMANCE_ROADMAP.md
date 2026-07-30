@@ -200,6 +200,23 @@ tracks распределены равномерно, но их сумма ос�
 на стороне WB SFU/carrier и следующий эксперимент — независимые KCP lanes с
 явной capability, а не увеличение окон.
 
+### Alpha.38 field result and alpha.39 diagnostic gate
+
+Matching alpha.38 Android logs confirm that direct WB now subscribes and moves
+payload over all four VP8 tracks. Per-track byte/frame counters are balanced,
+queues are empty in the available sample, `kcp_wait_snd=0/512` and there are no
+KCP drops. The measured aggregate speed is still approximately 1.57 Mbps, but
+the WB session ended before a second saturated ten-second metrics interval.
+
+Alpha.39 therefore does not increase KCP/DRR buffers. It records interval
+`track_tx_kbps`/`track_rx_kbps` and per-track average/max `WriteSample` latency
+and errors. A useful next field run keeps one WB download active for at least
+30 seconds and retains matching client and Creator `METRICS`. Roughly equal
+~0.4 Mbps rates on every track with low write latency indicate a carrier/SFU
+ceiling; high write latency or growing track queues indicate a local publisher
+bottleneck. Only that distinction determines whether the next reversible
+experiment should change packetization/pacing or track topology.
+
 ## Полевой результат `0.5.0-alpha.2`: односторонний stall
 
 Matching Android-клиент и сервер успешно согласовали `wire=1`, `caps=0x3` и

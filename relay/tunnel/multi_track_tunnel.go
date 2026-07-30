@@ -223,6 +223,9 @@ func (m *MultiTrackTunnel) TunnelMetrics() TunnelMetrics {
 		metrics.TrackSentFrames = append(metrics.TrackSentFrames, item.SentFrames)
 		metrics.TrackReceivedFrames = append(metrics.TrackReceivedFrames, item.ReceivedFrames)
 		metrics.TrackQueueDepths = append(metrics.TrackQueueDepths, item.QueueDepth)
+		metrics.TrackWriteNanos = append(metrics.TrackWriteNanos, item.TrackWriteNanos...)
+		metrics.TrackMaxWriteNanos = append(metrics.TrackMaxWriteNanos, item.TrackMaxWriteNanos...)
+		metrics.TrackWriteErrors = append(metrics.TrackWriteErrors, item.TrackWriteErrors...)
 		metrics.SentBytes += item.SentBytes
 		metrics.ReceivedBytes += item.ReceivedBytes
 		metrics.SentFrames += item.SentFrames

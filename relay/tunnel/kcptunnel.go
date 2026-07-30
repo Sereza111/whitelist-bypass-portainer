@@ -381,6 +381,9 @@ func (t *KCPTunnel) TunnelMetrics() TunnelMetrics {
 		metrics.TrackSentFrames = inner.TrackSentFrames
 		metrics.TrackReceivedFrames = inner.TrackReceivedFrames
 		metrics.TrackQueueDepths = inner.TrackQueueDepths
+		metrics.TrackWriteNanos = inner.TrackWriteNanos
+		metrics.TrackMaxWriteNanos = inner.TrackMaxWriteNanos
+		metrics.TrackWriteErrors = inner.TrackWriteErrors
 	}
 	return metrics
 }

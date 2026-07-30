@@ -31,19 +31,22 @@ type VP8DataTunnel struct {
 	fps   int
 	batch int
 
-	sentFrames atomic.Uint64
-	recvFrames atomic.Uint64
-	sentBytes  atomic.Uint64
-	recvBytes  atomic.Uint64
-	sendWait   atomic.Uint64
-	maxQueue   atomic.Uint64
+	sentFrames  atomic.Uint64
+	recvFrames  atomic.Uint64
+	sentBytes   atomic.Uint64
+	recvBytes   atomic.Uint64
+	sendWait    atomic.Uint64
+	maxQueue    atomic.Uint64
+	writeNanos  atomic.Uint64
+	maxWrite    atomic.Uint64
+	writeErrors atomic.Uint64
 
 	OnData  func([]byte)
 	OnClose func()
 }
 
 func (t *VP8DataTunnel) SetOnData(fn func([]byte)) { t.OnData = fn }
-func (t *VP8DataTunnel) SetOnClose(fn func())       { t.OnClose = fn }
+func (t *VP8DataTunnel) SetOnClose(fn func())      { t.OnClose = fn }
 
 func NewVP8DataTunnel(track *webrtc.TrackLocalStaticSample, obf *TunnelObfuscator, logFn func(string, ...any)) *VP8DataTunnel {
 	return &VP8DataTunnel{
@@ -195,7 +198,13 @@ func (t *VP8DataTunnel) writerLoop() {
 				if sample == nil {
 					continue
 				}
-				if err := t.track.WriteSample(media.Sample{Data: sample, Duration: sampleInterval}); err != nil {
+				writeStarted := time.Now()
+				err := t.track.WriteSample(media.Sample{Data: sample, Duration: sampleInterval})
+				writeElapsed := uint64(time.Since(writeStarted))
+				t.writeNanos.Add(writeElapsed)
+				updateAtomicMax(&t.maxWrite, writeElapsed)
+				if err != nil {
+					t.writeErrors.Add(1)
 					t.logFn("vp8tunnel: WriteSample error: %v", err)
 					continue
 				}
@@ -235,15 +244,23 @@ func (t *VP8DataTunnel) HandleFrame(frame []byte) {
 
 func (t *VP8DataTunnel) TunnelMetrics() TunnelMetrics {
 	return TunnelMetrics{
-		Kind:          "vp8",
-		SentBytes:     t.sentBytes.Load(),
-		ReceivedBytes: t.recvBytes.Load(),
-		SentFrames:    t.sentFrames.Load(),
-		ReceivedFrames: t.recvFrames.Load(),
-		QueueDepth:    len(t.sendQueue),
-		QueueCapacity: cap(t.sendQueue),
-		MaxQueueDepth: t.maxQueue.Load(),
-		SendWaitNanos: t.sendWait.Load(),
-		TrackCount:    1,
+		Kind:                "vp8",
+		SentBytes:           t.sentBytes.Load(),
+		ReceivedBytes:       t.recvBytes.Load(),
+		SentFrames:          t.sentFrames.Load(),
+		ReceivedFrames:      t.recvFrames.Load(),
+		QueueDepth:          len(t.sendQueue),
+		QueueCapacity:       cap(t.sendQueue),
+		MaxQueueDepth:       t.maxQueue.Load(),
+		SendWaitNanos:       t.sendWait.Load(),
+		TrackCount:          1,
+		TrackSentBytes:      []uint64{t.sentBytes.Load()},
+		TrackReceivedBytes:  []uint64{t.recvBytes.Load()},
+		TrackSentFrames:     []uint64{t.sentFrames.Load()},
+		TrackReceivedFrames: []uint64{t.recvFrames.Load()},
+		TrackQueueDepths:    []int{len(t.sendQueue)},
+		TrackWriteNanos:     []uint64{t.writeNanos.Load()},
+		TrackMaxWriteNanos:  []uint64{t.maxWrite.Load()},
+		TrackWriteErrors:    []uint64{t.writeErrors.Load()},
 	}
 }

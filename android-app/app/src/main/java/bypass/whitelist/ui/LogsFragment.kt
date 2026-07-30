@@ -5,6 +5,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.View
 import android.widget.Button
+import android.widget.TextView
 import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -15,14 +16,16 @@ class LogsFragment : Fragment(R.layout.fragment_logs_screen) {
     interface Host {
         fun activityLogLines(): List<String>
         fun activityLogRevision(): Long
+        fun liveLogDisplayEnabled(): Boolean
         fun copyLogs()
         fun shareLogs()
     }
 
     private var recyclerView: RecyclerView? = null
-    private var emptyView: View? = null
+    private var emptyView: TextView? = null
     private val adapter = LogLineAdapter()
     private var lastRevision = -1L
+    private var lastLiveDisplayEnabled: Boolean? = null
     private val tickHandler = Handler(Looper.getMainLooper())
     private val tickRunnable = object : Runnable {
         override fun run() {
@@ -66,23 +69,51 @@ class LogsFragment : Fragment(R.layout.fragment_logs_screen) {
     }
 
     private fun syncIfChanged() {
-        val revision = host()?.activityLogRevision() ?: return
-        if (revision != lastRevision) syncFromHost(forceScroll = false)
+        val host = host() ?: return
+        val revision = host.activityLogRevision()
+        val liveDisplayEnabled = host.liveLogDisplayEnabled()
+        if (revision != lastRevision || liveDisplayEnabled != lastLiveDisplayEnabled) {
+            syncFromHost(forceScroll = false)
+        }
     }
 
     private fun syncFromHost(forceScroll: Boolean) {
         val host = host() ?: return
         val revision = host.activityLogRevision()
+        val liveDisplayEnabled = host.liveLogDisplayEnabled()
+        lastLiveDisplayEnabled = liveDisplayEnabled
+        if (!liveDisplayEnabled) {
+            adapter.setLines(emptyList())
+            lastRevision = revision
+            updateEmptyState(liveDisplayEnabled = false)
+            return
+        }
         val lines = host.activityLogLines()
         val atBottom = isAtBottom()
+        val manager = recyclerView?.layoutManager as? LinearLayoutManager
+        val anchorPosition = if (atBottom) -1 else manager?.findFirstVisibleItemPosition() ?: -1
+        val anchorLine = if (anchorPosition >= 0) adapter.rawLineAt(anchorPosition) else null
+        val anchorOffset = if (anchorPosition >= 0) {
+            manager?.findViewByPosition(anchorPosition)?.top ?: 0
+        } else 0
         adapter.setLines(lines)
         lastRevision = revision
-        updateEmptyState()
-        if (forceScroll || atBottom) scrollToBottom()
+        updateEmptyState(liveDisplayEnabled = true)
+        if (forceScroll || atBottom) {
+            scrollToBottom()
+        } else if (anchorLine != null) {
+            val restoredPosition = adapter.positionOfRawLine(anchorLine)
+            if (restoredPosition >= 0) {
+                recyclerView?.post { manager?.scrollToPositionWithOffset(restoredPosition, anchorOffset) }
+            }
+        }
     }
 
-    private fun updateEmptyState() {
+    private fun updateEmptyState(liveDisplayEnabled: Boolean) {
         val empty = adapter.isEmpty()
+        emptyView?.setText(
+            if (liveDisplayEnabled) R.string.activity_empty else R.string.activity_live_logs_disabled
+        )
         emptyView?.visibility = if (empty) View.VISIBLE else View.GONE
         recyclerView?.visibility = if (empty) View.GONE else View.VISIBLE
     }
@@ -103,7 +134,6 @@ class LogsFragment : Fragment(R.layout.fragment_logs_screen) {
     private fun host(): Host? = activity as? Host
 
     companion object {
-        private const val REFRESH_INTERVAL_MS = 400L
+        private const val REFRESH_INTERVAL_MS = 1000L
     }
 }
-

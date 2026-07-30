@@ -6,7 +6,11 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-class LogWriter(cacheDir: File, private val maxDisplayLines: Int = 2000) {
+class LogWriter(
+    cacheDir: File,
+    private val maxDisplayLines: Int = 300,
+    private val maxRetainedFileLines: Int = 2000,
+) {
 
     private val logFile = File(cacheDir, "relay.log")
     private var writer: FileWriter? = null
@@ -28,10 +32,10 @@ class LogWriter(cacheDir: File, private val maxDisplayLines: Int = 2000) {
     fun beginSession() {
         writer?.close()
         val retained = if (logFile.exists()) {
-            logFile.readLines().takeLast((maxDisplayLines - 1).coerceAtLeast(0))
+            logFile.readLines().takeLast((maxRetainedFileLines - 1).coerceAtLeast(0))
         } else emptyList()
         displayLines.clear()
-        retained.forEach { displayLines.addLast(it) }
+        retained.takeLast((maxDisplayLines - 1).coerceAtLeast(0)).forEach { displayLines.addLast(it) }
         writer = FileWriter(logFile, false)
         retained.forEach { writer?.write("$it\n") }
         writer?.flush()
@@ -50,6 +54,9 @@ class LogWriter(cacheDir: File, private val maxDisplayLines: Int = 2000) {
 
     @Synchronized
     fun revision(): Long = revisionCounter
+
+    @Synchronized
+    fun displayLines(): List<String> = displayLines.toList()
 
     @Synchronized
     fun displayText(): String = displayLines.joinToString("\n")

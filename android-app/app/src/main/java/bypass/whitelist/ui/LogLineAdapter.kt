@@ -8,7 +8,7 @@ import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import bypass.whitelist.R
 
-class LogLineAdapter(private val maxLines: Int = 500) : RecyclerView.Adapter<LogLineAdapter.LineViewHolder>() {
+class LogLineAdapter(private val maxLines: Int = 300) : RecyclerView.Adapter<LogLineAdapter.LineViewHolder>() {
 
     private val lines = ArrayDeque<ParsedLine>()
 
@@ -19,6 +19,10 @@ class LogLineAdapter(private val maxLines: Int = 500) : RecyclerView.Adapter<Log
     }
 
     fun isEmpty(): Boolean = lines.isEmpty()
+
+    fun rawLineAt(position: Int): String? = lines.elementAtOrNull(position)?.raw
+
+    fun positionOfRawLine(raw: String): Int = lines.indexOfFirst { it.raw == raw }
 
     override fun getItemCount(): Int = lines.size
 
@@ -64,7 +68,13 @@ class LogLineAdapter(private val maxLines: Int = 500) : RecyclerView.Adapter<Log
 
     enum class Level { INFO, OK, WARN, ERR }
 
-    data class ParsedLine(val time: String, val component: String, val level: Level, val message: String)
+    data class ParsedLine(
+        val raw: String,
+        val time: String,
+        val component: String,
+        val level: Level,
+        val message: String,
+    )
 
     companion object {
         private val timestampRegex = Regex("^\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,3})?$")
@@ -95,7 +105,7 @@ class LogLineAdapter(private val maxLines: Int = 500) : RecyclerView.Adapter<Log
                 else -> Level.INFO
             }
 
-            return ParsedLine(time = time, component = component, level = level, message = rest)
+            return ParsedLine(raw = line, time = time, component = component, level = level, message = rest)
         }
 
         private fun iconFor(component: String): Int = when (component.lowercase()) {
@@ -113,4 +123,3 @@ class LogLineAdapter(private val maxLines: Int = 500) : RecyclerView.Adapter<Log
         }
     }
 }
-

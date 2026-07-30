@@ -102,6 +102,7 @@ class MainActivity :
     private var navScrollState: Int = ViewPager2.SCROLL_STATE_IDLE
     @Volatile private var resetInProgress: Boolean = false
     @Volatile private var overlayVisible: Boolean = false
+    @Volatile private var overlayRefreshQueued: Boolean = false
     @Volatile private var resetGeneration: Long = 0L
     private var pendingConnectConfig: CallConfig? = null
 	private var pendingConnectDirect = false
@@ -437,12 +438,12 @@ class MainActivity :
     }
 
     override fun activityLogLines(): List<String> {
-        val text = logWriter.displayText()
-        if (text.isEmpty()) return emptyList()
-        return text.split('\n').filter { it.isNotBlank() }
+        return if (Prefs.liveLogDisplay) logWriter.displayLines() else emptyList()
     }
 
     override fun activityLogRevision(): Long = logWriter.revision()
+
+    override fun liveLogDisplayEnabled(): Boolean = Prefs.liveLogDisplay
 
     override fun copyLogs() {
         val contents =
@@ -469,11 +470,14 @@ class MainActivity :
 
     override fun appendLog(message: String) {
         logWriter.append(message)
-        if (overlayVisible) {
-            runOnUiThread {
+        if (overlayVisible && Prefs.liveLogDisplay && !overlayRefreshQueued) {
+            overlayRefreshQueued = true
+            overlayLogs.postDelayed({
+                overlayRefreshQueued = false
+                if (!overlayVisible || !Prefs.liveLogDisplay) return@postDelayed
                 overlayLogsText.text = logWriter.displayText()
                 overlayLogsScroll.post { overlayLogsScroll.fullScroll(View.FOCUS_DOWN) }
-            }
+            }, OVERLAY_LOG_REFRESH_MS)
         }
     }
 
@@ -868,9 +872,16 @@ class MainActivity :
         overlayLogs.visibility = if (visible) View.VISIBLE else View.GONE
         bottomNav.visibility = if (visible) View.GONE else View.VISIBLE
         overlayVisible = visible
+        if (!visible) overlayRefreshQueued = false
         if (visible) {
-            overlayLogsText.text = logWriter.displayText()
-            overlayLogsScroll.post { overlayLogsScroll.fullScroll(View.FOCUS_DOWN) }
+            overlayLogsText.text = if (Prefs.liveLogDisplay) {
+                logWriter.displayText()
+            } else {
+                getString(R.string.activity_live_logs_disabled)
+            }
+            if (Prefs.liveLogDisplay) {
+                overlayLogsScroll.post { overlayLogsScroll.fullScroll(View.FOCUS_DOWN) }
+            }
         }
     }
 
@@ -1108,6 +1119,7 @@ class MainActivity :
     }
 
     companion object {
+        private const val OVERLAY_LOG_REFRESH_MS = 1000L
 		private const val MOBILE_INVITE_SCHEME = "wlb"
 		private const val MOBILE_INVITE_HOST = "import"
         const val ACTION_AUTO_START = "bypass.whitelist.AUTO_START"

@@ -175,6 +175,10 @@ object Prefs {
         }
         set(value) = prefs.edit { putString(PrefsKeys.THEME_MODE, value.name) }
 
+    var liveLogDisplay: Boolean
+        get() = prefs.getBoolean(PrefsKeys.LIVE_LOG_DISPLAY, false)
+        set(value) = prefs.edit { putBoolean(PrefsKeys.LIVE_LOG_DISPLAY, value) }
+
     val activeDestination: CallConfig?
         get() {
             val id = activeDestinationId

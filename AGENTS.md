@@ -14,6 +14,23 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
+## Active handoff (2026-07-30, alpha.39 bounded Android logs + WB diagnostics)
+
+- Matching alpha.38 WB field logs prove all four carrier tracks are subscribed
+  and balanced. Aggregate user throughput nevertheless remains around 1.57
+  Mbps; the only WB `METRICS` sample was captured before sustained saturation,
+  so it does not justify another KCP window change.
+- Android live log rendering is off by default and can be enabled in Settings.
+  The complete diagnostic file continues to be written and remains available
+  through Copy/Share. Enabled preview is capped at 300 lines and both activity
+  and overlay refresh are throttled to one second.
+- Transport metrics report per-track interval TX/RX kbps plus average/max
+  WebRTC `WriteSample` latency and errors. The next WB test must keep load active
+  across at least two `METRICS` intervals and collect matching Android and
+  Manager/Creator lines.
+- Do not research or reproduce WBAAS or `slide-v3`. WB cookies/tokens stay on
+  Android and Manager accepts only validated invitation links.
+
 ## Active handoff (2026-07-29, alpha.38 VK bootstrap regression fix)
 
 - The external alpha.37 log retained several sessions and proved that none of

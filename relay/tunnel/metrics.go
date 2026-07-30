@@ -39,6 +39,9 @@ type TunnelMetrics struct {
 	TrackSentFrames          []uint64 `json:"trackSentFrames,omitempty"`
 	TrackReceivedFrames      []uint64 `json:"trackReceivedFrames,omitempty"`
 	TrackQueueDepths         []int    `json:"trackQueueDepths,omitempty"`
+	TrackWriteNanos          []uint64 `json:"trackWriteNanos,omitempty"`
+	TrackMaxWriteNanos       []uint64 `json:"trackMaxWriteNanos,omitempty"`
+	TrackWriteErrors         []uint64 `json:"trackWriteErrors,omitempty"`
 }
 
 type RelayMetrics struct {
@@ -127,6 +130,7 @@ func (rb *RelayBridge) metricsLoop() {
 	defer ticker.Stop()
 	lastAt := time.Now()
 	var lastSent, lastReceived uint64
+	var lastTrackSent, lastTrackReceived, lastTrackWrite, lastTrackSentFrames []uint64
 	for {
 		select {
 		case <-rb.metricsStop:
@@ -137,7 +141,17 @@ func (rb *RelayBridge) metricsLoop() {
 			elapsed := now.Sub(lastAt).Seconds()
 			txKbps := float64(m.SentBytes-lastSent) * 8 / elapsed / 1000
 			rxKbps := float64(m.ReceivedBytes-lastReceived) * 8 / elapsed / 1000
+			trackTxKbps := perTrackKbps(m.Tunnel.TrackSentBytes, lastTrackSent, elapsed)
+			trackRxKbps := perTrackKbps(m.Tunnel.TrackReceivedBytes, lastTrackReceived, elapsed)
+			trackWriteAvgMS := perTrackAverageMillis(
+				m.Tunnel.TrackWriteNanos, lastTrackWrite,
+				m.Tunnel.TrackSentFrames, lastTrackSentFrames,
+			)
 			lastAt, lastSent, lastReceived = now, m.SentBytes, m.ReceivedBytes
+			lastTrackSent = append(lastTrackSent[:0], m.Tunnel.TrackSentBytes...)
+			lastTrackReceived = append(lastTrackReceived[:0], m.Tunnel.TrackReceivedBytes...)
+			lastTrackWrite = append(lastTrackWrite[:0], m.Tunnel.TrackWriteNanos...)
+			lastTrackSentFrames = append(lastTrackSentFrames[:0], m.Tunnel.TrackSentFrames...)
 			avgDNSLatency := float64(0)
 			if m.ReliableDNSReplies > 0 {
 				avgDNSLatency = float64(m.DNSLatencyNanos) / float64(m.ReliableDNSReplies) / float64(time.Millisecond)
@@ -146,7 +160,7 @@ func (rb *RelayBridge) metricsLoop() {
 			if m.FairScheduledFrames > 0 {
 				avgFairWait = float64(m.FairQueueWaitNanos) / float64(m.FairScheduledFrames) / float64(time.Millisecond)
 			}
-			rb.logFn("METRICS mode=%s uptime=%s tx_bytes=%d rx_bytes=%d tx_kbps=%.1f rx_kbps=%.1f tx_frames=%d rx_frames=%d control_tx=%d control_rx=%d send_wait_ms=%.2f max_send_wait_ms=%.2f tcp=%d udp=%d dns_queries=%d dns_retries=%d dns_reliable_queries=%d dns_reliable_replies=%d dns_avg_ms=%.1f dns_max_ms=%.1f fair_flows=%d fair_queue=%d/%dB fair_queue_limit=%dB fair_flow_limit=%dB fair_queue_max=%dB fair_avg_wait_ms=%.1f fair_max_wait_ms=%.1f wire=%d caps=0x%x legacy=%t tunnel=%s tunnel_tx=%d tunnel_rx=%d queue=%d/%d queue_max=%d tracks=%d track_tx_bytes=%v track_rx_bytes=%v track_tx_frames=%v track_rx_frames=%v track_queue=%v kcp_wait_snd=%d kcp_window=%d kcp_auto_changes=%d kcp_control_wait_snd=%d kcp_control_tx=%d kcp_control_rx=%d kcp_out_queue=%d/%d kcp_dropped=%d kcp_backpressure_ms=%.2f kcp_stalls=%d kcp_ack_stalls=%d kcp_input_idle_ms=%.0f kcp_ack_idle_ms=%.0f",
+			rb.logFn("METRICS mode=%s uptime=%s tx_bytes=%d rx_bytes=%d tx_kbps=%.1f rx_kbps=%.1f tx_frames=%d rx_frames=%d control_tx=%d control_rx=%d send_wait_ms=%.2f max_send_wait_ms=%.2f tcp=%d udp=%d dns_queries=%d dns_retries=%d dns_reliable_queries=%d dns_reliable_replies=%d dns_avg_ms=%.1f dns_max_ms=%.1f fair_flows=%d fair_queue=%d/%dB fair_queue_limit=%dB fair_flow_limit=%dB fair_queue_max=%dB fair_avg_wait_ms=%.1f fair_max_wait_ms=%.1f wire=%d caps=0x%x legacy=%t tunnel=%s tunnel_tx=%d tunnel_rx=%d queue=%d/%d queue_max=%d tracks=%d track_tx_bytes=%v track_rx_bytes=%v track_tx_kbps=%v track_rx_kbps=%v track_tx_frames=%v track_rx_frames=%v track_queue=%v track_write_avg_ms=%v track_write_max_ms=%v track_write_errors=%v kcp_wait_snd=%d kcp_window=%d kcp_auto_changes=%d kcp_control_wait_snd=%d kcp_control_tx=%d kcp_control_rx=%d kcp_out_queue=%d/%d kcp_dropped=%d kcp_backpressure_ms=%.2f kcp_stalls=%d kcp_ack_stalls=%d kcp_input_idle_ms=%.0f kcp_ack_idle_ms=%.0f",
 				m.Mode, m.Uptime.Round(time.Second), m.SentBytes, m.ReceivedBytes,
 				txKbps, rxKbps,
 				m.SentFrames, m.ReceivedFrames, m.SentControlFrames, m.RecvControlFrames,
@@ -165,8 +179,11 @@ func (rb *RelayBridge) metricsLoop() {
 				m.Tunnel.ReceivedBytes, m.Tunnel.QueueDepth, m.Tunnel.QueueCapacity,
 				m.Tunnel.MaxQueueDepth, m.Tunnel.TrackCount,
 				m.Tunnel.TrackSentBytes, m.Tunnel.TrackReceivedBytes,
+				trackTxKbps, trackRxKbps,
 				m.Tunnel.TrackSentFrames, m.Tunnel.TrackReceivedFrames,
-				m.Tunnel.TrackQueueDepths, m.Tunnel.KCPWaitSnd,
+				m.Tunnel.TrackQueueDepths, trackWriteAvgMS,
+				nanosToMillis(m.Tunnel.TrackMaxWriteNanos), m.Tunnel.TrackWriteErrors,
+				m.Tunnel.KCPWaitSnd,
 				m.Tunnel.KCPWindow, m.Tunnel.KCPAutoWindowChanges,
 				m.Tunnel.KCPControlWaitSnd, m.Tunnel.KCPControlSentFrames, m.Tunnel.KCPControlReceivedFrames,
 				m.Tunnel.KCPOutputQueueDepth, m.Tunnel.KCPOutputQueueCap,
@@ -178,6 +195,52 @@ func (rb *RelayBridge) metricsLoop() {
 				float64(m.Tunnel.KCPLastAckAgeNanos)/float64(time.Millisecond))
 		}
 	}
+}
+
+func perTrackKbps(current, previous []uint64, elapsedSeconds float64) []float64 {
+	rates := make([]float64, len(current))
+	if elapsedSeconds <= 0 {
+		return rates
+	}
+	for i, value := range current {
+		var before uint64
+		if i < len(previous) {
+			before = previous[i]
+		}
+		if value >= before {
+			rates[i] = float64(value-before) * 8 / elapsedSeconds / 1000
+		}
+	}
+	return rates
+}
+
+func perTrackAverageMillis(currentNanos, previousNanos, currentFrames, previousFrames []uint64) []float64 {
+	averages := make([]float64, len(currentNanos))
+	for i, value := range currentNanos {
+		var beforeNanos, beforeFrames uint64
+		if i < len(previousNanos) {
+			beforeNanos = previousNanos[i]
+		}
+		if i < len(previousFrames) {
+			beforeFrames = previousFrames[i]
+		}
+		if value < beforeNanos || i >= len(currentFrames) || currentFrames[i] < beforeFrames {
+			continue
+		}
+		frameDelta := currentFrames[i] - beforeFrames
+		if frameDelta > 0 {
+			averages[i] = float64(value-beforeNanos) / float64(frameDelta) / float64(time.Millisecond)
+		}
+	}
+	return averages
+}
+
+func nanosToMillis(values []uint64) []float64 {
+	result := make([]float64, len(values))
+	for i, value := range values {
+		result[i] = float64(value) / float64(time.Millisecond)
+	}
+	return result
 }
 
 func updateAtomicMax(target *atomic.Uint64, value uint64) {
