@@ -16,6 +16,7 @@ import android.util.Log
 import bypass.whitelist.MainActivity
 import bypass.whitelist.R
 import bypass.whitelist.util.Callback
+import bypass.whitelist.util.AppLog
 import bypass.whitelist.util.DnsMode
 import bypass.whitelist.util.Prefs
 import bypass.whitelist.util.SocksAuth
@@ -164,7 +165,7 @@ class TunnelVpnService : VpnService() {
                 if (systemDns.isNotEmpty()) {
                     for (dns in systemDns) builder.addDnsServer(dns)
                 } else {
-                    TunnelServiceState.logCallback?.invoke("Carrier DNS is not reachable from the server; using public DNS")
+                    AppLog.writer.append("Carrier DNS is not reachable from the server; using public DNS")
                     builder.addDnsServer(Vpn.DNS_PRIMARY)
                     builder.addDnsServer(Vpn.DNS_SECONDARY)
                 }
@@ -208,12 +209,12 @@ class TunnelVpnService : VpnService() {
                         val message = "App proxy requires at least one installed application"
                         Log.e(TAG, message)
                         startInProgress = false
-                        TunnelServiceState.logCallback?.invoke(message)
+                        AppLog.writer.append(message)
                         TunnelServiceState.vpnStatusCallback?.invoke(VpnStatus.CALL_FAILED)
                         stopSelf()
                         return
                     }
-                    TunnelServiceState.logCallback?.invoke("App proxy routing $allowedApps selected applications")
+                    AppLog.writer.append("App proxy routing $allowedApps selected applications")
                 }
             }
         } catch (e: Exception) {
@@ -224,7 +225,7 @@ class TunnelVpnService : VpnService() {
         if (vpnFd == null) {
             Log.e(TAG, "Failed to establish VPN")
             startInProgress = false
-            TunnelServiceState.logCallback?.invoke("Failed to establish VPN")
+            AppLog.writer.append("Failed to establish VPN")
             TunnelServiceState.vpnStatusCallback?.invoke(VpnStatus.CALL_FAILED)
             stopSelf()
             return
@@ -250,7 +251,7 @@ class TunnelVpnService : VpnService() {
                 isRunning = false
                 startInProgress = false
                 stopInProgress = false
-                TunnelServiceState.logCallback?.invoke("tun2socks error: ${e.message}")
+                AppLog.writer.append("tun2socks error: ${e.message}")
                 TunnelServiceState.vpnStatusCallback?.invoke(VpnStatus.TUNNEL_LOST)
             }
         }.also { it.start() }

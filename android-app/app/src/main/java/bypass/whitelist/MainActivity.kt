@@ -55,6 +55,7 @@ import bypass.whitelist.ui.MainActivityHost
 import bypass.whitelist.ui.MainFragment
 import bypass.whitelist.ui.SettingsScreenFragment
 import bypass.whitelist.ui.SplitTunnelingScreenFragment
+import bypass.whitelist.util.AppLog
 import bypass.whitelist.util.LogWriter
 import bypass.whitelist.util.Net
 import bypass.whitelist.util.Prefs
@@ -74,7 +75,7 @@ class MainActivity :
     LogsFragment.Host,
     CallsListener {
 
-    private val logWriter by lazy { LogWriter(cacheDir) }
+    private val logWriter: LogWriter get() = AppLog.writer
 
     private lateinit var bottomNav: View
     private lateinit var navMain: LinearLayout
@@ -282,10 +283,6 @@ class MainActivity :
             }
         }
 
-        TunnelServiceState.logCallback = { message ->
-            runOnUiThread { appendLog(message) }
-        }
-
         when {
             resetInProgress -> {
                 connected = false
@@ -319,7 +316,6 @@ class MainActivity :
     override fun onPause() {
         super.onPause()
         TunnelServiceState.vpnStatusCallback = null
-        TunnelServiceState.logCallback = null
     }
 
     override fun onDestroy() {
@@ -328,7 +324,6 @@ class MainActivity :
         navPageChangeCallback = null
         TunnelVpnService.onDisconnect = null
         ProxyService.onDisconnect = null
-        logWriter.close()
         super.onDestroy()
     }
 
@@ -919,17 +914,19 @@ class MainActivity :
 
         activeJoinUrl = url
 		recoveryInProgress = false
-        logWriter.beginSession()
-        runOnUiThread { logsFragment()?.refresh() }
-        appendLog("Loading: ${maskUrl(url)}")
+        val headlessMode =
+            Prefs.headless || platform == CallPlatform.WBSTREAM || platform == CallPlatform.DION
+        val serviceOwnedSession = headlessMode && platform != CallPlatform.VK
+        if (!serviceOwnedSession) {
+            logWriter.beginSession()
+            runOnUiThread { logsFragment()?.refresh() }
+            appendLog("Loading: ${maskUrl(url)}")
+        }
         lastStatus = VpnStatus.CONNECTING
         mainFragment()?.onStatusChanged(VpnStatus.CONNECTING)
         mainFragment()?.onConnectedChanged(false)
 
-        val headlessMode =
-            Prefs.headless || platform == CallPlatform.WBSTREAM || platform == CallPlatform.DION
-
-        if (headlessMode && platform != CallPlatform.VK) {
+        if (serviceOwnedSession) {
             setJoinOverlayVisible(false)
 			if (!Prefs.proxyOnly) {
 				val permission = VpnService.prepare(this)
@@ -979,7 +976,6 @@ class MainActivity :
 		} else {
 			Prefs.addDestination(config)
 		}
-		appendLog("Starting persistent ${config.platformLabel} session with profile sync")
 		ContextCompat.startForegroundService(this, Intent(this, HeadlessSessionService::class.java))
 	}
 

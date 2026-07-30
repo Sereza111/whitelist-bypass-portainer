@@ -14,6 +14,23 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses the direct VK creator in
 Portainer and a headless Joiner in Video mode.
 
+## Active handoff (2026-07-30, alpha.40 single Android log owner)
+
+- Alpha.39 field evidence at roughly 0.25 Mbps shows four balanced WB tracks,
+  empty carrier queues, zero KCP drops/stalls, zero `WriteSample` errors and
+  sub-millisecond average publisher writes. Do not tune KCP buffers from this
+  externally constrained run.
+- The same file proves Android had two independent writers: MainActivity and
+  HeadlessSessionService both opened `relay.log`, the service callback wrote
+  every native line a second time, and independent file offsets produced
+  duplicate separators, merged lines and a missing VK tail.
+- Android now owns one process-wide `AppLog`. A persistent headless session is
+  started and delimited only by HeadlessSessionService; Activity no longer
+  duplicates service messages or closes the writer while the service runs.
+  TunnelVpnService diagnostics write directly into the same process log.
+- Do not research or reproduce WBAAS or `slide-v3`. WB cookies/tokens stay on
+  Android and Manager accepts only validated invitation links.
+
 ## Active handoff (2026-07-30, alpha.39 bounded Android logs + WB diagnostics)
 
 - Matching alpha.38 WB field logs prove all four carrier tracks are subscribed

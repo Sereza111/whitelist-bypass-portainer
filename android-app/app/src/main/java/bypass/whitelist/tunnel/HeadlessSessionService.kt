@@ -18,6 +18,7 @@ import bypass.whitelist.MainActivity
 import bypass.whitelist.R
 import bypass.whitelist.recovery.ProfileSyncClient
 import bypass.whitelist.ui.JoinFragmentHost
+import bypass.whitelist.util.AppLog
 import bypass.whitelist.util.LogWriter
 import bypass.whitelist.util.Prefs
 import bypass.whitelist.util.maskUrl
@@ -28,7 +29,7 @@ import kotlin.concurrent.thread
 
 class HeadlessSessionService : Service() {
 
-    private val logWriter by lazy { LogWriter(cacheDir) }
+    private val logWriter: LogWriter get() = AppLog.writer
     private var controller: HeadlessJoinController? = null
     @Volatile private var sessionRunning: Boolean = false
     @Volatile private var stopInProgress: Boolean = false
@@ -113,7 +114,6 @@ class HeadlessSessionService : Service() {
                 override fun appendLog(message: String) {
                     logWriter.append(message)
                     Log.d(TAG, message)
-                    TunnelServiceState.logCallback?.invoke(message)
                 }
 
                 override fun onJoinStatus(status: VpnStatus) {
@@ -429,7 +429,6 @@ class HeadlessSessionService : Service() {
         sessionRunning = false
         stopInProgress = false
         controller = null
-        logWriter.close()
         TunnelServiceState.requestTileRefresh(this)
         super.onDestroy()
     }

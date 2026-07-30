@@ -2,12 +2,14 @@ package bypass.whitelist
 
 import android.app.Application
 import androidx.appcompat.app.AppCompatDelegate
+import bypass.whitelist.util.AppLog
 import bypass.whitelist.util.Prefs
 import bypass.whitelist.util.ThemeMode
 
 class App : Application() {
     override fun onCreate() {
         super.onCreate()
+        AppLog.init(this)
         Prefs.init(this)
         applyTheme(Prefs.themeMode)
     }
@@ -23,4 +25,3 @@ class App : Application() {
         }
     }
 }
-

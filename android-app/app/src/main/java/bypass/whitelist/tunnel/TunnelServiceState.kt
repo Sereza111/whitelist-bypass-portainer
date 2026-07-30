@@ -14,9 +14,6 @@ object TunnelServiceState {
     @Volatile
     var vpnStatusCallback: ParamCallback<VpnStatus>? = null
 
-    @Volatile
-    var logCallback: ParamCallback<String>? = null
-
     fun isTunnelActive(context: Context): Boolean {
         val vpnActive = TunnelVpnService.instance?.let { it.isRunning || it.startInProgress || it.stopInProgress } == true
         val proxyActive = ProxyService.instance?.let { it.isRunning || it.stopInProgress } == true
@@ -44,4 +41,3 @@ object TunnelServiceState {
         TileService.requestListeningState(context, ComponentName(context, VpnTileService::class.java))
     }
 }
-
