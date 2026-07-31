@@ -245,6 +245,20 @@ WB publisher alpha.41 объявляет carrier как 1920x1080 вместо 1
 запросить у SFU более высокий video allocation; фактические payload frames
 остаются MTU-aligned псевдо-VP8. VK bootstrap остаётся однотрековым.
 
+Alpha.42 добавляет capability `kcp_shards` (`1 << 6`). До взаимного Hello/Ack
+WB использует только прежнюю base conversation и поэтому совместим с alpha.41
+и более старыми peers. Matching стороны выбирают минимум из объявленного числа
+tracks и локального carrier count. Conversation zero (`kcpConversationID`)
+остаётся для global control, а новые logical flows детерминированно закрепляются
+по `connID` за остальными conversations и соответствующими VP8 tracks.
+
+Affinity фиксируется при первом исходящем frame: поток, который успел начаться
+на legacy lane до завершения handshake, не переезжает и не допускает
+межconversation reordering. `MsgClose` освобождает affinity. При reset или
+legacy fallback RelayBridge снова начинает handshake с одной base
+conversation. METRICS показывает `kcp_shards`, `kcp_shard_wait_snd` и
+интервальные TX/RX rates каждого shard отдельно от физических track counters.
+
 ## Полевой результат alpha.11: живой carrier с чрезмерной очередью
 
 Matching Android и Creator согласовали `caps=0x1b`, `legacy=false` и

@@ -160,6 +160,7 @@ func (rb *RelayBridge) SetOnHandshake(fn func(HandshakeResult)) {
 }
 
 func (rb *RelayBridge) ConfigureHandshake(capabilities uint64, maxCarrierPayload int, reliability ReliabilityMode, trackCount int) {
+	capabilities |= defaultCapabilitiesForTunnel(rb.currentTunnel()) & CapabilityKCPShards
 	rb.handshakeMu.Lock()
 	rb.localHello.Capabilities = capabilities
 	if maxCarrierPayload > 0 {
@@ -254,9 +255,9 @@ func (rb *RelayBridge) SwapTunnelWithReadBuf(newTunnel DataTunnel, readBuf int) 
 	newTunnel.SetOnClose(rb.handleTunnelClose)
 	rb.closeAll()
 	rb.handshakeMu.Lock()
-	capabilities := rb.localHello.Capabilities
+	capabilities := rb.localHello.Capabilities &^ CapabilityKCPShards
 	rb.localHello = newLocalHello(newTunnel, readBuf)
-	rb.localHello.Capabilities = capabilities
+	rb.localHello.Capabilities = capabilities | (rb.localHello.Capabilities & CapabilityKCPShards)
 	rb.peerHello = nil
 	rb.handshakeResult = nil
 	rb.handshakeMu.Unlock()
@@ -397,6 +398,7 @@ func (rb *RelayBridge) startHandshake() {
 	if rb.closed.Load() {
 		return
 	}
+	rb.setKCPShardCount(1)
 	generation := rb.handshakeGeneration.Add(1)
 	rb.sendHello()
 	go func() {
@@ -464,6 +466,9 @@ func (rb *RelayBridge) handleHello(payload []byte) {
 		EchoNonce:           peer.Nonce,
 		ResponderNonce:      local.Nonce,
 	}), true)
+	rb.configureKCPShards(HandshakeResult{
+		Peer: peer, SelectedWireVersion: selected, Capabilities: capabilities, Status: status,
+	})
 
 	if isNewPeer {
 		rb.logFn("relay: peer hello wire=%d build=%s commit=%s caps=0x%x max_payload=%d reliability=%s tracks=%d",
@@ -511,6 +516,7 @@ func (rb *RelayBridge) handleHelloAck(payload []byte) {
 }
 
 func (rb *RelayBridge) recordHandshakeResult(result HandshakeResult) {
+	rb.configureKCPShards(result)
 	rb.handshakeMu.Lock()
 	if rb.handshakeResult != nil && !rb.handshakeResult.LegacyFallback &&
 		rb.handshakeResult.Status == result.Status &&
@@ -525,6 +531,20 @@ func (rb *RelayBridge) recordHandshakeResult(result HandshakeResult) {
 	rb.handshakeMu.Unlock()
 	if cb != nil {
 		cb(result)
+	}
+}
+
+func (rb *RelayBridge) configureKCPShards(result HandshakeResult) {
+	count := 1
+	if result.Supports(CapabilityKCPShards) && result.Peer.TrackCount > 0 {
+		count = int(result.Peer.TrackCount)
+	}
+	rb.setKCPShardCount(count)
+}
+
+func (rb *RelayBridge) setKCPShardCount(count int) {
+	if sharded, ok := rb.currentTunnel().(*ShardedKCPTunnel); ok {
+		sharded.SetKCPShardCount(count)
 	}
 }
 

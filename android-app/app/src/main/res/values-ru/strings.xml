@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="onboarding_brand">ЗАЩИЩЁННЫЙ РЕЛЕЙ · ANDROID CREATOR</string>
+    <string name="onboarding_skip">Пропустить</string>
+    <string name="onboarding_next">Продолжить</string>
+    <string name="onboarding_start">Открыть приложение</string>
+    <string name="onboarding_step">ШАГ %1$02d / %2$02d</string>
+    <string name="onboarding_pair_title">Привяжите телефон</string>
+    <string name="onboarding_pair_body">Откройте одноразовую ссылку или QR из своей учётной записи Manager. Телефон получит только ваши профили — IP и порт сервера вручную вводить не нужно.</string>
+    <string name="onboarding_creator_title">Вход WB остаётся здесь</string>
+    <string name="onboarding_creator_body">Войдите в WB обычным способом внутри WebView. Телефон сам создаст звонок и передаст Manager только готовую ссылку. Cookies и WB-токены не покидают устройство.</string>
+    <string name="onboarding_connect_title">Выберите профиль</string>
+    <string name="onboarding_connect_body">Нажмите «Подключить» и разрешите Android VPN для режимов «Устройство» или «Приложения». SOCKS5 работает только в программах, где прокси указан вручную.</string>
+    <string name="onboarding_recovery_title">Дождитесь подключения</string>
+    <string name="onboarding_recovery_body">WB-звонок, резервный запуск через VK и замена канала выполняются автоматически. Не нужно копировать и вставлять ссылки звонков — дождитесь статуса «Подключено».</string>
+    <string name="settings_row_connection_guide">Как подключиться</string>
+    <string name="settings_row_connection_guide_sub">Повторить обучение по привязке, подключению и автовосстановлению</string>
+</resources>

@@ -14,6 +14,31 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses device-assisted WB with a
 single-track VK bootstrap/fallback and a headless Joiner in Video mode.
 
+## Active handoff (2026-07-31, alpha.42 independent WB KCP shards)
+
+- Matching alpha.41 `relay (39)` proves all eight WB tracks are balanced, their
+  queues are normally empty, normal publisher writes are sub-millisecond and
+  `WriteSample` errors are zero. The carrier topology itself is working.
+- The one shared KCP conversation reaches `506/512`, then `512-513/512`;
+  accumulated KCP backpressure reaches about 68.7s and fair max wait about
+  17.5s. Eight tracks did not create independent congestion domains.
+- Alpha.42 advertises capability `kcp_shards`. Matching WB peers reserve lane
+  zero for global control and hash new logical flows over seven independent KCP
+  conversations bound to physical tracks. Pre-handshake flows retain legacy
+  lane affinity, preventing cross-conversation reordering.
+- Old peers remain on base conversation `kcpConversationID` with alpha.41
+  round-robin physical striping. Every handshake/reset begins in this compatible
+  state; do not activate shards without mutual capability and track count.
+- METRICS exposes shard count, per-shard WaitSnd and interval rates. Field gate:
+  matching alpha.42 Android + Docker, `kcp_shards=8`, multiple active data
+  shards, and comparison of aggregate physical track rates under sustained WB
+  load. This removes software HOL but cannot guarantee a bandwidth level that
+  WB/SFU or the radio network does not allocate.
+- Android first launch now pauses auto-connect and notification permission for
+  an animated pairing/creator/routing/recovery guide. Settings can replay it.
+- Do not research or reproduce WBAAS or `slide-v3`. WB cookies/tokens stay on
+  Android and Manager accepts only validated invitation links.
+
 ## Active handoff (2026-07-31, alpha.41 wide WB carrier)
 
 - `relay (38)` retains saturated VK metrics around 0.9-1.1 Mbps with the

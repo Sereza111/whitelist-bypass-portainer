@@ -109,6 +109,8 @@ class MainActivity :
 	private var pendingConnectDirect = false
 	private var pendingHeadlessServiceConfig: CallConfig? = null
 	private var recoveryInProgress: Boolean = false
+	private var startupCompleted: Boolean = false
+	private var pendingStartupIntent: Intent? = null
     private val navColorEvaluator = ArgbEvaluator()
 	private val recoveryReceiver = object : BroadcastReceiver() {
 		override fun onReceive(context: Context?, intent: Intent?) {
@@ -128,16 +130,14 @@ class MainActivity :
 	private val notificationPermissionLauncher = registerForActivityResult(
 		ActivityResultContracts.RequestPermission()
 	) { }
+	private val onboardingLauncher = registerForActivityResult(
+		ActivityResultContracts.StartActivityForResult()
+	) { completeStartup() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContentView(R.layout.activity_main)
-		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-			ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-		) {
-			notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-		}
         ContextCompat.registerReceiver(
 			this, recoveryReceiver, IntentFilter(RecoveryNotificationListener.ACTION_RECOVERY_UPDATE),
 			ContextCompat.RECEIVER_NOT_EXPORTED,
@@ -240,16 +240,12 @@ class MainActivity :
         TunnelVpnService.onDisconnect = { runOnUiThread { onDisconnectFromService() } }
         ProxyService.onDisconnect = { runOnUiThread { onDisconnectFromService() } }
 
-        if (CALL_LINK.isNotEmpty() && !TunnelServiceState.isAnyTunnelComponentRunning(this)) {
-            startJoinFor(CallConfig.newWith(name = CallConfig.suggestNameFor(CALL_LINK), url = CALL_LINK))
-        } else if (Prefs.connectOnStart && !TunnelServiceState.isAnyTunnelComponentRunning(this)) {
-            // Managed WB rooms expire and must be confirmed by Manager before
-            // every start. Route startup through the same creator gate as the
-            // visible Connect button instead of launching a saved old room.
-            Prefs.activeDestination?.let(::onConnectPressed)
-        }
-
-        handleIntent(intent)
+		pendingStartupIntent = intent
+		if (Prefs.onboardingCompleted) {
+			completeStartup()
+		} else {
+			onboardingLauncher.launch(Intent(this, OnboardingActivity::class.java))
+		}
     }
 
     override fun onResume() {
@@ -330,8 +326,35 @@ class MainActivity :
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        handleIntent(intent)
+		if (startupCompleted) handleIntent(intent) else pendingStartupIntent = intent
     }
+
+	private fun completeStartup() {
+		if (startupCompleted) return
+		startupCompleted = true
+		requestNotificationPermissionIfNeeded()
+		val launchIntent = pendingStartupIntent
+		pendingStartupIntent = null
+		val hasExplicitLaunchAction = launchIntent?.action == Intent.ACTION_VIEW ||
+			launchIntent?.action == ACTION_AUTO_START || launchIntent?.action == ACTION_RECOVERY_UPDATE
+		if (CALL_LINK.isNotEmpty() && !TunnelServiceState.isAnyTunnelComponentRunning(this)) {
+			startJoinFor(CallConfig.newWith(name = CallConfig.suggestNameFor(CALL_LINK), url = CALL_LINK))
+		} else if (!hasExplicitLaunchAction && Prefs.connectOnStart && !TunnelServiceState.isAnyTunnelComponentRunning(this)) {
+			// Managed WB rooms expire and must be confirmed by Manager before
+			// every start. Route startup through the same creator gate as the
+			// visible Connect button instead of launching a saved old room.
+			Prefs.activeDestination?.let(::onConnectPressed)
+		}
+		handleIntent(launchIntent)
+	}
+
+	private fun requestNotificationPermissionIfNeeded() {
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+			ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+		) {
+			notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+		}
+	}
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)

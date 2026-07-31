@@ -82,9 +82,9 @@ API responses, security checklist пройден.
 - QUIC carrier prototype.
 
 **Статус:** per-flow queues, DRR, negotiated priority control/reliable DNS,
-ACK-stall recovery и alpha.12 bounded-latency pass реализованы. Credit-based
-flow control, adaptive pacing, UDP/443 policy, IPv6 и QUIC prototype остаются
-открытыми.
+ACK-stall recovery, alpha.12 bounded-latency pass и negotiated независимые KCP
+conversations для восьмитрекового WB реализованы. Credit-based flow control,
+adaptive pacing, UDP/443 policy, IPv6 и QUIC prototype остаются открытыми.
 
 **Gate:** большой download не блокирует DNS и открытие новой страницы; p95
 CONNECT latency остаётся в заданном бюджете.
@@ -116,8 +116,10 @@ advanced options не мешают основному сценарию.
 **Статус:** capability transport, provider-aware deep link, VPN/Apps/SOCKS
 routing, split tunneling, matching metrics, signed recovery, gothic tokens,
 device-assisted WB WebView и WB Smart DC→Video failover реализованы.
-Battery/thermal pacing и встроенный QR scanner остаются открытыми; WB
-profile-sync с Manager работает для device-assisted client profiles.
+Первый запуск показывает анимированное обучение pairing, WB creator,
+VPN/SOCKS routing и recovery, доступное повторно из Settings. Battery/thermal
+pacing и встроенный QR scanner остаются открытыми; WB profile-sync с Manager
+работает для device-assisted client profiles.
 
 ## Первый практический спринт
 

@@ -22,6 +22,7 @@ const (
 	CapabilityPriorityControl uint64 = 1 << 3
 	CapabilityReliableDNS     uint64 = 1 << 4
 	CapabilityKCPAuto         uint64 = 1 << 5
+	CapabilityKCPShards       uint64 = 1 << 6
 )
 
 type ReliabilityMode byte
@@ -117,6 +118,10 @@ func newLocalHello(t DataTunnel, readBuf int) Hello {
 	case *KCPTunnel:
 		reliability = ReliabilityKCP
 		maxPayload = kcpSegmentMTU
+	case *ShardedKCPTunnel:
+		reliability = ReliabilityKCP
+		maxPayload = kcpSegmentMTU
+		trackCount = typed.CarrierTrackCount()
 	case *MultiTrackTunnel:
 		trackCount = typed.SubTunnelCount()
 	}
@@ -129,7 +134,7 @@ func newLocalHello(t DataTunnel, readBuf int) Hello {
 
 	return Hello{
 		WireVersion:       WireVersion,
-		Capabilities:      CapabilityMetricsV1,
+		Capabilities:      defaultCapabilitiesForTunnel(t),
 		MaxCarrierPayload: uint16(maxPayload),
 		Reliability:       reliability,
 		TrackCount:        uint8(trackCount),
@@ -137,6 +142,14 @@ func newLocalHello(t DataTunnel, readBuf int) Hello {
 		BuildVersion:      common.Version,
 		BuildCommit:       common.BuildCommit,
 	}
+}
+
+func defaultCapabilitiesForTunnel(t DataTunnel) uint64 {
+	capabilities := CapabilityMetricsV1
+	if _, ok := t.(*ShardedKCPTunnel); ok {
+		capabilities |= CapabilityKCPShards
+	}
+	return capabilities
 }
 
 func newHandshakeNonce() (nonce [16]byte) {

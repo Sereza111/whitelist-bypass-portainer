@@ -70,7 +70,7 @@ type Session struct {
 	subReliableDC      *webrtc.DataChannel
 
 	vp8tun                 *tunnel.MultiTrackTunnel
-	kcptun                 *tunnel.KCPTunnel
+	kcptun                 tunnel.DataTunnel
 	dctun                  *tunnel.DCTunnel
 	smart                  *smartTransportSelector
 	mu                     sync.Mutex
@@ -187,7 +187,7 @@ func (s *Session) stopTunnels() {
 		dc.Close()
 	}
 	if kcptun != nil {
-		kcptun.Stop()
+		stopDataTunnel(kcptun)
 	}
 	if vp8 != nil {
 		vp8.Stop()
@@ -588,12 +588,24 @@ func (s *Session) maybeWrapReliable(tun tunnel.DataTunnel) tunnel.DataTunnel {
 		return wrapped
 	}
 	s.mu.Unlock()
-	wrapped := tunnel.NewKCPTunnel(vp8, s.cfg.LogFn)
+	var wrapped tunnel.DataTunnel
+	if vp8.SubTunnelCount() > 1 {
+		wrapped = tunnel.NewShardedKCPTunnel(vp8, s.cfg.LogFn)
+		s.cfg.LogFn("[lk] sharded KCP reliability prepared tracks=%d; capability handshake starts on legacy lane", vp8.SubTunnelCount())
+	} else {
+		wrapped = tunnel.NewKCPTunnel(vp8, s.cfg.LogFn)
+		s.cfg.LogFn("[lk] single-lane KCP reliability wrapper active over video tunnel")
+	}
 	s.mu.Lock()
 	s.kcptun = wrapped
 	s.mu.Unlock()
-	s.cfg.LogFn("[lk] kcp reliability wrapper active over video tunnel")
 	return wrapped
+}
+
+func stopDataTunnel(tun tunnel.DataTunnel) {
+	if stopper, ok := tun.(interface{ Stop() }); ok {
+		stopper.Stop()
+	}
 }
 
 func (s *Session) currentVP8Tun() *tunnel.MultiTrackTunnel {
@@ -741,7 +753,7 @@ func (s *Session) rearmAutoDetect() {
 	s.kcptun = nil
 	s.mu.Unlock()
 	if kcp != nil {
-		kcp.Stop()
+		stopDataTunnel(kcp)
 	}
 	if vp8 != nil {
 		vp8.SetOnData(func(payload []byte) { s.activate(vp8, payload) })

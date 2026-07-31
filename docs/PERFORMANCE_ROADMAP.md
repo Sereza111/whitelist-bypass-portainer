@@ -241,6 +241,32 @@ low write latency but aggregate throughput does not rise, the next architecture
 candidate is capability-negotiated independent KCP lanes/flow sharding rather
 than larger KCP or DRR queues.
 
+### Alpha.42 independent KCP congestion domains
+
+Matching alpha.41 evidence in `relay (39)` closes the alpha.41 field gate and
+locates a software bottleneck. All eight WB tracks remain balanced, normal
+publisher writes are sub-millisecond, their queues are normally empty and
+`WriteSample` errors stay zero. Nevertheless the one shared KCP conversation
+reaches `506/512`, then `512-513/512`; accumulated KCP backpressure reaches
+about 68.7 seconds and fair-queue maximum wait reaches about 17.5 seconds.
+Eight physical tracks therefore did not provide independent congestion
+windows: every flow still waited behind the same saturated KCP conversation.
+
+Alpha.42 adds capability-negotiated KCP sharding. Lane zero preserves the old
+conversation and carries global control. New logical flows use deterministic
+`connID` affinity over up to seven additional conversations, each bound to its
+own paced VP8 track. Existing flows never move during negotiation. A peer
+without the new capability remains on the exact alpha.41 base conversation and
+round-robin physical striping.
+
+The field gate is matching alpha.42 Android + Docker with `caps` containing the
+new bit, `kcp_shards=8`, several active `kcp_shard_*_kbps` values and no single
+shard monopolizing aggregate `kcp_wait_snd`. This removes shared software
+head-of-line/backpressure between flows. It still cannot guarantee 20 Mbps:
+if independent shards are healthy while aggregate physical track rates remain
+low, the remaining ceiling is carrier/SFU or radio policy rather than another
+KCP window or ACK mechanism.
+
 ## Полевой результат `0.5.0-alpha.2`: односторонний stall
 
 Matching Android-клиент и сервер успешно согласовали `wire=1`, `caps=0x3` и

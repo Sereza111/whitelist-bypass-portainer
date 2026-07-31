@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/onboardingRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/surface_bg">
+
+    <View
+        android:layout_width="340dp"
+        android:layout_height="340dp"
+        android:layout_gravity="top|end"
+        android:layout_marginTop="-150dp"
+        android:layout_marginEnd="-120dp"
+        android:background="@drawable/bg_onboarding_glow"
+        android:importantForAccessibility="no" />
+
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:id="@+id/onboardingContent"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:paddingTop="14dp"
+        android:paddingBottom="16dp">
+
+        <TextView
+            android:id="@+id/onboardingBrand"
+            android:layout_width="0dp"
+            android:layout_height="44dp"
+            android:gravity="center_vertical"
+            android:fontFamily="monospace"
+            android:letterSpacing="0.12"
+            android:paddingStart="24dp"
+            android:text="@string/onboarding_brand"
+            android:textColor="@color/ink_3"
+            android:textSize="10sp"
+            android:textStyle="bold"
+            app:layout_constraintEnd_toStartOf="@id/onboardingSkip"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent" />
+
+        <TextView
+            android:id="@+id/onboardingSkip"
+            android:layout_width="wrap_content"
+            android:layout_height="44dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:minWidth="64dp"
+            android:paddingHorizontal="18dp"
+            android:text="@string/onboarding_skip"
+            android:textColor="@color/ink_2"
+            android:textSize="12sp"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toTopOf="parent" />
+
+        <androidx.viewpager2.widget.ViewPager2
+            android:id="@+id/onboardingPager"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            app:layout_constraintBottom_toTopOf="@id/onboardingFooter"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/onboardingBrand" />
+
+        <LinearLayout
+            android:id="@+id/onboardingFooter"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="18dp"
+            android:background="@drawable/bg_stats_card"
+            android:gravity="center_vertical"
+            android:orientation="vertical"
+            android:padding="14dp"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent">
+
+            <LinearLayout
+                android:id="@+id/onboardingDots"
+                android:layout_width="match_parent"
+                android:layout_height="18dp"
+                android:gravity="center"
+                android:orientation="horizontal" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/onboardingAction"
+                style="@style/Widget.Material3.Button"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:layout_marginTop="9dp"
+                android:text="@string/onboarding_next"
+                android:textAllCaps="false"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                app:cornerRadius="12dp"
+                app:icon="@drawable/ic_chevron_right"
+                app:iconGravity="textEnd"
+                app:iconPadding="10dp" />
+        </LinearLayout>
+    </androidx.constraintlayout.widget.ConstraintLayout>
+</FrameLayout>

@@ -114,6 +114,23 @@ func (m *MultiTrackTunnel) SendData(data []byte) {
 	tun.SendData(data)
 }
 
+// SendDataOnTrack pins one transport lane to one independently paced VP8
+// carrier. The index is folded over the current track set so an in-session
+// publisher shrink cannot panic or strand KCP acknowledgements.
+func (m *MultiTrackTunnel) SendDataOnTrack(trackIndex int, data []byte) {
+	m.mu.Lock()
+	if len(m.tunnels) == 0 {
+		m.mu.Unlock()
+		return
+	}
+	if trackIndex < 0 {
+		trackIndex = 0
+	}
+	tun := m.tunnels[trackIndex%len(m.tunnels)]
+	m.mu.Unlock()
+	tun.SendData(data)
+}
+
 // EnableRoundRobinStriping is called by a reliability wrapper whose packets
 // can safely arrive out of order. It deliberately remains opt-in: callers
 // sending raw mux frames retain per-connection affinity.

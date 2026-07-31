@@ -15,6 +15,7 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.fragment.app.Fragment
 import bypass.whitelist.App
 import bypass.whitelist.R
+import bypass.whitelist.OnboardingActivity
 import bypass.whitelist.WBLoginActivity
 import bypass.whitelist.tunnel.SplitTunnelingMode
 import bypass.whitelist.tunnel.TunnelMode
@@ -73,6 +74,15 @@ class SettingsScreenFragment : Fragment(R.layout.fragment_settings_screen) {
                 }
             }
         }
+		addRow(
+			card, R.drawable.ic_log_info, getString(R.string.settings_row_connection_guide),
+			getString(R.string.settings_row_connection_guide_sub), null,
+		) {
+			startActivity(
+				Intent(requireContext(), OnboardingActivity::class.java)
+					.putExtra(OnboardingActivity.EXTRA_REPLAY, true),
+			)
+		}
         return section
     }
 

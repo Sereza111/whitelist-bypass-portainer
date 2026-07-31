@@ -21,6 +21,10 @@ object Prefs {
 		}
     }
 
+	var onboardingCompleted: Boolean
+		get() = prefs.getBoolean(PrefsKeys.ONBOARDING_COMPLETED, false)
+		set(value) = prefs.edit { putBoolean(PrefsKeys.ONBOARDING_COMPLETED, value) }
+
     var connectOnStart: Boolean
         get() = prefs.getBoolean(PrefsKeys.CONNECT_ON_START, false)
         set(value) = prefs.edit { putBoolean(PrefsKeys.CONNECT_ON_START, value) }

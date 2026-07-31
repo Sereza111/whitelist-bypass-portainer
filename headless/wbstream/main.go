@@ -103,6 +103,8 @@ func main() {
 				mode = "dc"
 			case *tunnel.KCPTunnel:
 				mode = "video+kcp"
+			case *tunnel.ShardedKCPTunnel:
+				mode = "video+kcp-sharded"
 			}
 			activeBridge = tunnel.NewRelayBridge(tun, "creator", bridgeReadBuf, log.Printf)
 			activeBridge.SetUpstreamSocks(*upstreamSocks, *upstreamUser, *upstreamPass)
