@@ -259,6 +259,22 @@ legacy fallback RelayBridge снова начинает handshake с одной 
 conversation. METRICS показывает `kcp_shards`, `kcp_shard_wait_snd` и
 интервальные TX/RX rates каждого shard отдельно от физических track counters.
 
+Alpha.43 добавляет capability `kcp_flow_striping` (`1 << 7`). При взаимной
+поддержке каждый новый logical flow получает независимую directional sequence.
+Его CONNECT/DATA/CLOSE frames циклически распределяются по conversations 1..N,
+а принимающая сторона восстанавливает исходный порядок до передачи в
+`RelayBridge`. Поэтому один большой TCP flow может использовать суммарные окна
+семи data lanes, не нарушая TCP byte order; conversation zero остаётся только
+для global control. Flow, начавшийся до handshake, не переезжает.
+
+Внутренний envelope использует `MsgKCPFlowStripe` и добавляет 5 байт: uint32
+sequence и исходный mux message type. WB RelayBridge читает не более 962 байт:
+`962 payload + 9 mux + 5 stripe + 24 KCP = 1000`, то есть полное чтение
+занимает ровно один KCP/VP8 carrier frame вместо двух. Peer alpha.42 не
+согласует новый bit, не получает envelope и продолжает per-flow affinity.
+METRICS показывает `kcp_flow_striping`, current/max reorder frames/bytes и
+число принимаемых striped flows.
+
 ## Полевой результат alpha.11: живой carrier с чрезмерной очередью
 
 Matching Android и Creator согласовали `caps=0x1b`, `legacy=false` и

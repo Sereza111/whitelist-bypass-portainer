@@ -82,9 +82,10 @@ API responses, security checklist пройден.
 - QUIC carrier prototype.
 
 **Статус:** per-flow queues, DRR, negotiated priority control/reliable DNS,
-ACK-stall recovery, alpha.12 bounded-latency pass и negotiated независимые KCP
-conversations для восьмитрекового WB реализованы. Credit-based flow control,
-adaptive pacing, UDP/443 policy, IPv6 и QUIC prototype остаются открытыми.
+ACK-stall recovery, alpha.12 bounded-latency pass, negotiated независимые KCP
+conversations и sequence-aware striping одного flow по семи WB data lanes
+реализованы. Credit-based flow control, adaptive pacing, UDP/443 policy, IPv6
+и QUIC prototype остаются открытыми.
 
 **Gate:** большой download не блокирует DNS и открытие новой страницы; p95
 CONNECT latency остаётся в заданном бюджете.

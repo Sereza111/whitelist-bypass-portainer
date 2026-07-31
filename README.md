@@ -6,12 +6,13 @@ Dion. Это уже не минимальная Docker-обёртка upstream: 
 клиенты, SOCKS5/TUN, автоматическое восстановление звонков, диагностику и
 multi-arch релизный pipeline.
 
-Текущий релиз: **v0.5.0-alpha.42**. Android и server необходимо обновлять вместе, чтобы включить negotiated KCP sharding.
+Текущий релиз: **v0.5.0-alpha.43**. Android и server необходимо обновлять
+вместе, чтобы один WB flow использовал все negotiated KCP data lanes.
 
 Docker image:
 
 ```text
-ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.42
+ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.43
 ```
 
 Проект основан на
@@ -50,8 +51,8 @@ ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.42
 - reliable DNS request/reply вместо слепых повторов на matching клиентах;
 - согласование более безопасного KCP-профиля с обеих сторон;
 - WB wide carrier: восемь независимо paced VP8 tracks и negotiated независимые
-  KCP conversations; lane 0 несёт global control, новые flows закрепляются за
-  data lanes, а старый peer остаётся на совместимой base conversation;
+  KCP conversations; lane 0 несёт global control, а части одного нового flow
+  чередуются по семи data lanes и собираются по sequence на приёме;
 - детектор ACK/UNA stall и ограниченное переподключение carrier;
 - bounded очередь `64 KiB` на logical flow и общий staging-лимит `512 KiB`;
 - Deficit Round Robin, чтобы bulk download не занимал отправку навсегда;
@@ -156,7 +157,7 @@ ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.42
 
 | Переменная | Рекомендуемое значение |
 |---|---|
-| `WLB_IMAGE` | `ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.42` |
+| `WLB_IMAGE` | `ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.43` |
 | `PANEL_USERNAME` | новый логин, по умолчанию `admin` |
 | `PANEL_PASSWORD` | уникальный пароль длиной от 12 символов |
 | `WLB_SECRETS_DIR` | `/opt/whitelist-bypass/secrets` |
@@ -246,7 +247,7 @@ WB Stream и Dion; тип провайдера связан с проверен�
 В логах клиента и сервера должны совпадать:
 
 ```text
-[build] version=0.5.0-alpha.42 commit=... built=...
+[build] version=0.5.0-alpha.43 commit=... built=...
 ```
 
 Если на телефоне осталась старая debug-signed `alpha.8`, её нужно удалить один

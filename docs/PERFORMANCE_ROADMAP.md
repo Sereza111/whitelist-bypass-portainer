@@ -267,6 +267,34 @@ if independent shards are healthy while aggregate physical track rates remain
 low, the remaining ceiling is carrier/SFU or radio policy rather than another
 KCP window or ACK mechanism.
 
+### Alpha.43 sequence-aware single-flow striping
+
+Matching alpha.42 evidence in `relay (40)` shows that sharding activates
+correctly (`kcp_shards=8`, `caps=0x41`), but Speedtest elephant flows remain
+pinned to one conversation. A hot lane repeatedly reaches `512/512` while most
+other lane windows are idle. Aggregate relay intervals reach roughly 1.6 Mbps,
+with no KCP drops or publisher errors. Per-flow hashing therefore moved rather
+than removed the bulk-flow bottleneck.
+
+Alpha.43 adds capability-negotiated sequence striping. New flow frames rotate
+over all seven data conversations, and a bounded per-flow reorder map restores
+CONNECT/DATA/CLOSE order before the existing mux. Old alpha.42 peers retain
+one-lane affinity because they do not negotiate the new capability; earlier
+peers retain the base conversation.
+
+The WB relay read size is also reduced from 1126 to 962 bytes. Together with
+the 9-byte mux header, 5-byte stripe envelope and 24-byte KCP header this fits
+exactly one 1000-byte KCP segment. Previously a normal full read became two
+separately paced VP8 samples, the second carrying only a small tail. This is a
+packet-efficiency fix, not a larger queue.
+
+Field acceptance is matching alpha.43 Android and Docker with `caps=0xc1`,
+`kcp_flow_striping=true`, seven active data-lane rate counters and bounded
+`kcp_reorder` during at least 30 seconds of a single bulk download. If all lanes
+move and aggregate throughput still stays low, the remaining limit is the
+WB/SFU/radio aggregate allocation; no software change can promise a fixed
+20 Mbps without evidence of additional carrier capacity.
+
 ## Полевой результат `0.5.0-alpha.2`: односторонний stall
 
 Matching Android-клиент и сервер успешно согласовали `wire=1`, `caps=0x3` и

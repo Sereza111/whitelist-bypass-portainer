@@ -14,6 +14,35 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses device-assisted WB with a
 single-track VK bootstrap/fallback and a headless Joiner in Video mode.
 
+## Active handoff (2026-07-31, alpha.43 single-flow WB striping)
+
+- Matching alpha.42 `relay (40)` proves `kcp_shards=8` and `caps=0x41`, but
+  one bulk TCP flow repeatedly fills one shard to `512/512` while most other
+  independent KCP windows stay idle. Aggregate relay intervals peak around
+  1.6 Mbps; per-flow affinity, not the eight-track publisher, is the next
+  demonstrated software bottleneck.
+- Alpha.43 advertises `kcp_flow_striping` (`1 << 7`) in addition to
+  `kcp_shards`. New flows receive a directional uint32 sequence, rotate over
+  all negotiated data lanes and are reordered before RelayBridge. CONNECT,
+  DATA and CLOSE therefore retain exact mux order across independent KCP
+  conversations. Lane zero remains global control.
+- Pre-handshake flows remain on their original alpha.42 lane. An alpha.42 peer
+  intersects only `kcp_shards` and retains flow affinity; an older peer remains
+  on the base KCP conversation. Do not send striped envelopes without mutual
+  capability.
+- `ShardedKCPRelayReadBuf=962` makes `mux header + stripe envelope + payload +
+  KCP header` exactly one 1000-byte KCP segment. The prior 1126-byte WB read
+  produced two separately paced KCP/VP8 frames for almost every full read, with
+  the second frame carrying only a short tail.
+- METRICS now exposes `kcp_flow_striping`, current/max reorder state and the
+  existing per-shard rates/windows. Field gate: matching alpha.43 Android +
+  Docker, `caps=0xc1`, `kcp_flow_striping=true`, one continuous bulk download
+  for at least 30 seconds, all seven data lanes active and bounded reorder.
+  This removes the observed single-lane ceiling but cannot guarantee 20 Mbps
+  if WB/SFU or the radio limits aggregate participant bandwidth.
+- Do not research or reproduce WBAAS or `slide-v3`. WB cookies/tokens stay on
+  Android and Manager accepts only validated invitation links.
+
 ## Active handoff (2026-07-31, alpha.42 independent WB KCP shards)
 
 - Matching alpha.41 `relay (39)` proves all eight WB tracks are balanced, their

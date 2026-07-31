@@ -23,6 +23,7 @@ const (
 	CapabilityReliableDNS     uint64 = 1 << 4
 	CapabilityKCPAuto         uint64 = 1 << 5
 	CapabilityKCPShards       uint64 = 1 << 6
+	CapabilityKCPFlowStriping uint64 = 1 << 7
 )
 
 type ReliabilityMode byte
@@ -147,7 +148,7 @@ func newLocalHello(t DataTunnel, readBuf int) Hello {
 func defaultCapabilitiesForTunnel(t DataTunnel) uint64 {
 	capabilities := CapabilityMetricsV1
 	if _, ok := t.(*ShardedKCPTunnel); ok {
-		capabilities |= CapabilityKCPShards
+		capabilities |= CapabilityKCPShards | CapabilityKCPFlowStriping
 	}
 	return capabilities
 }

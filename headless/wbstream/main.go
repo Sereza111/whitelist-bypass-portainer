@@ -104,6 +104,7 @@ func main() {
 			case *tunnel.KCPTunnel:
 				mode = "video+kcp"
 			case *tunnel.ShardedKCPTunnel:
+				bridgeReadBuf = tunnel.ShardedKCPRelayReadBuf
 				mode = "video+kcp-sharded"
 			}
 			activeBridge = tunnel.NewRelayBridge(tun, "creator", bridgeReadBuf, log.Printf)

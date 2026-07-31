@@ -17,6 +17,10 @@ const (
 	MsgKCPProfile byte = 0x0C
 	MsgDNSQuery   byte = 0x0D
 	MsgDNSReply   byte = 0x0E
+	// MsgKCPFlowStripe is an internal ShardedKCPTunnel envelope. RelayBridge
+	// never sees it: matching peers restore the original mux message after
+	// sequence-aware cross-lane reordering.
+	MsgKCPFlowStripe byte = 0x0F
 )
 
 const ControlConnID uint32 = 0

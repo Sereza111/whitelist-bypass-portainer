@@ -88,6 +88,8 @@ func main() {
 			var peerSupportsAuto atomic.Bool
 			if _, ok := tun.(*tunnel.DCTunnel); ok {
 				readBuf = common.DCBufSize
+			} else if _, ok := tun.(*tunnel.ShardedKCPTunnel); ok {
+				readBuf = tunnel.ShardedKCPRelayReadBuf
 			} else if negotiateVKVideoKCP && *videoReliability == "auto" {
 				if multi, ok := tun.(*tunnel.MultiTrackTunnel); ok {
 					trackCount = multi.SubTunnelCount()

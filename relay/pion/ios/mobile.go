@@ -54,6 +54,8 @@ func makeOnConnected(socksPort int, socksUser, socksPass string, logFn func(stri
 		readBuf := common.VP8BufSize
 		if _, ok := tun.(*tunnel.DCTunnel); ok {
 			readBuf = common.DCBufSize
+		} else if _, ok := tun.(*tunnel.ShardedKCPTunnel); ok {
+			readBuf = tunnel.ShardedKCPRelayReadBuf
 		}
 		activeHeadless.Lock()
 		if activeHeadless.stopped {

@@ -84,6 +84,8 @@ func main() {
 		readBuf := common.VP8BufSize
 		if _, ok := tun.(*tunnel.DCTunnel); ok {
 			readBuf = common.DCBufSize
+		} else if _, ok := tun.(*tunnel.ShardedKCPTunnel); ok {
+			readBuf = tunnel.ShardedKCPRelayReadBuf
 		}
 		bridgeMu.Lock()
 		defer bridgeMu.Unlock()

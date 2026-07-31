@@ -59,6 +59,116 @@ func TestShardedKCPFreezesFlowsAcrossNegotiation(t *testing.T) {
 	}
 }
 
+func TestShardedKCPFlowStripingUsesEveryDataLane(t *testing.T) {
+	carrier := &memoryShardCarrier{tracks: 8}
+	sharded := newShardedKCPTunnel(carrier, func(string, ...any) {})
+	defer sharded.Stop()
+	sharded.SetKCPShardCount(8)
+	sharded.SetFlowStripingEnabled(true)
+
+	for i := 0; i < 28; i++ {
+		sharded.SendData(EncodeFrame(77, MsgData, bytes.Repeat([]byte{byte(i)}, 128)))
+	}
+	waitFor(t, func() bool {
+		return len(carrier.dataTracks()) >= 7
+	}, "striped flow did not emit a KCP segment on every data lane")
+
+	used := make(map[int]bool)
+	for _, track := range carrier.dataTracks() {
+		if track > 0 {
+			used[track] = true
+		}
+	}
+	if len(used) != 7 {
+		t.Fatalf("single flow used tracks=%v, want data tracks 1..7", used)
+	}
+}
+
+func TestShardedKCPFlowStripingReordersAcrossLanesAndDrainsClose(t *testing.T) {
+	carrier := &memoryShardCarrier{tracks: 4}
+	sharded := newShardedKCPTunnel(carrier, func(string, ...any) {})
+	defer sharded.Stop()
+
+	received := make(chan []byte, 4)
+	sharded.SetOnData(func(data []byte) { received <- bytes.Clone(data) })
+	frames := [][]byte{
+		EncodeFrame(91, MsgData, []byte("zero")),
+		EncodeFrame(91, MsgData, []byte("one")),
+		EncodeFrame(91, MsgData, []byte("two")),
+		EncodeFrame(91, MsgClose, nil),
+	}
+
+	// Simulate independent KCP lanes completing in a different order.
+	sharded.deliverData(encodeKCPFlowStripe(91, 2, MsgData, []byte("two")))
+	sharded.deliverData(encodeKCPFlowStripe(91, 1, MsgData, []byte("one")))
+	select {
+	case got := <-received:
+		t.Fatalf("delivered before missing sequence zero: %x", got)
+	default:
+	}
+	sharded.deliverData(encodeKCPFlowStripe(91, 0, MsgData, []byte("zero")))
+	sharded.deliverData(encodeKCPFlowStripe(91, 3, MsgClose, nil))
+	for _, want := range frames {
+		assertFrameReceived(t, received, want)
+	}
+
+	metrics := sharded.TunnelMetrics()
+	if metrics.KCPReorderFrames != 0 || metrics.KCPReorderBytes != 0 || metrics.KCPReorderFlows != 0 {
+		t.Fatalf("reorder state leaked after close: %+v", metrics)
+	}
+}
+
+func TestShardedKCPFlowStripingKeepsPreNegotiationFlowOnLegacyLane(t *testing.T) {
+	carrier := &memoryShardCarrier{tracks: 4}
+	sharded := newShardedKCPTunnel(carrier, func(string, ...any) {})
+	defer sharded.Stop()
+
+	oldFlow := EncodeFrame(101, MsgConnect, []byte("old"))
+	sharded.selectFlowLane(oldFlow)
+	sharded.SetKCPShardCount(4)
+	sharded.SetFlowStripingEnabled(true)
+	lane, _, _, _ := sharded.selectFlowLane(EncodeFrame(101, MsgData, []byte("later")))
+	if lane != 0 {
+		t.Fatalf("pre-negotiation flow moved to lane %d", lane)
+	}
+	newLane, _, _, _ := sharded.selectFlowLane(EncodeFrame(102, MsgConnect, []byte("new")))
+	if newLane == 0 {
+		t.Fatal("post-negotiation striped flow stayed on control lane")
+	}
+}
+
+func TestShardedKCPRemoteCloseDoesNotResetOutboundStripeSequence(t *testing.T) {
+	carrier := &memoryShardCarrier{tracks: 4}
+	sharded := newShardedKCPTunnel(carrier, func(string, ...any) {})
+	defer sharded.Stop()
+	sharded.SetKCPShardCount(4)
+	sharded.SetFlowStripingEnabled(true)
+	sharded.SetOnData(func([]byte) {})
+
+	flow, _, _, ok := sharded.selectSendFlow(EncodeFrame(111, MsgData, []byte("outbound")))
+	if !ok || !flow.striped {
+		t.Fatal("expected striped outbound state")
+	}
+	flow.nextSeq = 7
+	sharded.deliverFrame(EncodeFrame(111, MsgClose, nil))
+	flowAfter, _, _, _ := sharded.selectSendFlow(EncodeFrame(111, MsgClose, nil))
+	if flowAfter != flow || flowAfter.nextSeq != 7 {
+		t.Fatalf("remote close reset outbound sequence: flow_same=%t seq=%d", flowAfter == flow, flowAfter.nextSeq)
+	}
+}
+
+func TestKCPFlowStripeEnvelopeRoundTrip(t *testing.T) {
+	if ShardedKCPRelayReadBuf+kcpMuxFrameOverhead+kcpFlowStripeOverhead+kcpHeaderSize != kcpSegmentMTU {
+		t.Fatalf("striped read buffer does not fit one KCP segment: read=%d mtu=%d", ShardedKCPRelayReadBuf, kcpSegmentMTU)
+	}
+	want := EncodeFrame(123, MsgData, []byte("payload"))
+	envelope := encodeKCPFlowStripe(123, 456, MsgData, []byte("payload"))
+	connID, seq, got, msgType, ok := decodeKCPFlowStripe(envelope)
+	if !ok || connID != 123 || seq != 456 || msgType != MsgData || !bytes.Equal(got, want) {
+		t.Fatalf("decoded conn=%d seq=%d type=%d ok=%t frame=%x", connID, seq, msgType, ok, got)
+	}
+}
+
 func TestShardedKCPDeliversBidirectionally(t *testing.T) {
 	leftCarrier, rightCarrier := newMemoryShardCarrierPair(4)
 	left := newShardedKCPTunnel(leftCarrier, func(string, ...any) {})
@@ -82,6 +192,31 @@ func TestShardedKCPDeliversBidirectionally(t *testing.T) {
 
 	if tracks := leftCarrier.dataTracks(); len(tracks) == 0 || tracks[0] == 0 {
 		t.Fatalf("left data did not use a sharded physical track: %v", tracks)
+	}
+}
+
+func TestShardedKCPFlowStripingDeliversLargeFlowBidirectionally(t *testing.T) {
+	leftCarrier, rightCarrier := newMemoryShardCarrierPair(4)
+	left := newShardedKCPTunnel(leftCarrier, func(string, ...any) {})
+	right := newShardedKCPTunnel(rightCarrier, func(string, ...any) {})
+	defer left.Stop()
+	defer right.Stop()
+	left.SetKCPShardCount(4)
+	right.SetKCPShardCount(4)
+	left.SetFlowStripingEnabled(true)
+	right.SetFlowStripingEnabled(true)
+
+	leftReceived := make(chan []byte, 64)
+	rightReceived := make(chan []byte, 64)
+	left.SetOnData(func(data []byte) { leftReceived <- bytes.Clone(data) })
+	right.SetOnData(func(data []byte) { rightReceived <- bytes.Clone(data) })
+	for i := 0; i < 24; i++ {
+		toRight := EncodeFrame(141, MsgData, bytes.Repeat([]byte{byte(i)}, ShardedKCPRelayReadBuf))
+		toLeft := EncodeFrame(142, MsgData, bytes.Repeat([]byte{byte(255 - i)}, ShardedKCPRelayReadBuf))
+		left.SendData(toRight)
+		right.SendData(toLeft)
+		assertFrameReceived(t, rightReceived, toRight)
+		assertFrameReceived(t, leftReceived, toLeft)
 	}
 }
 
@@ -118,8 +253,40 @@ func TestRelayBridgeNegotiatesKCPShardsAndFallsBackForLegacyPeer(t *testing.T) {
 			rightResult, rightOK := right.NegotiatedHandshake()
 			return leftOK && rightOK && leftResult.Supports(CapabilityKCPShards) &&
 				rightResult.Supports(CapabilityKCPShards) &&
-				leftTunnel.KCPShardCount() == 4 && rightTunnel.KCPShardCount() == 4
+				leftResult.Supports(CapabilityKCPFlowStriping) &&
+				rightResult.Supports(CapabilityKCPFlowStriping) &&
+				leftTunnel.KCPShardCount() == 4 && rightTunnel.KCPShardCount() == 4 &&
+				leftTunnel.FlowStripingEnabled() && rightTunnel.FlowStripingEnabled()
 		}, "matching peers did not activate four KCP shards")
+	})
+
+	t.Run("alpha42_shards_without_flow_striping", func(t *testing.T) {
+		leftCarrier, rightCarrier := newMemoryShardCarrierPair(4)
+		leftTunnel := newShardedKCPTunnel(leftCarrier, func(string, ...any) {})
+		rightTunnel := newShardedKCPTunnel(rightCarrier, func(string, ...any) {})
+		defer leftTunnel.Stop()
+		defer rightTunnel.Stop()
+		left := NewRelayBridge(leftTunnel, "joiner", ShardedKCPRelayReadBuf, func(string, ...any) {})
+		right := NewRelayBridge(rightTunnel, "creator", ShardedKCPRelayReadBuf, func(string, ...any) {})
+		defer left.Close()
+		defer right.Close()
+		right.handshakeMu.Lock()
+		right.localHello.Capabilities &^= CapabilityKCPFlowStriping
+		right.localHello.Nonce = newHandshakeNonce()
+		right.peerHello = nil
+		right.handshakeResult = nil
+		right.handshakeMu.Unlock()
+		left.Reset()
+		right.Reset()
+
+		waitFor(t, func() bool {
+			result, ok := left.NegotiatedHandshake()
+			return ok && result.Supports(CapabilityKCPShards) &&
+				!result.Supports(CapabilityKCPFlowStriping) && leftTunnel.KCPShardCount() == 4
+		}, "alpha.42 capability subset did not retain flow-affinity shards")
+		if leftTunnel.FlowStripingEnabled() || rightTunnel.FlowStripingEnabled() {
+			t.Fatal("flow striping activated without mutual capability")
+		}
 	})
 
 	t.Run("legacy", func(t *testing.T) {

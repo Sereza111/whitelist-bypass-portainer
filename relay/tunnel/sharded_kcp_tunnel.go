@@ -8,6 +8,18 @@ import (
 
 const maxKCPShardCount = 8
 
+const (
+	// A striped mux message adds a 4-byte per-flow sequence and preserves the
+	// original message type in its payload. Keeping RelayBridge reads below one
+	// KCP MSS avoids turning every full TCP read into two separately paced VP8
+	// samples (the second one used to contain only a short tail).
+	kcpHeaderSize           = 24
+	kcpMuxFrameOverhead     = 9
+	kcpFlowStripeOverhead   = 5
+	ShardedKCPRelayReadBuf  = kcpSegmentMTU - kcpHeaderSize - kcpMuxFrameOverhead - kcpFlowStripeOverhead
+	maxKCPFlowReorderFrames = 16 * 1024
+)
+
 type kcpShardCarrier interface {
 	DataTunnel
 	EnableRoundRobinStriping()
@@ -16,22 +28,51 @@ type kcpShardCarrier interface {
 }
 
 // ShardedKCPTunnel keeps the legacy KCP conversation on lane zero until both
-// peers negotiate CapabilityKCPShards. Matching peers then place every logical
-// flow into one of seven independent data conversations while lane zero remains
-// available for global control. A blocked/lost flow can no longer fill the KCP
-// window used by unrelated flows.
+// peers negotiate CapabilityKCPShards. Alpha.42 peers keep one logical flow on
+// one of seven data conversations. Peers which also negotiate
+// CapabilityKCPFlowStriping sequence and spread each new flow across every data
+// conversation, then restore mux order before RelayBridge. Lane zero remains
+// available for global control.
 type ShardedKCPTunnel struct {
 	inner    kcpShardCarrier
 	lanes    []*KCPTunnel
 	adapters []*kcpShardInner
 	logFn    func(string, ...any)
 
-	activeShards atomic.Int32
-	flowLanes    sync.Map
-	mu           sync.Mutex
-	onData       func([]byte)
-	onClose      func()
-	closeOnce    sync.Once
+	activeShards     atomic.Int32
+	flowStriping     atomic.Bool
+	flowMu           sync.Mutex
+	sendFlows        map[uint32]*kcpShardSendFlow
+	recvMu           sync.Mutex
+	recvFlows        map[uint32]*kcpShardReceiveFlow
+	reorderFrames    atomic.Int64
+	reorderBytes     atomic.Int64
+	maxReorderFrames atomic.Uint64
+	maxReorderBytes  atomic.Uint64
+	malformedStripes atomic.Uint64
+	mu               sync.Mutex
+	onData           func([]byte)
+	onClose          func()
+	closeOnce        sync.Once
+}
+
+type kcpShardSendFlow struct {
+	mu       sync.Mutex
+	striped  bool
+	lane     int
+	nextSeq  uint32
+	nextLane uint32
+}
+
+type kcpStripedFrame struct {
+	data    []byte
+	msgType byte
+}
+
+type kcpShardReceiveFlow struct {
+	mu      sync.Mutex
+	nextSeq uint32
+	pending map[uint32]kcpStripedFrame
 }
 
 type kcpShardInner struct {
@@ -48,7 +89,11 @@ func NewShardedKCPTunnel(inner *MultiTrackTunnel, logFn func(string, ...any)) *S
 }
 
 func newShardedKCPTunnel(inner kcpShardCarrier, logFn func(string, ...any)) *ShardedKCPTunnel {
-	t := &ShardedKCPTunnel{inner: inner, logFn: logFn}
+	t := &ShardedKCPTunnel{
+		inner: inner, logFn: logFn,
+		sendFlows: make(map[uint32]*kcpShardSendFlow),
+		recvFlows: make(map[uint32]*kcpShardReceiveFlow),
+	}
 	t.activeShards.Store(1)
 	inner.EnableRoundRobinStriping()
 	for index := 0; index < maxKCPShardCount; index++ {
@@ -71,10 +116,27 @@ func (t *ShardedKCPTunnel) SendData(data []byte) {
 	if len(data) == 0 {
 		return
 	}
-	lane, connID, msgType, isFlow := t.selectFlowLane(data)
-	t.lanes[lane].SendData(data)
-	if isFlow && msgType == MsgClose {
-		t.flowLanes.Delete(connID)
+	flow, connID, msgType, isFlow := t.selectSendFlow(data)
+	if !isFlow {
+		t.lanes[0].SendData(data)
+		return
+	}
+
+	flow.mu.Lock()
+	lane := flow.lane
+	outbound := data
+	if flow.striped && t.KCPShardCount() > 1 {
+		seq := flow.nextSeq
+		flow.nextSeq++
+		lane = 1 + int(flow.nextLane%uint32(t.KCPShardCount()-1))
+		flow.nextLane++
+		outbound = encodeKCPFlowStripe(connID, seq, msgType, data[9:])
+	}
+	flow.mu.Unlock()
+
+	t.lanes[lane].SendData(outbound)
+	if msgType == MsgClose {
+		t.deleteSendFlow(connID, flow)
 	}
 }
 
@@ -83,16 +145,49 @@ func (t *ShardedKCPTunnel) SendData(data []byte) {
 // must not jump to a newly enabled shard and let later bytes overtake data that
 // is still buffered in the base KCP conversation.
 func (t *ShardedKCPTunnel) selectFlowLane(frame []byte) (lane int, connID uint32, msgType byte, isFlow bool) {
-	connID, msgType, ok := muxFrameIdentity(frame)
-	if !ok || connID == ControlConnID {
+	flow, connID, msgType, isFlow := t.selectSendFlow(frame)
+	if !isFlow {
 		return 0, connID, msgType, false
 	}
-	if existing, ok := t.flowLanes.Load(connID); ok {
-		return existing.(int), connID, msgType, true
+	flow.mu.Lock()
+	defer flow.mu.Unlock()
+	if flow.striped && t.KCPShardCount() > 1 {
+		return 1 + int(flow.nextLane%uint32(t.KCPShardCount()-1)), connID, msgType, true
 	}
-	candidate := selectKCPShard(frame, t.KCPShardCount())
-	actual, _ := t.flowLanes.LoadOrStore(connID, candidate)
-	return actual.(int), connID, msgType, true
+	return flow.lane, connID, msgType, true
+}
+
+func (t *ShardedKCPTunnel) selectSendFlow(frame []byte) (*kcpShardSendFlow, uint32, byte, bool) {
+	connID, msgType, ok := muxFrameIdentity(frame)
+	if !ok || connID == ControlConnID {
+		return nil, connID, msgType, false
+	}
+	t.flowMu.Lock()
+	defer t.flowMu.Unlock()
+	if existing := t.sendFlows[connID]; existing != nil {
+		return existing, connID, msgType, true
+	}
+	striped := t.flowStriping.Load() && t.KCPShardCount() > 1
+	lane := selectKCPShard(frame, t.KCPShardCount())
+	flow := &kcpShardSendFlow{striped: striped, lane: lane}
+	t.sendFlows[connID] = flow
+	return flow, connID, msgType, true
+}
+
+func (t *ShardedKCPTunnel) deleteSendFlow(connID uint32, expected *kcpShardSendFlow) {
+	t.flowMu.Lock()
+	if expected == nil || t.sendFlows[connID] == expected {
+		delete(t.sendFlows, connID)
+	}
+	t.flowMu.Unlock()
+}
+
+func (t *ShardedKCPTunnel) deleteFixedSendFlow(connID uint32) {
+	t.flowMu.Lock()
+	if flow := t.sendFlows[connID]; flow != nil && !flow.striped {
+		delete(t.sendFlows, connID)
+	}
+	t.flowMu.Unlock()
 }
 
 func (t *ShardedKCPTunnel) SetOnData(fn func([]byte)) {
@@ -175,19 +270,43 @@ func (t *ShardedKCPTunnel) SetKCPShardCount(count int) {
 	if count > len(t.lanes) {
 		count = len(t.lanes)
 	}
+	previous := int(t.activeShards.Swap(int32(count)))
 	if count == 1 {
 		// Every handshake/reset returns to the legacy conversation after
 		// RelayBridge has closed its flows. Forget stale ids as well: a new
 		// Joiner process may restart connID allocation from one.
-		t.flowLanes.Range(func(key, _ any) bool {
-			t.flowLanes.Delete(key)
-			return true
-		})
+		t.flowStriping.Store(false)
+		t.resetFlows()
 	}
-	previous := int(t.activeShards.Swap(int32(count)))
 	if previous != count && t.logFn != nil {
 		t.logFn("kcp-shards: active %d -> %d (lane 0 control, %d flow lanes)", previous, count, count-1)
 	}
+}
+
+// SetFlowStripingEnabled affects only flows which start after capability
+// negotiation. A pre-handshake flow retains its alpha.42 lane affinity so no
+// bytes can overtake data already buffered in the base conversation.
+func (t *ShardedKCPTunnel) SetFlowStripingEnabled(enabled bool) {
+	enabled = enabled && t.KCPShardCount() > 1
+	previous := t.flowStriping.Swap(enabled)
+	if previous != enabled && t.logFn != nil {
+		t.logFn("kcp-flow-stripe: enabled=%t data_lanes=%d read_buf=%d", enabled, t.KCPShardCount()-1, ShardedKCPRelayReadBuf)
+	}
+}
+
+func (t *ShardedKCPTunnel) FlowStripingEnabled() bool {
+	return t.flowStriping.Load()
+}
+
+func (t *ShardedKCPTunnel) resetFlows() {
+	t.flowMu.Lock()
+	t.sendFlows = make(map[uint32]*kcpShardSendFlow)
+	t.flowMu.Unlock()
+	t.recvMu.Lock()
+	t.recvFlows = make(map[uint32]*kcpShardReceiveFlow)
+	t.recvMu.Unlock()
+	t.reorderFrames.Store(0)
+	t.reorderBytes.Store(0)
 }
 
 func (t *ShardedKCPTunnel) handleInnerData(segment []byte) {
@@ -199,7 +318,10 @@ func (t *ShardedKCPTunnel) handleInnerData(segment []byte) {
 		return
 	}
 	index := int(conversation - kcpConversationID)
-	if index < 0 || index >= t.KCPShardCount() {
+	// Accept prepared conversations before local send activation. Hello/Ack and
+	// video tracks are asynchronous, so a matching peer's first data segment may
+	// overtake the lane-0 acknowledgement which enables our outbound striping.
+	if index < 0 || index >= t.CarrierTrackCount() {
 		return
 	}
 	t.adapters[index].deliverData(segment)
@@ -212,6 +334,87 @@ func (t *ShardedKCPTunnel) handleInnerClose() {
 }
 
 func (t *ShardedKCPTunnel) deliverData(data []byte) {
+	connID, seq, restored, msgType, striped := decodeKCPFlowStripe(data)
+	if striped {
+		t.deliverStriped(connID, seq, restored, msgType)
+		return
+	}
+	if _, envelopeType, ok := muxFrameIdentity(data); ok && envelopeType == MsgKCPFlowStripe {
+		if t.malformedStripes.Add(1) == 1 && t.logFn != nil {
+			t.logFn("kcp-flow-stripe: dropped malformed envelope")
+		}
+		return
+	}
+	t.deliverFrame(data)
+}
+
+func (t *ShardedKCPTunnel) deliverStriped(connID, seq uint32, frame []byte, msgType byte) {
+	t.recvMu.Lock()
+	flow := t.recvFlows[connID]
+	if flow == nil {
+		flow = &kcpShardReceiveFlow{pending: make(map[uint32]kcpStripedFrame)}
+		t.recvFlows[connID] = flow
+	}
+	t.recvMu.Unlock()
+
+	flow.mu.Lock()
+	var ready []kcpStripedFrame
+	switch {
+	case seq == flow.nextSeq:
+		ready = append(ready, kcpStripedFrame{data: frame, msgType: msgType})
+		flow.nextSeq++
+		for {
+			pending, ok := flow.pending[flow.nextSeq]
+			if !ok {
+				break
+			}
+			delete(flow.pending, flow.nextSeq)
+			t.reorderFrames.Add(-1)
+			t.reorderBytes.Add(-int64(len(pending.data)))
+			ready = append(ready, pending)
+			flow.nextSeq++
+		}
+	case sequenceAfter(seq, flow.nextSeq):
+		if _, duplicate := flow.pending[seq]; !duplicate {
+			if len(flow.pending) >= maxKCPFlowReorderFrames {
+				if t.logFn != nil {
+					t.logFn("kcp-flow-stripe: reorder overflow conn=%d expected=%d received=%d; frame rejected", connID, flow.nextSeq, seq)
+				}
+				flow.mu.Unlock()
+				return
+			}
+			flow.pending[seq] = kcpStripedFrame{data: frame, msgType: msgType}
+			currentFrames := t.reorderFrames.Add(1)
+			currentBytes := t.reorderBytes.Add(int64(len(frame)))
+			updateAtomicMax(&t.maxReorderFrames, uint64(currentFrames))
+			updateAtomicMax(&t.maxReorderBytes, uint64(currentBytes))
+		}
+	}
+
+	closed := false
+	for _, item := range ready {
+		t.deliverFrame(item.data)
+		if item.msgType == MsgClose {
+			closed = true
+			break
+		}
+	}
+	if closed {
+		for _, pending := range flow.pending {
+			t.reorderFrames.Add(-1)
+			t.reorderBytes.Add(-int64(len(pending.data)))
+		}
+		flow.pending = nil
+		t.recvMu.Lock()
+		if t.recvFlows[connID] == flow {
+			delete(t.recvFlows, connID)
+		}
+		t.recvMu.Unlock()
+	}
+	flow.mu.Unlock()
+}
+
+func (t *ShardedKCPTunnel) deliverFrame(data []byte) {
 	t.mu.Lock()
 	cb := t.onData
 	t.mu.Unlock()
@@ -220,9 +423,41 @@ func (t *ShardedKCPTunnel) deliverData(data []byte) {
 	}
 	// A remote CLOSE terminates the local half of the same logical flow. Drop
 	// its affinity only after RelayBridge has processed the frame so concurrent
-	// final writes cannot move ahead of it on another conversation.
+	// final writes cannot move ahead of it on another conversation. A striped
+	// outbound direction keeps its sequence until its own CLOSE is sent; resetting
+	// it here would restart at sequence zero and make that CLOSE look stale.
 	if connID, msgType, ok := muxFrameIdentity(data); ok && connID != ControlConnID && msgType == MsgClose {
-		t.flowLanes.Delete(connID)
+		t.deleteFixedSendFlow(connID)
+	}
+}
+
+func encodeKCPFlowStripe(connID, seq uint32, msgType byte, payload []byte) []byte {
+	stripedPayload := make([]byte, kcpFlowStripeOverhead+len(payload))
+	binary.BigEndian.PutUint32(stripedPayload[:4], seq)
+	stripedPayload[4] = msgType
+	copy(stripedPayload[5:], payload)
+	return EncodeFrame(connID, MsgKCPFlowStripe, stripedPayload)
+}
+
+func decodeKCPFlowStripe(frame []byte) (connID, seq uint32, restored []byte, msgType byte, ok bool) {
+	connID, envelopeType, valid := muxFrameIdentity(frame)
+	if !valid || connID == ControlConnID || envelopeType != MsgKCPFlowStripe || len(frame) < 14 {
+		return 0, 0, nil, 0, false
+	}
+	seq = binary.BigEndian.Uint32(frame[9:13])
+	msgType = frame[13]
+	if !isKCPFlowMessage(msgType) {
+		return 0, 0, nil, 0, false
+	}
+	return connID, seq, EncodeFrame(connID, msgType, frame[14:]), msgType, true
+}
+
+func isKCPFlowMessage(msgType byte) bool {
+	switch msgType {
+	case MsgConnect, MsgConnectOK, MsgConnectErr, MsgData, MsgClose, MsgUDP, MsgUDPReply:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -274,9 +509,22 @@ func muxFrameIdentity(frame []byte) (connID uint32, msgType byte, ok bool) {
 
 func (t *ShardedKCPTunnel) TunnelMetrics() TunnelMetrics {
 	active := t.KCPShardCount()
+	kind := "kcp-vp8-sharded-" + t.Profile()
+	if t.FlowStripingEnabled() {
+		kind = "kcp-vp8-flow-striped-" + t.Profile()
+	}
+	t.recvMu.Lock()
+	receiveFlows := len(t.recvFlows)
+	t.recvMu.Unlock()
 	metrics := TunnelMetrics{
-		Kind:          "kcp-vp8-sharded-" + t.Profile(),
-		KCPShardCount: active,
+		Kind:                kind,
+		KCPShardCount:       active,
+		KCPFlowStriping:     t.FlowStripingEnabled(),
+		KCPReorderFlows:     receiveFlows,
+		KCPReorderFrames:    int(t.reorderFrames.Load()),
+		KCPReorderBytes:     int(t.reorderBytes.Load()),
+		KCPMaxReorderFrames: t.maxReorderFrames.Load(),
+		KCPMaxReorderBytes:  t.maxReorderBytes.Load(),
 	}
 	var minInputAge, minAckAge uint64
 	for index, lane := range t.lanes[:active] {

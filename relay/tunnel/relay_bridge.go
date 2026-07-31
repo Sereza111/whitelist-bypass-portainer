@@ -160,7 +160,7 @@ func (rb *RelayBridge) SetOnHandshake(fn func(HandshakeResult)) {
 }
 
 func (rb *RelayBridge) ConfigureHandshake(capabilities uint64, maxCarrierPayload int, reliability ReliabilityMode, trackCount int) {
-	capabilities |= defaultCapabilitiesForTunnel(rb.currentTunnel()) & CapabilityKCPShards
+	capabilities |= defaultCapabilitiesForTunnel(rb.currentTunnel()) & (CapabilityKCPShards | CapabilityKCPFlowStriping)
 	rb.handshakeMu.Lock()
 	rb.localHello.Capabilities = capabilities
 	if maxCarrierPayload > 0 {
@@ -255,9 +255,9 @@ func (rb *RelayBridge) SwapTunnelWithReadBuf(newTunnel DataTunnel, readBuf int) 
 	newTunnel.SetOnClose(rb.handleTunnelClose)
 	rb.closeAll()
 	rb.handshakeMu.Lock()
-	capabilities := rb.localHello.Capabilities &^ CapabilityKCPShards
+	capabilities := rb.localHello.Capabilities &^ (CapabilityKCPShards | CapabilityKCPFlowStriping)
 	rb.localHello = newLocalHello(newTunnel, readBuf)
-	rb.localHello.Capabilities = capabilities | (rb.localHello.Capabilities & CapabilityKCPShards)
+	rb.localHello.Capabilities = capabilities | (rb.localHello.Capabilities & (CapabilityKCPShards | CapabilityKCPFlowStriping))
 	rb.peerHello = nil
 	rb.handshakeResult = nil
 	rb.handshakeMu.Unlock()
@@ -539,7 +539,10 @@ func (rb *RelayBridge) configureKCPShards(result HandshakeResult) {
 	if result.Supports(CapabilityKCPShards) && result.Peer.TrackCount > 0 {
 		count = int(result.Peer.TrackCount)
 	}
-	rb.setKCPShardCount(count)
+	if sharded, ok := rb.currentTunnel().(*ShardedKCPTunnel); ok {
+		sharded.SetKCPShardCount(count)
+		sharded.SetFlowStripingEnabled(count > 1 && result.Supports(CapabilityKCPFlowStriping))
+	}
 }
 
 func (rb *RelayBridge) setKCPShardCount(count int) {
