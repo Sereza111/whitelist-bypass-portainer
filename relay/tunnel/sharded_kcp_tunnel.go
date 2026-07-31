@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 const maxKCPShardCount = 8
@@ -39,21 +40,27 @@ type ShardedKCPTunnel struct {
 	adapters []*kcpShardInner
 	logFn    func(string, ...any)
 
-	activeShards     atomic.Int32
-	flowStriping     atomic.Bool
-	flowMu           sync.Mutex
-	sendFlows        map[uint32]*kcpShardSendFlow
-	recvMu           sync.Mutex
-	recvFlows        map[uint32]*kcpShardReceiveFlow
-	reorderFrames    atomic.Int64
-	reorderBytes     atomic.Int64
-	maxReorderFrames atomic.Uint64
-	maxReorderBytes  atomic.Uint64
-	malformedStripes atomic.Uint64
-	mu               sync.Mutex
-	onData           func([]byte)
-	onClose          func()
-	closeOnce        sync.Once
+	activeShards      atomic.Int32
+	flowStriping      atomic.Bool
+	flowMu            sync.Mutex
+	sendFlows         map[uint32]*kcpShardSendFlow
+	recvMu            sync.Mutex
+	recvFlows         map[uint32]*kcpShardReceiveFlow
+	reorderFrames     atomic.Int64
+	reorderBytes      atomic.Int64
+	maxReorderFrames  atomic.Uint64
+	maxReorderBytes   atomic.Uint64
+	malformedStripes  atomic.Uint64
+	dispatchWaitNanos atomic.Uint64
+	maxDispatchWait   atomic.Uint64
+	saturatedSkips    atomic.Uint64
+	allLanesFullPolls atomic.Uint64
+	mu                sync.Mutex
+	onData            func([]byte)
+	onClose           func()
+	closeOnce         sync.Once
+	stopOnce          sync.Once
+	stopCh            chan struct{}
 }
 
 type kcpShardSendFlow struct {
@@ -93,6 +100,7 @@ func newShardedKCPTunnel(inner kcpShardCarrier, logFn func(string, ...any)) *Sha
 		inner: inner, logFn: logFn,
 		sendFlows: make(map[uint32]*kcpShardSendFlow),
 		recvFlows: make(map[uint32]*kcpShardReceiveFlow),
+		stopCh:    make(chan struct{}),
 	}
 	t.activeShards.Store(1)
 	inner.EnableRoundRobinStriping()
@@ -124,20 +132,100 @@ func (t *ShardedKCPTunnel) SendData(data []byte) {
 
 	flow.mu.Lock()
 	lane := flow.lane
-	outbound := data
+	sent := true
 	if flow.striped && t.KCPShardCount() > 1 {
-		seq := flow.nextSeq
-		flow.nextSeq++
-		lane = 1 + int(flow.nextLane%uint32(t.KCPShardCount()-1))
-		flow.nextLane++
-		outbound = encodeKCPFlowStripe(connID, seq, msgType, data[9:])
+		sent = t.sendStripedFlowFrameLocked(flow, connID, msgType, data[9:])
+	} else {
+		flow.mu.Unlock()
+		t.lanes[lane].SendData(data)
 	}
-	flow.mu.Unlock()
-
-	t.lanes[lane].SendData(outbound)
-	if msgType == MsgClose {
+	if sent && msgType == MsgClose {
 		t.deleteSendFlow(connID, flow)
 	}
+}
+
+// sendStripedFlowFrameLocked assigns the sequence only after a data lane has
+// atomically accepted the frame. A saturated lane is skipped instead of
+// blocking the single fair-sender goroutine while other independent KCP
+// windows still have room. Backpressure is applied only when every data lane
+// is full. The caller holds flow.mu so concurrent writes retain exact order.
+func (t *ShardedKCPTunnel) sendStripedFlowFrameLocked(flow *kcpShardSendFlow, connID uint32, msgType byte, payload []byte) bool {
+	defer flow.mu.Unlock()
+	shardCount := t.KCPShardCount()
+	dataLaneCount := shardCount - 1
+	if dataLaneCount < 1 {
+		return false
+	}
+	sequence := flow.nextSeq
+	outbound := encodeKCPFlowStripe(connID, sequence, msgType, payload)
+	startLane := int(flow.nextLane % uint32(dataLaneCount))
+	started := time.Now()
+	waited := false
+	for {
+		candidates := t.availableDataLanes(startLane, dataLaneCount)
+		for _, candidate := range candidates {
+			lane := 1 + candidate
+			if t.lanes[lane].trySendData(outbound) {
+				flow.nextSeq++
+				flow.nextLane = uint32((candidate + 1) % dataLaneCount)
+				if waited {
+					elapsed := uint64(time.Since(started))
+					t.dispatchWaitNanos.Add(elapsed)
+					updateAtomicMax(&t.maxDispatchWait, elapsed)
+				}
+				return true
+			}
+			t.saturatedSkips.Add(1)
+		}
+		waited = true
+		t.allLanesFullPolls.Add(1)
+		select {
+		case <-t.stopCh:
+			elapsed := uint64(time.Since(started))
+			t.dispatchWaitNanos.Add(elapsed)
+			updateAtomicMax(&t.maxDispatchWait, elapsed)
+			return false
+		case <-time.After(kcpBackpressurePoll):
+		}
+	}
+}
+
+// availableDataLanes returns lanes with capacity from least to most occupied.
+// The round-robin cursor breaks ties, retaining even distribution when ACK
+// rates match while avoiding additional work on a slower, nearly full lane.
+func (t *ShardedKCPTunnel) availableDataLanes(startLane, dataLaneCount int) []int {
+	type candidate struct {
+		index   int
+		waitSnd int
+		window  int
+		offset  int
+	}
+	available := make([]candidate, 0, dataLaneCount)
+	for offset := 0; offset < dataLaneCount; offset++ {
+		index := (startLane + offset) % dataLaneCount
+		waitSnd, window, stopped := t.lanes[1+index].sendWindowOccupancy()
+		if stopped || window <= 0 || waitSnd >= window {
+			t.saturatedSkips.Add(1)
+			continue
+		}
+		available = append(available, candidate{index: index, waitSnd: waitSnd, window: window, offset: offset})
+	}
+	for i := 1; i < len(available); i++ {
+		for j := i; j > 0; j-- {
+			left, right := available[j-1], available[j]
+			leftScaled := int64(left.waitSnd) * int64(right.window)
+			rightScaled := int64(right.waitSnd) * int64(left.window)
+			if leftScaled < rightScaled || (leftScaled == rightScaled && left.offset < right.offset) {
+				break
+			}
+			available[j-1], available[j] = available[j], available[j-1]
+		}
+	}
+	result := make([]int, len(available))
+	for i, item := range available {
+		result[i] = item.index
+	}
+	return result
 }
 
 // selectFlowLane freezes an existing flow on the lane where it started. This
@@ -207,6 +295,7 @@ func (t *ShardedKCPTunnel) Reconfigure(fps, batch int) {
 }
 
 func (t *ShardedKCPTunnel) Stop() {
+	t.stopOnce.Do(func() { close(t.stopCh) })
 	for _, lane := range t.lanes {
 		lane.Stop()
 	}
@@ -517,14 +606,18 @@ func (t *ShardedKCPTunnel) TunnelMetrics() TunnelMetrics {
 	receiveFlows := len(t.recvFlows)
 	t.recvMu.Unlock()
 	metrics := TunnelMetrics{
-		Kind:                kind,
-		KCPShardCount:       active,
-		KCPFlowStriping:     t.FlowStripingEnabled(),
-		KCPReorderFlows:     receiveFlows,
-		KCPReorderFrames:    int(t.reorderFrames.Load()),
-		KCPReorderBytes:     int(t.reorderBytes.Load()),
-		KCPMaxReorderFrames: t.maxReorderFrames.Load(),
-		KCPMaxReorderBytes:  t.maxReorderBytes.Load(),
+		Kind:                  kind,
+		KCPShardCount:         active,
+		KCPFlowStriping:       t.FlowStripingEnabled(),
+		KCPReorderFlows:       receiveFlows,
+		KCPReorderFrames:      int(t.reorderFrames.Load()),
+		KCPReorderBytes:       int(t.reorderBytes.Load()),
+		KCPMaxReorderFrames:   t.maxReorderFrames.Load(),
+		KCPMaxReorderBytes:    t.maxReorderBytes.Load(),
+		KCPDispatchWaitNanos:  t.dispatchWaitNanos.Load(),
+		KCPMaxDispatchWait:    t.maxDispatchWait.Load(),
+		KCPSaturatedLaneSkips: t.saturatedSkips.Load(),
+		KCPAllLanesFullPolls:  t.allLanesFullPolls.Load(),
 	}
 	var minInputAge, minAckAge uint64
 	for index, lane := range t.lanes[:active] {
@@ -554,6 +647,7 @@ func (t *ShardedKCPTunnel) TunnelMetrics() TunnelMetrics {
 			minAckAge = item.KCPLastAckAgeNanos
 		}
 	}
+	metrics.KCPBackpressureNanos += metrics.KCPDispatchWaitNanos
 	metrics.KCPLastInputAgeNanos = minInputAge
 	metrics.KCPLastAckAgeNanos = minAckAge
 	if provider, ok := t.inner.(tunnelMetricsProvider); ok {

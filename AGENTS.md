@@ -14,6 +14,32 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses device-assisted WB with a
 single-track VK bootstrap/fallback and a headless Joiner in Video mode.
 
+## Active handoff (2026-07-31, alpha.44 availability-aware WB dispatch)
+
+- `relay (41)` contains roughly 14m50s of the single-track VK bootstrap and
+  only the first three seconds of matching alpha.43 WB. It proves `tracks=8`,
+  `caps=0xc1`, `kcp_shards=8` and `kcp_flow_striping=true`, but the shared file
+  was copied before the first ten-second WB METRICS interval. Do not attribute
+  the retained VK throughput to alpha.43 WB striping.
+- Alpha.43 rotated a flow over lanes but synchronously called one lane's
+  blocking `SendData`. A full selected lane therefore stopped the single fair
+  sender even when six other KCP windows had capacity.
+- Alpha.44 uses atomic non-blocking lane admission: it skips saturated data
+  lanes and applies backpressure only while all data lanes are full. Per-flow
+  sequence assignment remains serialized and occurs only after a lane accepts
+  the frame, preserving exact receiver reorder semantics and the alpha.43 wire
+  format/capability.
+- METRICS adds lane-skip, all-lanes-full and dispatch-wait counters. Android
+  Share now creates an immutable synchronized log snapshot; each new carrier
+  retains only a small previous-session tail and the live file rolls with a
+  guaranteed current-session prefix/tail budget.
+- Field gate: matching alpha.44 Android + Docker, direct WB active for at least
+  30 seconds before Share, `caps=0xc1`, `kcp_flow_striping=true` and at least
+  three WB METRICS lines. Compare all seven shard rates, lane skips,
+  all-lanes-full polls and physical track rates.
+- Do not research or reproduce WBAAS or `slide-v3`. WB cookies/tokens stay on
+  Android and Manager accepts only validated invitation links.
+
 ## Active handoff (2026-07-31, alpha.43 single-flow WB striping)
 
 - Matching alpha.42 `relay (40)` proves `kcp_shards=8` and `caps=0x41`, but

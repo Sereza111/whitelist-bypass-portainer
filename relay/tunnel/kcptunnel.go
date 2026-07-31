@@ -151,23 +151,58 @@ func (t *KCPTunnel) SendData(data []byte) {
 	}
 	started := time.Now()
 	for {
-		t.mu.Lock()
-		if t.kcp.WaitSnd() < t.maxWaitSnd {
-			t.sentMessages.Add(1)
-			t.sentBytes.Add(uint64(len(data)))
-			t.kcp.Send(data)
-			t.kcp.Update()
-			t.mu.Unlock()
+		if t.trySendData(data) {
 			t.backpressureNanos.Add(uint64(time.Since(started)))
 			return
 		}
-		t.mu.Unlock()
 		select {
 		case <-t.stopCh:
 			return
 		case <-time.After(kcpBackpressurePoll):
 		}
 	}
+}
+
+// trySendData atomically checks the KCP window and accepts one message without
+// waiting. ShardedKCPTunnel uses it to skip a saturated data lane and keep
+// dispatching through the other independent KCP conversations. SendData keeps
+// the original blocking contract for legacy and fixed-lane callers.
+func (t *KCPTunnel) trySendData(data []byte) bool {
+	if len(data) == 0 {
+		return true
+	}
+	select {
+	case <-t.stopCh:
+		return false
+	default:
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	select {
+	case <-t.stopCh:
+		return false
+	default:
+	}
+	if t.kcp.WaitSnd() >= t.maxWaitSnd {
+		return false
+	}
+	t.sentMessages.Add(1)
+	t.sentBytes.Add(uint64(len(data)))
+	t.kcp.Send(data)
+	t.kcp.Update()
+	return true
+}
+
+func (t *KCPTunnel) sendWindowOccupancy() (waitSnd, window int, stopped bool) {
+	select {
+	case <-t.stopCh:
+		return 0, 0, true
+	default:
+	}
+	t.mu.Lock()
+	waitSnd, window = t.kcp.WaitSnd(), t.maxWaitSnd
+	t.mu.Unlock()
+	return waitSnd, window, false
 }
 
 func (t *KCPTunnel) SetProfile(profile string) string {

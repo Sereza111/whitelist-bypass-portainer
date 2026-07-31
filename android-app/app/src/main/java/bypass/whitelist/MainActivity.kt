@@ -464,8 +464,7 @@ class MainActivity :
     override fun liveLogDisplayEnabled(): Boolean = Prefs.liveLogDisplay
 
     override fun copyLogs() {
-        val contents =
-            if (logWriter.file.exists()) logWriter.file.readText() else logWriter.displayText()
+        val contents = logWriter.snapshotText()
         val clipboard =
             getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
         clipboard.setPrimaryClip(ClipData.newPlainText("relay.log", contents))
@@ -473,10 +472,11 @@ class MainActivity :
     }
 
     override fun shareLogs() {
+        val snapshot = logWriter.createShareSnapshot()
         val uri = FileProvider.getUriForFile(
             this,
             "${packageName}.fileprovider",
-            logWriter.file
+            snapshot
         )
         val share = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"

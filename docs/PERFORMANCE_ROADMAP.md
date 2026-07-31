@@ -295,6 +295,29 @@ move and aggregate throughput still stays low, the remaining limit is the
 WB/SFU/radio aggregate allocation; no software change can promise a fixed
 20 Mbps without evidence of additional carrier capacity.
 
+### Alpha.44 availability-aware striped dispatch
+
+The alpha.43 field export verifies that matching WB negotiated eight KCP lanes
+and flow striping, but it ends three seconds after WB connected and contains no
+WB metrics interval. Code inspection nevertheless found a concrete remaining
+software head-of-line block: the fair sender selected a lane round-robin and
+then waited inside that lane's blocking `KCPTunnel.SendData`, even when another
+independent data lane still had send-window capacity.
+
+Alpha.44 samples every data lane, tries the least occupied available window
+first and uses the round-robin cursor to break ties. It skips full lanes and
+waits only when every data lane is full. A flow sequence is advanced only after
+one lane accepts the envelope, so
+the existing alpha.43 reorder protocol and `0xc1` capability remain unchanged.
+Metrics expose saturated-lane skips, all-lanes-full polls and total/maximum
+dispatcher wait.
+
+Android log sharing now freezes a point-in-time export instead of handing a
+live `relay.log` to the receiving app. New sessions keep only a small tail of
+the preceding VK carrier, and bounded rolling retains the current handshake
+prefix plus the newest metrics. This makes a post-test export diagnostic rather
+than a three-second snapshot crowded out by the bootstrap.
+
 ## Полевой результат `0.5.0-alpha.2`: односторонний stall
 
 Matching Android-клиент и сервер успешно согласовали `wire=1`, `caps=0x3` и

@@ -275,6 +275,14 @@ sequence и исходный mux message type. WB RelayBridge читает не 
 METRICS показывает `kcp_flow_striping`, current/max reorder frames/bytes и
 число принимаемых striped flows.
 
+Alpha.44 не меняет wire protocol alpha.43. Отправитель проверяет заполнение
+окон data conversations, сначала пытается принять frame в наименее заполненную
+lane и пропускает полностью заполненные. Directional sequence увеличивается только после
+успешного принятия кадра одной lane, поэтому receiver reorder остаётся точным.
+Общий backpressure возникает только когда заполнены все data lanes. METRICS
+добавляет число пропусков заполненных lanes, polls полного набора lanes и
+total/max dispatcher wait.
+
 ## Полевой результат alpha.11: живой carrier с чрезмерной очередью
 
 Matching Android и Creator согласовали `caps=0x1b`, `legacy=false` и

@@ -84,6 +84,96 @@ func TestShardedKCPFlowStripingUsesEveryDataLane(t *testing.T) {
 	}
 }
 
+func TestShardedKCPFlowStripingSkipsSaturatedLane(t *testing.T) {
+	carrier := &memoryShardCarrier{tracks: 4}
+	sharded := newShardedKCPTunnel(carrier, func(string, ...any) {})
+	defer sharded.Stop()
+	sharded.SetKCPShardCount(4)
+	sharded.SetFlowStripingEnabled(true)
+	fillKCPWindow(t, sharded.lanes[1])
+
+	sharded.SendData(EncodeFrame(78, MsgData, []byte("uses-next-free-lane")))
+
+	if sent := sharded.lanes[1].sentMessages.Load(); sent != 0 {
+		t.Fatalf("saturated lane accepted %d messages", sent)
+	}
+	if sent := sharded.lanes[2].sentMessages.Load(); sent != 1 {
+		t.Fatalf("next free lane accepted %d messages, want 1", sent)
+	}
+	metrics := sharded.TunnelMetrics()
+	if metrics.KCPSaturatedLaneSkips == 0 {
+		t.Fatal("saturated lane skip was not recorded")
+	}
+	if metrics.KCPAllLanesFullPolls != 0 {
+		t.Fatalf("dispatcher reported all lanes full %d times with free lanes", metrics.KCPAllLanesFullPolls)
+	}
+}
+
+func TestShardedKCPFlowStripingPrefersLeastOccupiedLane(t *testing.T) {
+	carrier := &memoryShardCarrier{tracks: 4}
+	sharded := newShardedKCPTunnel(carrier, func(string, ...any) {})
+	defer sharded.Stop()
+	sharded.SetKCPShardCount(4)
+	sharded.SetFlowStripingEnabled(true)
+	queueKCPMessages(t, sharded.lanes[1], 20)
+	queueKCPMessages(t, sharded.lanes[2], 10)
+	queueKCPMessages(t, sharded.lanes[3], 1)
+
+	sharded.SendData(EncodeFrame(80, MsgData, []byte("uses-least-occupied-lane")))
+
+	if sent := sharded.lanes[3].sentMessages.Load(); sent != 1 {
+		t.Fatalf("least occupied lane accepted %d messages, want 1", sent)
+	}
+	if sent := sharded.lanes[1].sentMessages.Load() + sharded.lanes[2].sentMessages.Load(); sent != 0 {
+		t.Fatalf("more occupied lanes accepted %d messages", sent)
+	}
+}
+
+func TestShardedKCPFlowStripingBackpressuresOnlyWhenAllDataLanesFull(t *testing.T) {
+	carrier := &memoryShardCarrier{tracks: 4}
+	sharded := newShardedKCPTunnel(carrier, func(string, ...any) {})
+	defer sharded.Stop()
+	sharded.SetKCPShardCount(4)
+	sharded.SetFlowStripingEnabled(true)
+	for lane := 1; lane < 4; lane++ {
+		fillKCPWindow(t, sharded.lanes[lane])
+	}
+
+	done := make(chan struct{})
+	go func() {
+		sharded.SendData(EncodeFrame(79, MsgData, []byte("waits-for-capacity")))
+		close(done)
+	}()
+	select {
+	case <-done:
+		t.Fatal("striped send completed while every data lane was full")
+	case <-time.After(30 * time.Millisecond):
+	}
+	waitFor(t, func() bool {
+		return sharded.TunnelMetrics().KCPAllLanesFullPolls > 0
+	}, "all-lanes-full backpressure was not recorded")
+
+	// Open one atomic admission slot without acknowledging any other lane. The
+	// blocked dispatcher must resume through this lane rather than waiting for
+	// the originally selected lane.
+	lane := sharded.lanes[3]
+	lane.mu.Lock()
+	lane.maxWaitSnd++
+	lane.mu.Unlock()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("striped send did not resume after one data lane became available")
+	}
+	if sent := lane.sentMessages.Load(); sent != 1 {
+		t.Fatalf("newly available lane accepted %d messages, want 1", sent)
+	}
+	metrics := sharded.TunnelMetrics()
+	if metrics.KCPDispatchWaitNanos == 0 || metrics.KCPMaxDispatchWait == 0 {
+		t.Fatalf("dispatcher wait was not measured: %+v", metrics)
+	}
+}
+
 func TestShardedKCPFlowStripingReordersAcrossLanesAndDrainsClose(t *testing.T) {
 	carrier := &memoryShardCarrier{tracks: 4}
 	sharded := newShardedKCPTunnel(carrier, func(string, ...any) {})
@@ -336,6 +426,28 @@ func waitFor(t *testing.T, condition func() bool, failure string) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatal(failure)
+}
+
+func fillKCPWindow(t *testing.T, lane *KCPTunnel) {
+	t.Helper()
+	lane.mu.Lock()
+	defer lane.mu.Unlock()
+	for lane.kcp.WaitSnd() < lane.maxWaitSnd {
+		if result := lane.kcp.Send([]byte{1}); result != 0 {
+			t.Fatalf("fill KCP window: send result=%d", result)
+		}
+	}
+}
+
+func queueKCPMessages(t *testing.T, lane *KCPTunnel, count int) {
+	t.Helper()
+	lane.mu.Lock()
+	defer lane.mu.Unlock()
+	for i := 0; i < count; i++ {
+		if result := lane.kcp.Send([]byte{1}); result != 0 {
+			t.Fatalf("queue KCP message %d: send result=%d", i, result)
+		}
+	}
 }
 
 type memoryShardCarrier struct {
