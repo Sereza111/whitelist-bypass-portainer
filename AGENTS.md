@@ -11,8 +11,28 @@ Before changing the transport, read:
 ## Current objective
 
 Turn the experimental whitelist-bypass tunnel into a measurable, stable
-server/client system. The current deployment uses the direct VK creator in
-Portainer and a headless Joiner in Video mode.
+server/client system. The current deployment uses device-assisted WB with a
+single-track VK bootstrap/fallback and a headless Joiner in Video mode.
+
+## Active handoff (2026-07-31, alpha.41 wide WB carrier)
+
+- `relay (38)` retains saturated VK metrics around 0.9-1.1 Mbps with the
+  single-track stable KCP window at 256/256. WB starts only at the end of the
+  file and has no post-connect metrics, so that sample is not a WB ceiling.
+- WB Video now starts with eight independently paced VP8 tracks on both
+  Android Joiner and Creator, doubles the previous software topology limit,
+  and advertises 1920x1080 carrier tracks to request a larger SFU allocation.
+- One existing KCP conversation remains striped round-robin over the tracks;
+  the wire format is unchanged. VK remains strictly single-track because the
+  previous dual-track VK bootstrap changed DIRECT to SERVER and failed.
+- KCP already provides ACK/retransmission. Do not add duplicate ACK requests:
+  they consume carrier capacity without increasing the physical SFU budget.
+- Field gate: matching alpha.41 Android + Docker must log `tracks=8` on both
+  peers, keep a WB transfer active for at least 30 seconds, and retain matching
+  per-track rates/write latency. If aggregate rate does not scale despite eight
+  balanced tracks, prototype capability-negotiated independent KCP lanes next.
+- Do not research or reproduce WBAAS or `slide-v3`. WB cookies/tokens stay on
+  Android and Manager accepts only validated invitation links.
 
 ## Active handoff (2026-07-30, alpha.40 single Android log owner)
 

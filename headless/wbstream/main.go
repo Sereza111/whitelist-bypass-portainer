@@ -25,7 +25,8 @@ func main() {
 	upstreamSocks := flag.String("upstream-socks", "", "route tunneled egress through this SOCKS5 proxy (host:port), e.g. a local VPN client")
 	upstreamUser := flag.String("upstream-user", "", "upstream SOCKS5 username")
 	upstreamPass := flag.String("upstream-pass", "", "upstream SOCKS5 password")
-	trackCount := flag.Int("track-count", 4, "initial VP8 carrier count (1..4); peer config may reduce it")
+	trackCount := flag.Int("track-count", wbstream.DefaultTrackCount,
+		fmt.Sprintf("initial VP8 carrier count (1..%d); peer config may reduce it", wbstream.MaxTrackCount))
 	flag.Parse()
 	*trackCount = wbstream.ClampTrackCount(*trackCount)
 

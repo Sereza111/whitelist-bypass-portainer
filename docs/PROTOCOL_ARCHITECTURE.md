@@ -233,12 +233,17 @@ control frames, временем блокировки `SendData`, активны
 результатом handshake и transport-specific queue/KCP counters.
 
 Для direct WB Video в alpha.35 одна KCP conversation распределяет выходные
-segments round-robin по 1..4 VP8 tracks. Это не меняет KCP wire format: KCP
+segments round-robin по нескольким VP8 tracks. В alpha.35-alpha.40 предел был
+1..4, а alpha.41 расширяет matching WB-топологию до 1..8 и по умолчанию
+запускает восемь tracks. Это не меняет KCP wire format: KCP
 принимает segments в произвольном порядке и выполняет reassembly. Raw mux без
 KCP продолжает закреплять `connID` за одним track. Android передаёт новый
 опциональный JSON-параметр `trackCount`; при его отсутствии `dualTrack=true`
 остаётся совместимым двухтрековым режимом. Сторона Creator получает фактическое
 число tracks через существующий `MsgConfig` и динамически адаптирует publisher.
+WB publisher alpha.41 объявляет carrier как 1920x1080 вместо 1280x720, чтобы
+запросить у SFU более высокий video allocation; фактические payload frames
+остаются MTU-aligned псевдо-VP8. VK bootstrap остаётся однотрековым.
 
 ## Полевой результат alpha.11: живой carrier с чрезмерной очередью
 

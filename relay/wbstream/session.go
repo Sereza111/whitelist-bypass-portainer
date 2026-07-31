@@ -29,6 +29,10 @@ const (
 	TunnelModeVideo         = "video"
 	TunnelModeDC            = "dc"
 	TunnelModeSmart         = "smart"
+	DefaultTrackCount       = 8
+	MaxTrackCount           = 8
+	carrierVideoWidth       = 1920
+	carrierVideoHeight      = 1080
 	smartDCValidationPeriod = 5 * time.Second
 )
 
@@ -48,7 +52,7 @@ type SessionConfig struct {
 	AccessToken       string
 	ReadBuf           int
 	ScreenShare       bool          // legacy compatibility: when true and TrackCount is unset, publish two tracks
-	TrackCount        int           // desired VP8 carrier count; clamped to 1..4
+	TrackCount        int           // desired VP8 carrier count; clamped to 1..MaxTrackCount
 	IsJoiner          bool          // when true, run the configPingPong loop; only the joiner sends VP8 config to the peer
 	SmartDCGrace      time.Duration // optional test/tuning override; zero uses the bounded default
 	SmartDCValidation time.Duration // optional test override for initial bidirectional DC validation
@@ -212,9 +216,7 @@ func (s *Session) onLKReady() {
 			trackCount = 2
 		}
 	}
-	if trackCount > 4 {
-		trackCount = 4
-	}
+	trackCount = ClampTrackCount(trackCount)
 	tracks := []*webrtc.TrackLocalStaticSample{trackCam}
 
 	for len(tracks) < trackCount {
@@ -271,7 +273,7 @@ func (s *Session) onLKReady() {
 			source = livekit.TrackSourceScreenShare
 		}
 		if err := s.lk.SendAddTrack(t.ID(), "videochannel",
-			livekit.TrackTypeVideo, source, 1280, 720); err != nil {
+			livekit.TrackTypeVideo, source, carrierVideoWidth, carrierVideoHeight); err != nil {
 			s.cfg.LogFn("[lk] send add-track: %v", err)
 			return
 		}
@@ -604,9 +606,9 @@ func (s *Session) AdaptTrackCount(peerCount int) {
 	if peerCount < 1 {
 		return
 	}
-	if peerCount > 4 {
-		s.cfg.LogFn("[lk] adapt-track-count: clamping peer request %d -> 4", peerCount)
-		peerCount = 4
+	if peerCount > MaxTrackCount {
+		s.cfg.LogFn("[lk] adapt-track-count: clamping peer request %d -> %d", peerCount, MaxTrackCount)
+		peerCount = MaxTrackCount
 	}
 	pubPC := s.lk.PubPC()
 	if pubPC == nil {
@@ -654,8 +656,8 @@ func ClampTrackCount(n int) int {
 	if n < 1 {
 		return 1
 	}
-	if n > 4 {
-		return 4
+	if n > MaxTrackCount {
+		return MaxTrackCount
 	}
 	return n
 }
@@ -711,7 +713,7 @@ func (s *Session) addPublisherTrack(pubPC *webrtc.PeerConnection, slot int) bool
 		return false
 	}
 	if err := s.lk.SendAddTrack(track.ID(), "videochannel",
-		livekit.TrackTypeVideo, source, 1280, 720); err != nil {
+		livekit.TrackTypeVideo, source, carrierVideoWidth, carrierVideoHeight); err != nil {
 		s.cfg.LogFn("[lk] adapt-track-count: send add-track slot=%d: %v", slot, err)
 		return false
 	}

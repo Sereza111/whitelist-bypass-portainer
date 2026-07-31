@@ -60,8 +60,8 @@ class HeadlessJoinController(
                 put("roomId", CallPlatform.extractRoomId(url))
 				put("tunnelMode", mode.relayArg)
 				// KCP restores packet order, so managed WB Video can stripe one
-				// conversation over four independently paced VP8 carriers.
-				put("trackCount", if (Prefs.activeDualTrack && mode != TunnelMode.DC) 4 else 1)
+				// conversation over eight independently paced VP8 carriers.
+				put("trackCount", if (Prefs.activeDualTrack && mode != TunnelMode.DC) WIDE_WB_TRACK_COUNT else 1)
             }
             CallPlatform.DION -> put("roomId", CallPlatform.extractRoomId(url))
             CallPlatform.VK -> error("VK headless flow uses HeadlessVkFragment for captcha UI")
@@ -75,5 +75,6 @@ class HeadlessJoinController(
 
     private companion object {
         const val LOG_TAG = "HeadlessJoinController"
+        const val WIDE_WB_TRACK_COUNT = 8
     }
 }

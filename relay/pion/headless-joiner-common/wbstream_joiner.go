@@ -77,9 +77,7 @@ func (j *WBStreamHeadlessJoiner) RunWithParams(jsonParams string) {
 			trackCount = 2
 		}
 	}
-	if trackCount > 4 {
-		trackCount = 4
-	}
+	trackCount = wbstream.ClampTrackCount(trackCount)
 	j.logFn("wbstream-joiner: room=%s name=%s vp8Fps=%d vp8Batch=%d tracks=%d", params.RoomID, params.DisplayName, params.VP8FPS, params.VP8Batch, trackCount)
 
 	obf, err := tunnel.NewTunnelObfuscator(tunnel.DeriveSecretFromJoinLink(params.RoomID))

@@ -217,6 +217,30 @@ ceiling; high write latency or growing track queues indicate a local publisher
 bottleneck. Only that distinction determines whether the next reversible
 experiment should change packetization/pacing or track topology.
 
+### Alpha.41 wide WB carrier candidate
+
+The retained alpha.40-era `relay (38)` sample does not contain saturated WB
+metrics: its 0.9-1.1 Mbps interval belongs to the one-track VK bootstrap, and WB
+connects only at the end of the file. It therefore cannot justify another KCP
+window increase or duplicate ACK mechanism. KCP already ACKs and retransmits;
+more control packets would reduce useful payload capacity.
+
+Alpha.41 makes a topology change instead. Matching WB peers start eight
+independently paced VP8 tracks rather than four, and advertise each carrier as
+1920x1080 instead of 1280x720 so the SFU can allocate a larger video profile.
+The existing KCP conversation continues to stripe segments round-robin, so the
+wire format and reordering semantics do not change. VK stays single-track for
+bootstrap compatibility.
+
+The aggregate theoretical pacer ceiling rises from roughly 26 to 52 Mbps before
+WebRTC/KCP overhead, loss and SFU policy. This is a scaling experiment, not a
+20 Mbps guarantee: WB may enforce a participant-level cap independent of track
+count. The field gate is matching `tracks=8` metrics from both sides during at
+least 30 seconds of continuous WB load. If all eight tracks are balanced with
+low write latency but aggregate throughput does not rise, the next architecture
+candidate is capability-negotiated independent KCP lanes/flow sharding rather
+than larger KCP or DRR queues.
+
 ## Полевой результат `0.5.0-alpha.2`: односторонний stall
 
 Matching Android-клиент и сервер успешно согласовали `wire=1`, `caps=0x3` и

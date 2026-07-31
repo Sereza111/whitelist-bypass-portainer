@@ -75,7 +75,7 @@ data class CallConfig(
 			// VK switches the call from DIRECT to SERVER when the bootstrap
 			// publishes the extra screen-share track. The current carrier supports
 			// only the direct two-party topology, so keep this short-lived control
-			// path single-track. WB still uses its independent four-track path.
+			// path single-track. WB still uses its independent eight-track path.
 			return selected?.copy(dualTrack = false)
 		}
 
