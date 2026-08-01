@@ -8,12 +8,13 @@ import (
 type MultiTrackTunnel struct {
 	tunnels []*VP8DataTunnel
 
-	mu       sync.Mutex
-	onData   func([]byte)
-	onClose  func()
-	isClosed bool
-	fps      int
-	batch    int
+	mu            sync.Mutex
+	onData        func([]byte)
+	onClose       func()
+	onPeerRestart func()
+	isClosed      bool
+	fps           int
+	batch         int
 	// Raw mux frames are pinned by connection id so one TCP flow remains
 	// ordered on one carrier. Once KCP wraps this tunnel, the payload here is a
 	// KCP packet rather than a mux frame; KCP provides ordering itself and its
@@ -39,6 +40,14 @@ func (m *MultiTrackTunnel) wireSubTunnel(tun *VP8DataTunnel, isCamera bool) {
 		m.mu.Unlock()
 		if handler != nil {
 			handler(data)
+		}
+	})
+	tun.SetOnPeerRestart(func() {
+		m.mu.Lock()
+		handler := m.onPeerRestart
+		m.mu.Unlock()
+		if handler != nil {
+			handler()
 		}
 	})
 	if !isCamera {
@@ -167,6 +176,12 @@ func (m *MultiTrackTunnel) SetOnClose(fn func()) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.onClose = fn
+}
+
+func (m *MultiTrackTunnel) SetOnPeerRestart(fn func()) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onPeerRestart = fn
 }
 
 func (m *MultiTrackTunnel) Reconfigure(fps, batch int) {

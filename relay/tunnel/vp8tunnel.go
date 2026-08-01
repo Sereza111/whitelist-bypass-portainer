@@ -41,12 +41,14 @@ type VP8DataTunnel struct {
 	maxWrite    atomic.Uint64
 	writeErrors atomic.Uint64
 
-	OnData  func([]byte)
-	OnClose func()
+	OnData        func([]byte)
+	OnClose       func()
+	OnPeerRestart func()
 }
 
-func (t *VP8DataTunnel) SetOnData(fn func([]byte)) { t.OnData = fn }
-func (t *VP8DataTunnel) SetOnClose(fn func())      { t.OnClose = fn }
+func (t *VP8DataTunnel) SetOnData(fn func([]byte))  { t.OnData = fn }
+func (t *VP8DataTunnel) SetOnClose(fn func())       { t.OnClose = fn }
+func (t *VP8DataTunnel) SetOnPeerRestart(fn func()) { t.OnPeerRestart = fn }
 
 func NewVP8DataTunnel(track *webrtc.TrackLocalStaticSample, obf *TunnelObfuscator, logFn func(string, ...any)) *VP8DataTunnel {
 	return &VP8DataTunnel{
@@ -228,6 +230,9 @@ func (t *VP8DataTunnel) HandleFrame(frame []byte) {
 	}
 	if res.PeerRestart {
 		t.logFn("vp8tunnel: peer restart detected, new epoch=0x%08x", res.PeerEpoch)
+		if t.OnPeerRestart != nil {
+			t.OnPeerRestart()
+		}
 	}
 	if res.Keepalive || len(res.Payload) == 0 {
 		return

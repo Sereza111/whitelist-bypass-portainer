@@ -80,14 +80,6 @@ func (j *WBStreamHeadlessJoiner) RunWithParams(jsonParams string) {
 	trackCount = wbstream.ClampTrackCount(trackCount)
 	j.logFn("wbstream-joiner: room=%s name=%s vp8Fps=%d vp8Batch=%d tracks=%d", params.RoomID, params.DisplayName, params.VP8FPS, params.VP8Batch, trackCount)
 
-	obf, err := tunnel.NewTunnelObfuscator(tunnel.DeriveSecretFromJoinLink(params.RoomID))
-	if err != nil {
-		j.logFn("wbstream-joiner: obfuscator init failed: %v", err)
-		j.Status.EmitStatusError("obfuscator init: " + err.Error())
-		return
-	}
-	j.logFn("wbstream-joiner: obfuscator ready localEpoch=0x%08x", obf.LocalEpoch())
-
 	var settingEngine *webrtc.SettingEngine
 	if j.PCConfig != nil {
 		se := webrtc.SettingEngine{}
@@ -98,7 +90,7 @@ func (j *WBStreamHeadlessJoiner) RunWithParams(jsonParams string) {
 	var attempt atomic.Int32
 
 	j.Status.EmitStatus(common.StatusConnecting)
-	if err := j.runOnce(httpClient, params.RoomID, params.DisplayName, params.TunnelMode, obf, settingEngine, params.VP8FPS, params.VP8Batch, trackCount, &attempt); err != nil {
+	if err := j.runOnce(httpClient, params.RoomID, params.DisplayName, params.TunnelMode, settingEngine, params.VP8FPS, params.VP8Batch, trackCount, &attempt); err != nil {
 		j.Status.EmitStatusError(err.Error())
 		return
 	}
@@ -118,18 +110,27 @@ func (j *WBStreamHeadlessJoiner) RunWithParams(jsonParams string) {
 		}
 		j.logFn("wbstream-joiner: reconnect attempt #%d", attempt.Load())
 		j.Status.EmitStatus(common.StatusReconnecting)
-		if err := j.runOnce(httpClient, params.RoomID, params.DisplayName, params.TunnelMode, obf, settingEngine, params.VP8FPS, params.VP8Batch, trackCount, &attempt); err != nil {
+		if err := j.runOnce(httpClient, params.RoomID, params.DisplayName, params.TunnelMode, settingEngine, params.VP8FPS, params.VP8Batch, trackCount, &attempt); err != nil {
 			j.logFn("wbstream-joiner: %v, will retry", err)
 		}
 	}
 }
 
-func (j *WBStreamHeadlessJoiner) runOnce(httpClient *http.Client, roomID, displayName, tunnelMode string, obf *tunnel.TunnelObfuscator, settingEngine *webrtc.SettingEngine, vp8FPS, vp8Batch, trackCount int, attempt *atomic.Int32) error {
+func (j *WBStreamHeadlessJoiner) runOnce(httpClient *http.Client, roomID, displayName, tunnelMode string, settingEngine *webrtc.SettingEngine, vp8FPS, vp8Batch, trackCount int, attempt *atomic.Int32) error {
 	_, roomToken, _, serverURL, authErr := wbstream.AuthAndGetToken(httpClient, roomID, displayName)
 	if authErr != nil {
 		return fmt.Errorf("auth: %w", authErr)
 	}
 	j.logFn("wbstream-joiner: server=%s", serverURL)
+	// KCP sequence state is recreated for every WebRTC session. Give that
+	// generation a fresh authenticated carrier epoch as well, so a long-lived
+	// Creator can detect an internal Joiner reconnect even when room/link and
+	// Android process remain unchanged.
+	obf, obfErr := tunnel.NewTunnelObfuscator(tunnel.DeriveSecretFromJoinLink(roomID))
+	if obfErr != nil {
+		return fmt.Errorf("obfuscator init: %w", obfErr)
+	}
+	j.logFn("wbstream-joiner: obfuscator ready localEpoch=0x%08x", obf.LocalEpoch())
 
 	sess := wbstream.NewSession(wbstream.SessionConfig{
 		RoomToken:      roomToken,

@@ -318,6 +318,31 @@ the preceding VK carrier, and bounded rolling retains the current handshake
 prefix plus the newest metrics. This makes a post-test export diagnostic rather
 than a three-second snapshot crowded out by the bootstrap.
 
+### Alpha.45 WB peer-generation recovery
+
+The first useful alpha.44 WB field window did not expose a speed ceiling. It
+exposed a complete one-way protocol failure after a validated invitation was
+reused: WebRTC connected eight tracks, but the Joiner received only carrier
+keepalives, negotiated `wire=0/caps=0`, recorded `tunnel_rx=0` for 40 seconds
+and timed out every CONNECT. The long-lived Creator still belonged to the
+previous Android/KCP generation.
+
+Two lifecycle gaps caused it. Signaling reset only fired when a newcomer and
+stale predecessor coexisted in one participant update; a predecessor already
+reported Disconnected was forgotten. More importantly, RelayBridge reset did
+not recreate KCP sequence/ACK state. A replacement Joiner begins at sequence
+zero and cannot share the old KCP control block.
+
+Alpha.45 treats the encrypted VP8 peer epoch as the data-plane generation. A
+change synchronously rebuilds all KCP lanes over the existing physical tracks
+and swaps/replaces RelayBridge before that first new-epoch payload is handed
+up. Every internal Joiner reconnect creates a fresh epoch alongside its fresh
+KCP state, so this also works without restarting the Android process.
+Participant history survives clean disconnects for signaling-level recovery
+and stale-peer eviction. This is a liveness fix; throughput testing of
+availability-aware dispatch resumes only after a matching alpha.45 session
+negotiates `caps=0xc1` and records sustained non-zero WB metrics.
+
 ## Полевой результат `0.5.0-alpha.2`: односторонний stall
 
 Matching Android-клиент и сервер успешно согласовали `wire=1`, `caps=0x3` и

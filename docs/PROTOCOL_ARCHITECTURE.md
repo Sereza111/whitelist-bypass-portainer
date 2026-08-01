@@ -283,6 +283,18 @@ lane и пропускает полностью заполненные. Directio
 добавляет число пропусков заполненных lanes, polls полного набора lanes и
 total/max dispatcher wait.
 
+Alpha.45 исправляет смену WB peer внутри уже живой комнаты. Новый Android
+participant использует новый transport epoch и начинает каждую KCP conversation
+с sequence zero. Поэтому обычного RelayBridge reset недостаточно: старые KCP
+receive/send sequence, ACK и reorder state несовместимы с новым peer. Событие
+смены зашифрованного VP8 epoch теперь поднимается через MultiTrack в WB Session.
+Session останавливает прежние KCP lanes, создаёт новый sharded wrapper поверх
+тех же WebRTC tracks и передаёт его существующему persistent Joiner bridge либо
+новому Creator bridge. Первый payload нового epoch попадает уже в свежий KCP.
+Каждая внутренняя WB Joiner reconnect-сессия также создаёт новый VP8 epoch
+вместе с новым KCP state, даже если Android-процесс и room link не изменились.
+Wire protocol и `0xc1` capability не меняются.
+
 ## Полевой результат alpha.11: живой carrier с чрезмерной очередью
 
 Matching Android и Creator согласовали `caps=0x1b`, `legacy=false` и

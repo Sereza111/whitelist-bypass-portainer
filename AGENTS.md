@@ -14,6 +14,40 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses device-assisted WB with a
 single-track VK bootstrap/fallback and a headless Joiner in Video mode.
 
+## Active handoff (2026-08-01, alpha.45 WB peer-generation recovery)
+
+- `relay-export-2197-5066776826703729464.log` contains a healthy matching
+  alpha.44 VK bootstrap followed by a direct WB join to the same room used by
+  the preceding day's test. WB ICE and all eight physical tracks connect, but
+  protocol negotiation times out: `wire=0`, `caps=0x0`, `tunnel_rx=0`, only
+  24-byte carrier keepalives arrive and every SOCKS CONNECT waits 20 seconds
+  for a response. This is a dead protocol generation, not low throughput.
+- WB participant tracking reset RelayBridge only when a newcomer and stale
+  predecessor appeared in the same signaling update. A normal sequence where
+  the predecessor disconnected before the replacement joined did not reset.
+  RelayBridge reset also retained the previous KCP sequence/ACK state, so it
+  was insufficient for a replacement peer which starts KCP at sequence zero.
+- Alpha.45 propagates the authenticated VP8 peer-epoch change through every
+  MultiTrack carrier. The WB Session stops the old KCP lanes, constructs fresh
+  reliability over the still-connected physical tracks, and invokes
+  OnConnected so persistent Joiners atomically swap their bridge and Creator
+  replaces its bridge. The first frame from the new epoch is then delivered to
+  the fresh KCP state instead of the stale one.
+- Every WB Joiner reconnect now creates a fresh VP8 epoch together with its new
+  KCP state. An in-process WebRTC reconnect is therefore visible to the
+  long-lived Creator even when the room, Android process and device binding do
+  not change.
+- Participant generation history now survives a clean disconnect, preserving
+  the earlier signaling-level reset and stale-peer eviction as a second line
+  of recovery. Regression tests cover both the clean disconnect/rejoin order
+  and sharded-KCP replacement on an epoch change.
+- Field gate: matching alpha.45 Android + Docker, reconnect to a previously
+  used validated WB invitation, then confirm `carrier peer epoch changed`, a
+  successful `caps=0xc1` handshake and at least three non-zero WB METRICS
+  intervals before making any throughput conclusion about alpha.44 dispatch.
+- Do not research or reproduce WBAAS or `slide-v3`. WB cookies/tokens stay on
+  Android and Manager accepts only validated invitation links.
+
 ## Active handoff (2026-07-31, alpha.44 availability-aware WB dispatch)
 
 - `relay (41)` contains roughly 14m50s of the single-track VK bootstrap and

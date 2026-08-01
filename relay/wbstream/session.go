@@ -81,9 +81,11 @@ type Session struct {
 	dcFailureReason        string
 	remoteTracks           int
 	done                   chan struct{}
+	peerRestartMu          sync.Mutex
 
-	peersBySID map[string]peerEntry // SID -> first-seen time + state
-	kickedSIDs map[string]bool      // SIDs we kicked; SFU may still echo them as Active until it processes the kick
+	peersBySID         map[string]peerEntry // SID -> first-seen time + state
+	kickedSIDs         map[string]bool      // SIDs we kicked; SFU may still echo them as Active until it processes the kick
+	peerGenerationSeen bool                 // remains true after disconnect so a later clean join is still a new generation
 
 	configAcked     chan struct{}
 	configAckedOnce sync.Once
@@ -306,6 +308,7 @@ func (s *Session) startTunnel() {
 		subs = append(subs, tunnel.NewVP8DataTunnel(t, s.cfg.Obfuscator, s.cfg.LogFn))
 	}
 	s.vp8tun = tunnel.NewMultiTrackTunnel(subs)
+	s.vp8tun.SetOnPeerRestart(s.handleCarrierPeerRestart)
 	s.vp8tun.Start(s.cfg.VP8FPS, s.cfg.VP8Batch)
 	tun := s.vp8tun
 	s.mu.Unlock()
@@ -602,6 +605,51 @@ func (s *Session) maybeWrapReliable(tun tunnel.DataTunnel) tunnel.DataTunnel {
 	return wrapped
 }
 
+// handleCarrierPeerRestart is driven by the encrypted VP8 epoch, not only by
+// participant signaling. A replacement phone starts every KCP conversation at
+// sequence zero; retaining the previous KCP objects would silently discard its
+// packets even though all WebRTC tracks remain connected. Rebuild reliability
+// over the live carrier and let OnConnected swap the RelayBridge atomically.
+func (s *Session) handleCarrierPeerRestart() {
+	s.peerRestartMu.Lock()
+	defer s.peerRestartMu.Unlock()
+
+	select {
+	case <-s.done:
+		return
+	default:
+	}
+
+	s.mu.Lock()
+	vp8 := s.vp8tun
+	oldReliable := s.kcptun
+	active := s.activeTunnel
+	if vp8 == nil || oldReliable == nil || active != oldReliable {
+		fallback := s.OnPeerRestart
+		s.mu.Unlock()
+		if fallback != nil {
+			fallback()
+		}
+		return
+	}
+	s.kcptun = nil
+	s.activeTunnel = nil
+	s.mu.Unlock()
+
+	stopDataTunnel(oldReliable)
+	fresh := s.maybeWrapReliable(vp8)
+
+	s.mu.Lock()
+	s.activeTunnel = fresh
+	s.tunFired = true
+	s.mu.Unlock()
+
+	s.cfg.LogFn("[wb] carrier peer epoch changed; rebuilt KCP transport")
+	if s.OnConnected != nil {
+		s.OnConnected(fresh)
+	}
+}
+
 func stopDataTunnel(tun tunnel.DataTunnel) {
 	if stopper, ok := tun.(interface{ Stop() }); ok {
 		stopper.Stop()
@@ -863,6 +911,7 @@ func (s *Session) onParticipantUpdate(updates []livekit.ParticipantInfo) {
 	if s.peersBySID == nil {
 		s.peersBySID = make(map[string]peerEntry)
 	}
+	hadPeerGeneration := s.peerGenerationSeen
 	newcomerSIDs := make(map[string]bool)
 	canPromote := s.cfg.AccessToken != "" && s.cfg.RoomID != ""
 	for _, p := range updates {
@@ -887,6 +936,9 @@ func (s *Session) onParticipantUpdate(updates []livekit.ParticipantInfo) {
 		}
 		entry.state = p.State
 		s.peersBySID[p.SID] = entry
+	}
+	if len(newcomerSIDs) > 0 {
+		s.peerGenerationSeen = true
 	}
 
 	var stale []peerEntry
@@ -915,7 +967,7 @@ func (s *Session) onParticipantUpdate(updates []livekit.ParticipantInfo) {
 	}
 	s.mu.Unlock()
 
-	if len(stale) > 0 && s.OnPeerRestart != nil {
+	if hadPeerGeneration && len(newcomerSIDs) > 0 && s.OnPeerRestart != nil {
 		s.cfg.LogFn("[wb] participant generation changed; resetting relay state")
 		s.OnPeerRestart()
 	}
