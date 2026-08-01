@@ -295,6 +295,27 @@ Session останавливает прежние KCP lanes, создаёт но
 вместе с новым KCP state, даже если Android-процесс и room link не изменились.
 Wire protocol и `0xc1` capability не меняются.
 
+Alpha.46 исправляет отдельный отказ server egress, который выглядел как
+сломанный carrier. Android Automatic DNS больше не переносит DNS мобильного
+оператора в туннель: такой resolver может иметь публичный адрес, но принимать
+запросы только из сети оператора, тогда как DNS-пакет фактически выходит с
+Creator/VPS. Automatic теперь объявляет два удалённо доступных публичных
+resolver; Custom остаётся явной пользовательской настройкой.
+
+Matching sharded WB peers рекламируют `priority_control` и `reliable_dns`
+вместе с `kcp_shards`/`kcp_flow_striping` (`caps=0xd9`). CONNECT,
+CONNECT_OK/ERR и DNS Query/Reply идут по зарезервированной KCP lane zero, а
+семь data lanes продолжают переносить striped bulk. Peer alpha.45 согласует
+только прежнее пересечение capabilities и остаётся wire-compatible.
+
+Creator также ведёт bounded negative reachability cache для точного
+destination endpoint. Он открывается только после двух настоящих TCP timeout,
+использует cooldown 2–15 секунд и немедленно очищается успешным dial. Cache не
+переписывает destination, не сохраняет cookies/tokens и не заменяет обычное
+положительное DNS-кэширование Android; его задача — не запускать десятки
+одинаковых десятисекундных dial во время выбора приложением альтернативного
+endpoint.
+
 ## Полевой результат alpha.11: живой carrier с чрезмерной очередью
 
 Matching Android и Creator согласовали `caps=0x1b`, `legacy=false` и

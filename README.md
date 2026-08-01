@@ -6,14 +6,14 @@ Dion. Это уже не минимальная Docker-обёртка upstream: 
 клиенты, SOCKS5/TUN, автоматическое восстановление звонков, диагностику и
 multi-arch релизный pipeline.
 
-Текущий релиз: **v0.5.0-alpha.45**. Android и server необходимо обновлять
+Текущий релиз: **v0.5.0-alpha.46**. Android и server необходимо обновлять
 вместе: релиз восстанавливает WB KCP/handshake при замене Android-сеанса внутри
 уже использованной комнаты.
 
 Docker image:
 
 ```text
-ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.45
+ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.46
 ```
 
 Проект основан на
@@ -158,7 +158,7 @@ ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.45
 
 | Переменная | Рекомендуемое значение |
 |---|---|
-| `WLB_IMAGE` | `ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.45` |
+| `WLB_IMAGE` | `ghcr.io/sereza111/whitelist-bypass-portainer:v0.5.0-alpha.46` |
 | `PANEL_USERNAME` | новый логин, по умолчанию `admin` |
 | `PANEL_PASSWORD` | уникальный пароль длиной от 12 символов |
 | `WLB_SECRETS_DIR` | `/opt/whitelist-bypass/secrets` |
@@ -248,7 +248,7 @@ WB Stream и Dion; тип провайдера связан с проверен�
 В логах клиента и сервера должны совпадать:
 
 ```text
-[build] version=0.5.0-alpha.45 commit=... built=...
+[build] version=0.5.0-alpha.46 commit=... built=...
 ```
 
 Если на телефоне осталась старая debug-signed `alpha.8`, её нужно удалить один

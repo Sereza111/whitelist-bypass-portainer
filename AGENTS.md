@@ -14,6 +14,32 @@ Turn the experimental whitelist-bypass tunnel into a measurable, stable
 server/client system. The current deployment uses device-assisted WB with a
 single-track VK bootstrap/fallback and a headless Joiner in Video mode.
 
+## Active handoff (2026-08-01, alpha.46 remote-safe DNS/control lane)
+
+- `relay-export-2249-2399496216893211824.log` confirms alpha.45 WB generation
+  recovery: `caps=0xc1`, eight KCP shards, flow striping, about 4.75 MiB
+  received in twenty seconds and almost empty transport queues. Do not roll
+  back alpha.45 or call this a dead WB carrier.
+- Both VK and WB failed above the carrier. VK recorded 51 reliable DNS queries
+  and zero replies. Android Automatic DNS had copied a public-looking mobile
+  carrier resolver into the VPN, but tunneled DNS exits from Creator/VPS and
+  that resolver was unreachable there. Cached endpoints explain why Telegram
+  text partially worked while videos/Speedtest reported no internet.
+- Alpha.46 Automatic DNS advertises remote-safe public resolvers instead of
+  mobile carrier DNS. Custom DNS remains explicit. The normal Android/platform
+  positive cache was not removed.
+- Matching sharded WB advertises `priority_control + reliable_dns` together
+  with shards/striping (`caps=0xd9`). CONNECT, CONNECT_OK/ERR and DNS use the
+  already reserved KCP lane zero; seven data lanes remain available for bulk.
+- Creator has a bounded negative destination reachability cache. It opens only
+  after two true TCP timeouts, cools down for 2–15 seconds, clears on success,
+  never rewrites an endpoint and stores no DNS answers or secrets.
+- Field gate: matching alpha.46 Android + Docker, Automatic DNS, direct WB and
+  VK fallback without any external VPN, `caps=0xd9`, non-zero reliable DNS
+  replies and at least three metrics intervals before judging throughput.
+- Do not research or reproduce WBAAS or `slide-v3`. WB cookies/tokens stay on
+  Android and Manager accepts only validated invitation links.
+
 ## Active handoff (2026-08-01, alpha.45 WB peer-generation recovery)
 
 - `relay-export-2197-5066776826703729464.log` contains a healthy matching

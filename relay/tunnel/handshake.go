@@ -26,6 +26,11 @@ const (
 	CapabilityKCPFlowStriping uint64 = 1 << 7
 )
 
+const shardedTransportCapabilities = CapabilityPriorityControl |
+	CapabilityReliableDNS |
+	CapabilityKCPShards |
+	CapabilityKCPFlowStriping
+
 type ReliabilityMode byte
 
 const (
@@ -148,7 +153,11 @@ func newLocalHello(t DataTunnel, readBuf int) Hello {
 func defaultCapabilitiesForTunnel(t DataTunnel) uint64 {
 	capabilities := CapabilityMetricsV1
 	if _, ok := t.(*ShardedKCPTunnel); ok {
-		capabilities |= CapabilityKCPShards | CapabilityKCPFlowStriping
+		// Sharded KCP already reserves lane zero independently from the seven
+		// bulk lanes. Advertise it as the reliable priority path so CONNECT and
+		// DNS do not wait behind striped downloads and DNS no longer needs blind
+		// legacy duplication.
+		capabilities |= shardedTransportCapabilities
 	}
 	return capabilities
 }

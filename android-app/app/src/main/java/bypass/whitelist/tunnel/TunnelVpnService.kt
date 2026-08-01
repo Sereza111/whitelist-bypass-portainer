@@ -6,7 +6,6 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.net.ConnectivityManager
 import android.net.VpnService
 import android.os.Build
 import android.os.Handler
@@ -22,7 +21,6 @@ import bypass.whitelist.util.Prefs
 import bypass.whitelist.util.SocksAuth
 import bypass.whitelist.util.Vpn
 import androidbind.Androidbind
-import java.net.Inet4Address
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
@@ -161,14 +159,15 @@ class TunnelVpnService : VpnService() {
 
         when (Prefs.dnsMode) {
             DnsMode.SYSTEM -> {
-                val systemDns = getSystemDnsServers()
-                if (systemDns.isNotEmpty()) {
-                    for (dns in systemDns) builder.addDnsServer(dns)
-                } else {
-                    AppLog.writer.append("Carrier DNS is not reachable from the server; using public DNS")
-                    builder.addDnsServer(Vpn.DNS_PRIMARY)
-                    builder.addDnsServer(Vpn.DNS_SECONDARY)
-                }
+                // DNS packets leave from Creator/VPS, not from the mobile
+                // carrier. A public-looking carrier resolver may still accept
+                // packets only from that carrier; forwarding it through the
+                // tunnel then produces a complete DNS outage while cached IP
+                // applications appear to work partially. Automatic mode must
+                // therefore advertise resolvers reachable from remote egress.
+                builder.addDnsServer(Vpn.DNS_PRIMARY)
+                builder.addDnsServer(Vpn.DNS_SECONDARY)
+                AppLog.writer.append("DNS automatic: remote-safe public resolvers selected")
             }
             DnsMode.CUSTOM -> {
                 val primary = Prefs.dnsPrimary.trim()
@@ -281,22 +280,6 @@ class TunnelVpnService : VpnService() {
         }
         TunnelServiceState.requestTileRefresh(this)
         stopSelf()
-    }
-
-    private fun getSystemDnsServers(): List<String> {
-        val connectivityManager = getSystemService(ConnectivityManager::class.java) ?: return emptyList()
-        val network = connectivityManager.activeNetwork ?: return emptyList()
-        val linkProperties = connectivityManager.getLinkProperties(network) ?: return emptyList()
-        return linkProperties.dnsServers
-            .filterIsInstance<Inet4Address>()
-            .filter { address ->
-                val bytes = address.address.map { it.toInt() and 0xff }
-                val carrierGradeNat = bytes[0] == 100 && bytes[1] in 64..127
-                !address.isAnyLocalAddress && !address.isLoopbackAddress &&
-                    !address.isLinkLocalAddress && !address.isSiteLocalAddress &&
-                    !address.isMulticastAddress && !carrierGradeNat
-            }
-            .mapNotNull { it.hostAddress }
     }
 
     private fun startForegroundNotification() {

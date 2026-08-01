@@ -343,6 +343,36 @@ and stale-peer eviction. This is a liveness fix; throughput testing of
 availability-aware dispatch resumes only after a matching alpha.45 session
 negotiates `caps=0xc1` and records sustained non-zero WB metrics.
 
+### Alpha.46 remote-safe DNS and reserved WB control lane
+
+The matching alpha.45 field export closes the peer-generation gate: WB
+negotiated `caps=0xc1`, activated eight KCP shards and moved about 4.75 MiB to
+Android in the first twenty seconds with nearly empty KCP/carrier queues. VK
+and WB nevertheless both appeared partially offline. VK recorded 51 reliable
+DNS queries and zero replies; WB sent legacy DNS retries and also received no
+reply. Telegram text could reuse known endpoints while videos and Speedtest
+could not resolve their dependent services.
+
+The failure was above the carrier. Android Automatic DNS copied a
+public-looking mobile-carrier resolver into the VPN. DNS then left from
+Creator/VPS, where that resolver was not reachable. Alpha.46 always selects
+remote-safe public resolvers for Automatic mode. Custom DNS remains available
+for an operator who deliberately supplies a resolver reachable from server
+egress.
+
+Sharded WB now negotiates `priority_control` and `reliable_dns` in addition to
+shards and flow striping. Lane zero was already excluded from bulk, so it now
+carries CONNECT and reliable DNS while lanes 1..7 remain data lanes. Matching
+alpha.46 reports `caps=0xd9`; alpha.45 peers intersect the older capability
+set. A bounded destination circuit stops repeated ten-second TCP dials only
+after two real timeouts and clears immediately on success.
+
+Field acceptance requires matching alpha.46 Android + Docker, Automatic DNS,
+`caps=0xd9`, non-zero `dns_reliable_replies`, successful name resolution on
+both direct WB and VK fallback, and no dependency on an external VPN. Only
+after that gate should throughput be compared; the alpha.45 export diagnosed
+DNS reachability, not a new SFU bandwidth ceiling.
+
 ## Полевой результат `0.5.0-alpha.2`: односторонний stall
 
 Matching Android-клиент и сервер успешно согласовали `wire=1`, `caps=0x3` и

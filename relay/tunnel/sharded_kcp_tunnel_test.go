@@ -84,6 +84,36 @@ func TestShardedKCPFlowStripingUsesEveryDataLane(t *testing.T) {
 	}
 }
 
+func TestShardedKCPPriorityFramesUseReservedControlLane(t *testing.T) {
+	carrier := &memoryShardCarrier{tracks: 8}
+	sharded := newShardedKCPTunnel(carrier, func(string, ...any) {})
+	defer sharded.Stop()
+	sharded.SetKCPShardCount(8)
+	sharded.SetFlowStripingEnabled(true)
+
+	sharded.SendData(EncodeFrame(71, MsgConnect, []byte("example.invalid:443")))
+	sharded.SendData(EncodeFrame(72, MsgDNSQuery, []byte("dns-query")))
+	waitFor(t, func() bool { return len(carrier.dataTracks()) >= 2 }, "priority frames were not emitted")
+	for _, track := range carrier.dataTracks() {
+		if track != 0 {
+			t.Fatalf("priority frame used bulk track %d, want reserved track 0", track)
+		}
+	}
+
+	carrier.mu.Lock()
+	carrier.sentTracks = nil
+	carrier.mu.Unlock()
+	sharded.SendData(EncodeFrame(73, MsgData, []byte("bulk")))
+	waitFor(t, func() bool {
+		for _, track := range carrier.dataTracks() {
+			if track > 0 {
+				return true
+			}
+		}
+		return false
+	}, "bulk frame was not emitted on a data track")
+}
+
 func TestShardedKCPFlowStripingSkipsSaturatedLane(t *testing.T) {
 	carrier := &memoryShardCarrier{tracks: 4}
 	sharded := newShardedKCPTunnel(carrier, func(string, ...any) {})
@@ -343,6 +373,10 @@ func TestRelayBridgeNegotiatesKCPShardsAndFallsBackForLegacyPeer(t *testing.T) {
 			rightResult, rightOK := right.NegotiatedHandshake()
 			return leftOK && rightOK && leftResult.Supports(CapabilityKCPShards) &&
 				rightResult.Supports(CapabilityKCPShards) &&
+				leftResult.Supports(CapabilityPriorityControl) &&
+				rightResult.Supports(CapabilityPriorityControl) &&
+				leftResult.Supports(CapabilityReliableDNS) &&
+				rightResult.Supports(CapabilityReliableDNS) &&
 				leftResult.Supports(CapabilityKCPFlowStriping) &&
 				rightResult.Supports(CapabilityKCPFlowStriping) &&
 				leftTunnel.KCPShardCount() == 4 && rightTunnel.KCPShardCount() == 4 &&
@@ -377,6 +411,35 @@ func TestRelayBridgeNegotiatesKCPShardsAndFallsBackForLegacyPeer(t *testing.T) {
 		if leftTunnel.FlowStripingEnabled() || rightTunnel.FlowStripingEnabled() {
 			t.Fatal("flow striping activated without mutual capability")
 		}
+	})
+
+	t.Run("alpha45_shards_without_priority_dns", func(t *testing.T) {
+		leftCarrier, rightCarrier := newMemoryShardCarrierPair(4)
+		leftTunnel := newShardedKCPTunnel(leftCarrier, func(string, ...any) {})
+		rightTunnel := newShardedKCPTunnel(rightCarrier, func(string, ...any) {})
+		defer leftTunnel.Stop()
+		defer rightTunnel.Stop()
+		left := NewRelayBridge(leftTunnel, "joiner", ShardedKCPRelayReadBuf, func(string, ...any) {})
+		right := NewRelayBridge(rightTunnel, "creator", ShardedKCPRelayReadBuf, func(string, ...any) {})
+		defer left.Close()
+		defer right.Close()
+		right.handshakeMu.Lock()
+		right.localHello.Capabilities &^= CapabilityPriorityControl | CapabilityReliableDNS
+		right.localHello.Nonce = newHandshakeNonce()
+		right.peerHello = nil
+		right.handshakeResult = nil
+		right.handshakeMu.Unlock()
+		left.Reset()
+		right.Reset()
+
+		waitFor(t, func() bool {
+			result, ok := left.NegotiatedHandshake()
+			return ok && result.Supports(CapabilityKCPShards) &&
+				result.Supports(CapabilityKCPFlowStriping) &&
+				!result.Supports(CapabilityPriorityControl) &&
+				!result.Supports(CapabilityReliableDNS) &&
+				leftTunnel.KCPShardCount() == 4 && leftTunnel.FlowStripingEnabled()
+		}, "alpha.45 capability subset did not retain shards and flow striping")
 	})
 
 	t.Run("legacy", func(t *testing.T) {

@@ -66,22 +66,23 @@ type udpClient struct {
 }
 
 type RelayBridge struct {
-	tunnelMu    sync.RWMutex
-	tunnel      DataTunnel
-	conns       sync.Map
-	udpClients  sync.Map
-	udpSessions sync.Map
-	nackedConns sync.Map
-	nextID      atomic.Uint32
-	logFn       func(string, ...any)
-	mode        string
-	readBuf     atomic.Int64
-	ready       chan struct{}
-	once        sync.Once
-	socksUser   string
-	socksPass   string
-	upstream    *common.Socks5Upstream
-	fairSender  *fairSender
+	tunnelMu     sync.RWMutex
+	tunnel       DataTunnel
+	conns        sync.Map
+	udpClients   sync.Map
+	udpSessions  sync.Map
+	nackedConns  sync.Map
+	nextID       atomic.Uint32
+	logFn        func(string, ...any)
+	mode         string
+	readBuf      atomic.Int64
+	ready        chan struct{}
+	once         sync.Once
+	socksUser    string
+	socksPass    string
+	upstream     *common.Socks5Upstream
+	fairSender   *fairSender
+	egressHealth *destinationReachabilityCache
 
 	persistentListener atomic.Bool
 	listenerMu         sync.Mutex
@@ -160,7 +161,7 @@ func (rb *RelayBridge) SetOnHandshake(fn func(HandshakeResult)) {
 }
 
 func (rb *RelayBridge) ConfigureHandshake(capabilities uint64, maxCarrierPayload int, reliability ReliabilityMode, trackCount int) {
-	capabilities |= defaultCapabilitiesForTunnel(rb.currentTunnel()) & (CapabilityKCPShards | CapabilityKCPFlowStriping)
+	capabilities |= defaultCapabilitiesForTunnel(rb.currentTunnel()) & shardedTransportCapabilities
 	rb.handshakeMu.Lock()
 	rb.localHello.Capabilities = capabilities
 	if maxCarrierPayload > 0 {
@@ -203,12 +204,13 @@ func NewRelayBridgeWithAuth(tunnel DataTunnel, mode string, readBuf int, logFn f
 
 func NewRelayBridge(tunnel DataTunnel, mode string, readBuf int, logFn func(string, ...any)) *RelayBridge {
 	rb := &RelayBridge{
-		tunnel:      tunnel,
-		logFn:       logFn,
-		mode:        mode,
-		ready:       make(chan struct{}),
-		startedAt:   time.Now(),
-		metricsStop: make(chan struct{}),
+		tunnel:       tunnel,
+		logFn:        logFn,
+		mode:         mode,
+		ready:        make(chan struct{}),
+		startedAt:    time.Now(),
+		metricsStop:  make(chan struct{}),
+		egressHealth: newDestinationReachabilityCache(),
 	}
 	rb.readBuf.Store(int64(readBuf))
 	rb.fairSender = newFairSender(func(frame []byte) { rb.sendFrame(frame, false) })
@@ -255,9 +257,9 @@ func (rb *RelayBridge) SwapTunnelWithReadBuf(newTunnel DataTunnel, readBuf int) 
 	newTunnel.SetOnClose(rb.handleTunnelClose)
 	rb.closeAll()
 	rb.handshakeMu.Lock()
-	capabilities := rb.localHello.Capabilities &^ (CapabilityKCPShards | CapabilityKCPFlowStriping)
+	capabilities := rb.localHello.Capabilities &^ shardedTransportCapabilities
 	rb.localHello = newLocalHello(newTunnel, readBuf)
-	rb.localHello.Capabilities = capabilities | (rb.localHello.Capabilities & (CapabilityKCPShards | CapabilityKCPFlowStriping))
+	rb.localHello.Capabilities = capabilities | (rb.localHello.Capabilities & shardedTransportCapabilities)
 	rb.peerHello = nil
 	rb.handshakeResult = nil
 	rb.handshakeMu.Unlock()
@@ -828,6 +830,13 @@ func (rb *RelayBridge) dialCreatorUDP(addr string) (*creatorUDP, error) {
 }
 
 func (rb *RelayBridge) connectTCP(connID uint32, addr string) {
+	if allowed, retryAfter, logSkip := rb.egressHealth.allow(addr); !allowed {
+		if logSkip {
+			rb.logFn("relay: destination timeout circuit active for %s retry_in=%s", common.MaskAddr(addr), retryAfter.Round(time.Second))
+		}
+		rb.send(connID, MsgConnectErr, []byte("destination temporarily unreachable; retry shortly"))
+		return
+	}
 	rb.logFn("relay: CONNECT %d -> %s", connID, common.MaskAddr(addr))
 	var conn net.Conn
 	var err error
@@ -848,10 +857,14 @@ func (rb *RelayBridge) connectTCP(connID uint32, addr string) {
 		conn, err = net.DialTimeout("tcp", addr, 10*time.Second)
 	}
 	if err != nil {
+		if opened, cooldown := rb.egressHealth.recordFailure(addr, err); opened {
+			rb.logFn("relay: destination timeout circuit opened for %s cooldown=%s", common.MaskAddr(addr), cooldown)
+		}
 		rb.logFn("relay: CONNECT %d failed: %s", connID, common.MaskError(err))
 		rb.send(connID, MsgConnectErr, []byte(common.MaskError(err)))
 		return
 	}
+	rb.egressHealth.recordSuccess(addr)
 	rb.conns.Store(connID, conn)
 	rb.send(connID, MsgConnectOK, nil)
 	rb.logFn("relay: CONNECTED %d -> %s", connID, common.MaskAddr(addr))

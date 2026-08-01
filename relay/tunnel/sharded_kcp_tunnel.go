@@ -124,6 +124,13 @@ func (t *ShardedKCPTunnel) SendData(data []byte) {
 	if len(data) == 0 {
 		return
 	}
+	// Lane zero is deliberately excluded from striped bulk traffic. Use that
+	// reserved capacity for connection setup and reliable DNS so a saturated or
+	// heavily reordered download cannot make the device look offline.
+	if isPriorityMuxFrame(data) {
+		t.lanes[0].SendData(data)
+		return
+	}
 	flow, connID, msgType, isFlow := t.selectSendFlow(data)
 	if !isFlow {
 		t.lanes[0].SendData(data)
